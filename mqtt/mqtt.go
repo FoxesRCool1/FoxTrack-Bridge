@@ -14,16 +14,14 @@ import (
 )
 
 type Printer struct {
-	Name    string
-	IP      string
-	Serial  string
-	LANCode string
-	// Webhook credentials — injected from config at connection time
+	Name       string
+	IP         string
+	Serial     string
+	LANCode    string
 	WebhookURL string
 	APIKey     string
 }
 
-// TelemetryData is the in-memory state per printer, also served by /api/status.
 type TelemetryData struct {
 	Status    string `json:"status"`
 	FileName  string `json:"file_name"`
@@ -33,7 +31,6 @@ type TelemetryData struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// BambuReport is the top-level structure of a BambuLab MQTT report message.
 type BambuReport struct {
 	Print BambuPrint `json:"print"`
 }
@@ -81,16 +78,22 @@ func GetPrintersState() map[string]*TelemetryData {
 func ConnectPrinter(p Printer) {
 	go func() {
 		for {
-			if err := connectAndListen(p); err != nil {
-				log.Printf("[%s] disconnected: %v — retrying in 60s", p.Name, err)
+			err := connectAndListen(p)
+			if err != nil {
+				log.Printf("[%s] disconnected: %v — retrying in 15s", p.Name, err)
+			}
 
-				// Only push "disconnected" to FoxTrack if we haven't had a
-				// real status update in the last 5 minutes. BambuLab printers
-				// drop the MQTT connection frequently even while printing —
-				// we don't want a brief dropout to overwrite the real status.
-				state := GetPrinterState(p.Name)
-				stale := time.Now().Unix()-state.Timestamp > 300
-				if stale && p.WebhookURL != "" && p.APIKey != "" {
+			// Only tell FoxTrack the printer is offline if we haven't
+			// had a real telemetry update in the last 5 minutes.
+			// BambuLab drops the MQTT connection frequently (even mid-print)
+			// so a brief dropout must not overwrite the real status.
+			state := GetPrinterState(p.Name)
+			if time.Now().Unix()-state.Timestamp > 300 {
+				UpdatePrinterState(p.Name, TelemetryData{
+					Status:    "disconnected",
+					PrinterID: p.Name,
+				})
+				if p.WebhookURL != "" && p.APIKey != "" {
 					_ = webhook.Send(p.APIKey, p.WebhookURL, webhook.Payload{
 						PrinterName: p.Name,
 						Serial:      p.Serial,
@@ -99,7 +102,8 @@ func ConnectPrinter(p Printer) {
 					})
 				}
 			}
-			time.Sleep(60 * time.Second)
+
+			time.Sleep(15 * time.Second)
 		}
 	}()
 }
@@ -107,63 +111,85 @@ func ConnectPrinter(p Printer) {
 func connectAndListen(p Printer) error {
 	broker := fmt.Sprintf("ssl://%s:8883", p.IP)
 
+	// done is closed when the connection is lost
+	done := make(chan struct{})
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(broker)
 	opts.SetUsername("bblp")
 	opts.SetPassword(p.LANCode)
-	opts.SetClientID(fmt.Sprintf("foxtrack-%s", p.Serial))
+	opts.SetClientID(fmt.Sprintf("foxtrack-%s-%d", p.Serial, time.Now().UnixNano()))
 	opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
-	opts.SetConnectTimeout(30 * time.Second)
+	opts.SetConnectTimeout(10 * time.Second)
+	opts.SetKeepAlive(30 * time.Second)   // ping every 30s to keep connection alive
+	opts.SetPingTimeout(10 * time.Second)
 	opts.SetAutoReconnect(false)
+	opts.SetCleanSession(true)
+
+	// Use connection-lost handler instead of polling IsConnected()
+	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+		log.Printf("[%s] connection lost: %v", p.Name, err)
+		close(done)
+	})
+
+	// Re-subscribe automatically if the library reconnects (shouldn't happen
+	// with AutoReconnect=false, but belt-and-suspenders)
+	topic := fmt.Sprintf("device/%s/report", p.Serial)
+	opts.SetOnConnectHandler(func(c mqtt.Client) {
+		c.Subscribe(topic, 0, makeHandler(p))
+	})
 
 	client := mqtt.NewClient(opts)
 	token := client.Connect()
-	if token.Wait() && token.Error() != nil {
+	if token.WaitTimeout(15*time.Second) && token.Error() != nil {
 		return token.Error()
+	}
+	if !client.IsConnected() {
+		return fmt.Errorf("connect timed out")
 	}
 	log.Printf("[%s] MQTT connected", p.Name)
 
-	topic := fmt.Sprintf("device/%s/report", p.Serial)
+	// Subscribe
 	subToken := client.Subscribe(topic, 0, makeHandler(p))
-	if subToken.Wait() && subToken.Error() != nil {
+	if subToken.WaitTimeout(10*time.Second) && subToken.Error() != nil {
 		client.Disconnect(250)
 		return subToken.Error()
 	}
 	log.Printf("[%s] subscribed to %s", p.Name, topic)
 
-	// Mark as connected until first real message arrives
-	UpdatePrinterState(p.Name, TelemetryData{Status: "connected", PrinterID: p.Name})
+	// Mark connecting in local state — do NOT push this to FoxTrack
+	// because "connected" isn't a real print status and confuses the UI
+	UpdatePrinterState(p.Name, TelemetryData{
+		Status:    "connected",
+		PrinterID: p.Name,
+		Timestamp: time.Now().Unix(),
+	})
 
-	// Push initial "connected" state to FoxTrack
-	if p.WebhookURL != "" && p.APIKey != "" {
-		_ = webhook.Send(p.APIKey, p.WebhookURL, webhook.Payload{
-			PrinterName: p.Name,
-			Serial:      p.Serial,
-			Status:      "connected",
-			Timestamp:   time.Now().Unix(),
-		})
-	}
-
-	for client.IsConnected() {
-		time.Sleep(5 * time.Second)
-	}
-	return fmt.Errorf("connection dropped")
+	// Block until connection-lost fires
+	<-done
+	client.Disconnect(250)
+	return fmt.Errorf("connection lost")
 }
 
 func makeHandler(p Printer) mqtt.MessageHandler {
 	return func(_ mqtt.Client, msg mqtt.Message) {
 		var report BambuReport
 		if err := json.Unmarshal(msg.Payload(), &report); err != nil {
-			log.Printf("[%s] parse error: %v", p.Name, err)
 			return
 		}
 
 		pr := report.Print
 		if pr.GcodeState == "" {
-			return // not a status message
+			return // ignore messages that aren't status updates
 		}
 
 		status := mapGcodeState(pr.GcodeState)
+
+		// Only act if something actually changed — BambuLab sends the same
+		// status repeatedly; no need to hammer the webhook every time
+		currentState := GetPrinterState(p.Name)
+		changed := status != currentState.Status || pr.SubTaskName != currentState.FileName || pr.McPercent != currentState.Progress
+
 		t := TelemetryData{
 			Status:   status,
 			FileName: pr.SubTaskName,
@@ -172,9 +198,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		}
 		UpdatePrinterState(p.Name, t)
 
-		log.Printf("[%s] %s | %s | %d%%", p.Name, status, pr.SubTaskName, pr.McPercent)
+		log.Printf("[%s] %s | %q | %d%%", p.Name, status, pr.SubTaskName, pr.McPercent)
 
-		// Push to FoxTrack webhook on every status message
+		if !changed {
+			return // skip webhook if nothing changed
+		}
+
 		if p.WebhookURL != "" && p.APIKey != "" {
 			payload := webhook.Payload{
 				PrinterName: p.Name,
@@ -185,9 +214,11 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				ErrorCode:   pr.McPrintErrorCode,
 				Timestamp:   time.Now().Unix(),
 			}
-			if err := webhook.Send(p.APIKey, p.WebhookURL, payload); err != nil {
-				log.Printf("[%s] webhook error: %v", p.Name, err)
-			}
+			go func(payload webhook.Payload) {
+				if err := webhook.Send(p.APIKey, p.WebhookURL, payload); err != nil {
+					log.Printf("[%s] webhook error: %v", p.Name, err)
+				}
+			}(payload)
 		} else {
 			log.Printf("[%s] skipping webhook — API key or URL not configured", p.Name)
 		}
