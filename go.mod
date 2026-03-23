@@ -1,6 +1,6 @@
 module foxtrack-bridge
 
-go 1.21
+go 1.24
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.1
