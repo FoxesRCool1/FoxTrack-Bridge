@@ -16,32 +16,28 @@ func main() {
 }
 
 func onReady() {
-	// Set tray icon and tooltip
 	systray.SetIcon(iconBytes)
-	systray.SetTooltip("FoxTrack Bridge")
+	systray.SetTitle("FoxTrack Bridge")
+	systray.SetTooltip("FoxTrack Bridge — 3D Printer Integration")
 
-	// Menu items
 	mOpen := systray.AddMenuItem("Open Dashboard", "Open FoxTrack Bridge in browser")
 	systray.AddSeparator()
 
-	// Run at startup toggle
 	startupLabel := startupMenuLabel()
 	mStartup := systray.AddMenuItem(startupLabel, "Start FoxTrack Bridge automatically at login")
 	systray.AddSeparator()
 
 	mQuit := systray.AddMenuItem("Quit FoxTrack Bridge", "Stop the bridge and exit")
 
-	// Start the HTTP server and MQTT connections in the background
+	// Start HTTP server + MQTT connections in background
 	go StartServer()
 
-	// Wait a moment then open the browser on first run so the user
-	// can enter their API key and webhook URL straight away
+	// Open browser after a short delay so the server is ready
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(1500 * time.Millisecond)
 		openBrowser("http://localhost:8080")
 	}()
 
-	// Handle menu clicks
 	go func() {
 		for {
 			select {
@@ -67,9 +63,7 @@ func onReady() {
 	}()
 }
 
-func onExit() {
-	// Clean shutdown — nothing extra needed; MQTT clients will drop.
-}
+func onExit() {}
 
 func startupMenuLabel() string {
 	if startup.IsEnabled() {

@@ -13,6 +13,7 @@ jobs:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows
@@ -22,7 +23,7 @@ jobs:
             asset: FoxTrack-Bridge-Windows.exe
 
           - os: macos-intel
-            runner: macos-latest
+            runner: macos-13
             goos: darwin
             goarch: amd64
             asset: FoxTrack-Bridge-macOS-Intel
@@ -52,7 +53,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --fix-missing gcc libgtk-3-dev libayatana-appindicator3-dev
 
-      - name: Build
+      - name: Build (Windows — no console window)
+        if: matrix.goos == 'windows'
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 1
+        # -H windowsgui hides the console so the app runs silently in the tray
+        run: go build -ldflags="-s -w -H windowsgui" -o FoxTrack-Bridge-Windows.exe .
+
+      - name: Build (macOS / Linux)
+        if: matrix.goos != 'windows'
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
