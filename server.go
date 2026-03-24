@@ -34,6 +34,7 @@ func StartServer() {
 	}
 
 	http.HandleFunc("/", handleRoot)
+	http.HandleFunc("/logo.png", handleLogo)
 	http.HandleFunc("/api/config", handleConfig)
 	http.HandleFunc("/api/printers", handlePrinters)
 	http.HandleFunc("/api/status", handleStatus)
@@ -62,6 +63,10 @@ func cors(w http.ResponseWriter) {
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "ui.html")
+}
+
+func handleLogo(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "logo.png")
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {

@@ -85,8 +85,6 @@ func ConnectPrinter(p Printer) {
 
 			// Only tell FoxTrack the printer is offline if we haven't
 			// had a real telemetry update in the last 5 minutes.
-			// BambuLab drops the MQTT connection frequently (even mid-print)
-			// so a brief dropout must not overwrite the real status.
 			state := GetPrinterState(p.Name)
 			if time.Now().Unix()-state.Timestamp > 300 {
 				UpdatePrinterState(p.Name, TelemetryData{
@@ -110,8 +108,6 @@ func ConnectPrinter(p Printer) {
 
 func connectAndListen(p Printer) error {
 	broker := fmt.Sprintf("ssl://%s:8883", p.IP)
-
-	// done is closed when the connection is lost
 	done := make(chan struct{})
 
 	opts := mqtt.NewClientOptions()
@@ -121,22 +117,14 @@ func connectAndListen(p Printer) error {
 	opts.SetClientID(fmt.Sprintf("foxtrack-%s-%d", p.Serial, time.Now().UnixNano()))
 	opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
 	opts.SetConnectTimeout(10 * time.Second)
-	opts.SetKeepAlive(30 * time.Second)   // ping every 30s to keep connection alive
+	opts.SetKeepAlive(30 * time.Second)
 	opts.SetPingTimeout(10 * time.Second)
 	opts.SetAutoReconnect(false)
 	opts.SetCleanSession(true)
 
-	// Use connection-lost handler instead of polling IsConnected()
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 		log.Printf("[%s] connection lost: %v", p.Name, err)
 		close(done)
-	})
-
-	// Re-subscribe automatically if the library reconnects (shouldn't happen
-	// with AutoReconnect=false, but belt-and-suspenders)
-	topic := fmt.Sprintf("device/%s/report", p.Serial)
-	opts.SetOnConnectHandler(func(c mqtt.Client) {
-		c.Subscribe(topic, 0, makeHandler(p))
 	})
 
 	client := mqtt.NewClient(opts)
@@ -149,7 +137,8 @@ func connectAndListen(p Printer) error {
 	}
 	log.Printf("[%s] MQTT connected", p.Name)
 
-	// Subscribe
+	// Subscribe to the printer's report topic
+	topic := fmt.Sprintf("device/%s/report", p.Serial)
 	subToken := client.Subscribe(topic, 0, makeHandler(p))
 	if subToken.WaitTimeout(10*time.Second) && subToken.Error() != nil {
 		client.Disconnect(250)
@@ -157,13 +146,22 @@ func connectAndListen(p Printer) error {
 	}
 	log.Printf("[%s] subscribed to %s", p.Name, topic)
 
-	// Mark connecting in local state — do NOT push this to FoxTrack
-	// because "connected" isn't a real print status and confuses the UI
+	// Mark as connecting locally (don't push to FoxTrack — not a real print status)
 	UpdatePrinterState(p.Name, TelemetryData{
 		Status:    "connected",
 		PrinterID: p.Name,
 		Timestamp: time.Now().Unix(),
 	})
+
+	// Request the printer's full current status immediately.
+	// Without this, idle printers never send a message and the bridge
+	// sits on "Connecting" forever. This forces the printer to broadcast
+	// everything it knows right now.
+	requestTopic := fmt.Sprintf("device/%s/request", p.Serial)
+	pushAllCmd := `{"pushing": {"sequence_id": "0", "command": "pushall"}}`
+	pubToken := client.Publish(requestTopic, 0, false, pushAllCmd)
+	pubToken.WaitTimeout(5 * time.Second)
+	log.Printf("[%s] sent pushall status request", p.Name)
 
 	// Block until connection-lost fires
 	<-done
@@ -180,15 +178,16 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 
 		pr := report.Print
 		if pr.GcodeState == "" {
-			return // ignore messages that aren't status updates
+			return // ignore messages without a print state
 		}
 
 		status := mapGcodeState(pr.GcodeState)
 
-		// Only act if something actually changed — BambuLab sends the same
-		// status repeatedly; no need to hammer the webhook every time
+		// Only fire the webhook if something actually changed
 		currentState := GetPrinterState(p.Name)
-		changed := status != currentState.Status || pr.SubTaskName != currentState.FileName || pr.McPercent != currentState.Progress
+		changed := status != currentState.Status ||
+			pr.SubTaskName != currentState.FileName ||
+			pr.McPercent != currentState.Progress
 
 		t := TelemetryData{
 			Status:   status,
@@ -201,7 +200,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		log.Printf("[%s] %s | %q | %d%%", p.Name, status, pr.SubTaskName, pr.McPercent)
 
 		if !changed {
-			return // skip webhook if nothing changed
+			return
 		}
 
 		if p.WebhookURL != "" && p.APIKey != "" {
