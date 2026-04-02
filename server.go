@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -38,10 +39,16 @@ func StartServer() {
 		}
 	}
 
+	// On startup, tell Supabase which serials are currently configured.
+	// Any bridge_printers rows for this token that aren't in the list get deleted.
+	go syncPrintersToSupabase(cfg)
+
 	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/logo.png", handleLogo)
 	http.HandleFunc("/api/config", handleConfig)
 	http.HandleFunc("/api/printers", handlePrinters)
+	http.HandleFunc("/api/printers/", handlePrinterByName) // DELETE /api/printers/{name}
+	http.HandleFunc("/api/sync", handleSync)               // POST — FoxTrack sends current printer list
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/test", handleTest)
 	http.HandleFunc("/api/control/", handleControl) // /api/control/{name}/{command}
@@ -290,4 +297,103 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handlePrinterByName handles DELETE /api/printers/{name}
+func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		return
+	}
+	if r.Method != "DELETE" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/printers/")
+	if name == "" {
+		http.Error(w, "missing printer name", http.StatusBadRequest)
+		return
+	}
+	configMutex.Lock()
+	printers := configStore.Printers[:0]
+	for _, p := range configStore.Printers {
+		if p.Name != name {
+			printers = append(printers, p)
+		}
+	}
+	configStore.Printers = printers
+	cfg := configStore
+	configMutex.Unlock()
+	_ = config.SaveConfig(cfg)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleSync receives the current printer list from FoxTrack and removes
+// any local printers that are no longer in the list.
+func handleSync(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		return
+	}
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Serials []string `json:"serials"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	keep := make(map[string]bool)
+	for _, s := range req.Serials {
+		keep[s] = true
+	}
+	configMutex.Lock()
+	printers := configStore.Printers[:0]
+	for _, p := range configStore.Printers {
+		if keep[p.Serial] {
+			printers = append(printers, p)
+		}
+	}
+	configStore.Printers = printers
+	cfg := configStore
+	configMutex.Unlock()
+	_ = config.SaveConfig(cfg)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// syncPrintersToSupabase POSTs the current serial list to the relay so it can
+// delete any stale bridge_printers rows for this API token.
+func syncPrintersToSupabase(cfg *config.Config) {
+	if cfg.WebhookURL == "" || cfg.APIKey == "" {
+		return
+	}
+	serials := make([]string, 0, len(cfg.Printers))
+	for _, p := range cfg.Printers {
+		serials = append(serials, p.Serial)
+	}
+
+	// Derive the sync URL from the webhook URL
+	// webhook: .../bambu-local-relay  →  sync: .../bambu-local-sync
+	syncURL := strings.Replace(cfg.WebhookURL, "bambu-local-relay", "bambu-local-sync", 1)
+
+	body, _ := json.Marshal(map[string]interface{}{"serials": serials})
+	req, err := http.NewRequest("POST", syncURL, bytes.NewBuffer(body))
+	if err != nil {
+		log.Printf("[sync] failed to build request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[sync] failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("[sync] startup sync complete — %d printers registered", len(serials))
 }
