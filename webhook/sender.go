@@ -18,7 +18,12 @@ type Payload struct {
 	FileName    string `json:"file_name"`    // Current file, empty if idle
 	Progress    int    `json:"progress"`     // 0–100
 	ErrorCode   string `json:"error_code"`   // Empty string if no error
-	Timestamp   int64  `json:"timestamp"`    // Unix seconds (UTC)
+	Timestamp    int64   `json:"timestamp"`     // Unix seconds (UTC)
+	NozzleTemp   float64 `json:"nozzle_temp"`   // Celsius
+	NozzleTarget float64 `json:"nozzle_target"` // Celsius
+	BedTemp      float64 `json:"bed_temp"`      // Celsius
+	BedTarget    float64 `json:"bed_target"`    // Celsius
+	LightOn      bool    `json:"light_on"`
 }
 
 // Send posts a Payload to the FoxTrack webhook URL.

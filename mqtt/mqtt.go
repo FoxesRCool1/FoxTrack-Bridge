@@ -319,13 +319,18 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 
 		go func() {
 			payload := webhook.Payload{
-				PrinterName: p.Name,
-				Serial:      p.Serial,
-				Status:      status,
-				FileName:    pr.SubTaskName,
-				Progress:    pr.McPercent,
-				ErrorCode:   pr.McPrintErrorCode,
-				Timestamp:   time.Now().Unix(),
+				PrinterName:  p.Name,
+				Serial:       p.Serial,
+				Status:       status,
+				FileName:     pr.SubTaskName,
+				Progress:     pr.McPercent,
+				ErrorCode:    pr.McPrintErrorCode,
+				Timestamp:    time.Now().Unix(),
+				NozzleTemp:   pr.NozzleTemper,
+				NozzleTarget: pr.NozzleTargetTemper,
+				BedTemp:      pr.BedTemper,
+				BedTarget:    pr.BedTargetTemper,
+				LightOn:      lightOn,
 			}
 			if err := webhook.Send(p.APIKey, p.WebhookURL, payload); err != nil {
 				log.Printf("[%s] webhook error: %v", p.Name, err)
