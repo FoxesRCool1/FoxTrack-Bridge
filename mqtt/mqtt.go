@@ -23,12 +23,18 @@ type Printer struct {
 }
 
 type TelemetryData struct {
-	Status    string `json:"status"`
-	FileName  string `json:"file_name"`
-	Progress  int    `json:"progress"`
-	Error     string `json:"error"`
-	PrinterID string `json:"printer_id"`
-	Timestamp int64  `json:"timestamp"`
+	Status        string  `json:"status"`
+	FileName      string  `json:"file_name"`
+	Progress      int     `json:"progress"`
+	Error         string  `json:"error"`
+	PrinterID     string  `json:"printer_id"`
+	Timestamp     int64   `json:"timestamp"`
+	NozzleTemp    float64 `json:"nozzle_temp"`
+	NozzleTarget  float64 `json:"nozzle_target"`
+	BedTemp       float64 `json:"bed_temp"`
+	BedTarget     float64 `json:"bed_target"`
+	LightOn       bool    `json:"light_on"`
+	TimeRemaining int     `json:"time_remaining"` // minutes
 }
 
 type BambuReport struct {
@@ -36,15 +42,26 @@ type BambuReport struct {
 }
 
 type BambuPrint struct {
-	GcodeState       string `json:"gcode_state"`
-	SubTaskName      string `json:"subtask_name"`
-	McPercent        int    `json:"mc_percent"`
-	McPrintErrorCode string `json:"mc_print_error_code"`
+	GcodeState       string  `json:"gcode_state"`
+	SubTaskName      string  `json:"subtask_name"`
+	McPercent        int     `json:"mc_percent"`
+	McPrintErrorCode string  `json:"mc_print_error_code"`
+	NozzleTemper     float64 `json:"nozzle_temper"`
+	NozzleTargetTemper float64 `json:"nozzle_target_temper"`
+	BedTemper        float64 `json:"bed_temper"`
+	BedTargetTemper  float64 `json:"bed_target_temper"`
+	Lights           []struct {
+		Node string `json:"node"`
+		Mode string `json:"mode"`
+	} `json:"lights_report"`
+	McRemainingTime int `json:"mc_remaining_time"`
 }
 
 var (
-	printerStates = make(map[string]*TelemetryData)
-	stateMutex    sync.RWMutex
+	printerStates  = make(map[string]*TelemetryData)
+	printerClients = make(map[string]mqtt.Client) // for sending control commands
+	stateMutex     sync.RWMutex
+	clientMutex    sync.RWMutex
 )
 
 func GetPrinterState(name string) *TelemetryData {
@@ -74,7 +91,74 @@ func GetPrintersState() map[string]*TelemetryData {
 	return out
 }
 
+// SendCommand sends a control command to a named printer via MQTT.
+// command is one of: "pause", "resume", "stop", "light_on", "light_off"
+func SendCommand(printerName, command string) error {
+	clientMutex.RLock()
+	client, ok := printerClients[printerName]
+	clientMutex.RUnlock()
+
+	if !ok || !client.IsConnected() {
+		return fmt.Errorf("printer %q not connected", printerName)
+	}
+
+	// Find serial for the topic
+	stateMutex.RLock()
+	state, hasState := printerStates[printerName]
+	stateMutex.RUnlock()
+	_ = hasState
+
+	// We store serial in PrinterID only if set — look it up from connected printer map
+	serial := getSerial(printerName)
+	if serial == "" {
+		return fmt.Errorf("serial not found for %q", printerName)
+	}
+	_ = state
+
+	topic := fmt.Sprintf("device/%s/request", serial)
+	var payload string
+
+	switch command {
+	case "pause":
+		payload = `{"print":{"sequence_id":"0","command":"pause"}}`
+	case "resume":
+		payload = `{"print":{"sequence_id":"0","command":"resume"}}`
+	case "stop":
+		payload = `{"print":{"sequence_id":"0","command":"stop"}}`
+	case "light_on":
+		payload = `{"system":{"sequence_id":"0","command":"ledctrl","led_node":"work_light","led_mode":"on","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}`
+	case "light_off":
+		payload = `{"system":{"sequence_id":"0","command":"ledctrl","led_node":"work_light","led_mode":"off","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}`
+	default:
+		return fmt.Errorf("unknown command: %q", command)
+	}
+
+	token := client.Publish(topic, 0, false, payload)
+	token.WaitTimeout(5 * time.Second)
+	log.Printf("[%s] sent command: %s", printerName, command)
+	return nil
+}
+
+// printerSerials maps name → serial for control commands
+var (
+	printerSerials = make(map[string]string)
+	serialMutex    sync.RWMutex
+)
+
+func setSerial(name, serial string) {
+	serialMutex.Lock()
+	defer serialMutex.Unlock()
+	printerSerials[name] = serial
+}
+
+func getSerial(name string) string {
+	serialMutex.RLock()
+	defer serialMutex.RUnlock()
+	return printerSerials[name]
+}
+
 func ConnectPrinter(p Printer) {
+	setSerial(p.Name, p.Serial)
 	go func() {
 		for {
 			err := connectAndListen(p)
@@ -97,6 +181,11 @@ func ConnectPrinter(p Printer) {
 					})
 				}
 			}
+
+			// Remove client on disconnect
+			clientMutex.Lock()
+			delete(printerClients, p.Name)
+			clientMutex.Unlock()
 
 			time.Sleep(15 * time.Second)
 		}
@@ -134,6 +223,11 @@ func connectAndListen(p Printer) error {
 	}
 	log.Printf("[%s] MQTT connected", p.Name)
 
+	// Store client for control commands
+	clientMutex.Lock()
+	printerClients[p.Name] = client
+	clientMutex.Unlock()
+
 	topic := fmt.Sprintf("device/%s/report", p.Serial)
 	subToken := client.Subscribe(topic, 0, makeHandler(p))
 	if subToken.WaitTimeout(10*time.Second) && subToken.Error() != nil {
@@ -149,16 +243,8 @@ func connectAndListen(p Printer) error {
 	})
 
 	requestTopic := fmt.Sprintf("device/%s/request", p.Serial)
-
-	// Send pushall immediately on connect so we get current status right away
 	sendPushall(client, p.Name, requestTopic)
 
-	// Poll every 2 minutes with pushall.
-	// BambuLab printers go silent when idle — without this, an idle printer
-	// never sends another MQTT message and FoxTrack shows "Bridge Offline"
-	// even though the bridge is fully connected.
-	// Each pushall causes the printer to re-broadcast its full state,
-	// which hits makeHandler and sends a fresh webhook, keeping last_seen_at alive.
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
@@ -199,34 +285,36 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		}
 
 		status := mapGcodeState(pr.GcodeState)
-		currentState := GetPrinterState(p.Name)
 
-		statusChanged := status != currentState.Status ||
-			pr.SubTaskName != currentState.FileName ||
-			pr.McPercent != currentState.Progress
+		// Parse light state
+		lightOn := false
+		for _, l := range pr.Lights {
+			if l.Node == "work_light" && l.Mode == "on" {
+				lightOn = true
+			}
+		}
 
 		t := TelemetryData{
-			Status:   status,
-			FileName: pr.SubTaskName,
-			Progress: pr.McPercent,
-			Error:    pr.McPrintErrorCode,
+			Status:        status,
+			FileName:      pr.SubTaskName,
+			Progress:      pr.McPercent,
+			Error:         pr.McPrintErrorCode,
+			NozzleTemp:    pr.NozzleTemper,
+			NozzleTarget:  pr.NozzleTargetTemper,
+			BedTemp:       pr.BedTemper,
+			BedTarget:     pr.BedTargetTemper,
+			LightOn:       lightOn,
+			TimeRemaining: pr.McRemainingTime,
 		}
 		UpdatePrinterState(p.Name, t)
 
-		log.Printf("[%s] %s | %q | %d%%", p.Name, status, pr.SubTaskName, pr.McPercent)
+		log.Printf("[%s] %s | %q | %d%% | nozzle:%.0f°C bed:%.0f°C",
+			p.Name, status, pr.SubTaskName, pr.McPercent,
+			pr.NozzleTemper, pr.BedTemper)
 
 		if p.WebhookURL == "" || p.APIKey == "" {
 			log.Printf("[%s] skipping webhook — API key or URL not configured", p.Name)
 			return
-		}
-
-		// Send webhook on every message received.
-		// The pushall poll fires every 2 minutes, causing the printer to
-		// re-broadcast its state, which always reaches here and sends a
-		// fresh webhook — keeping FoxTrack's last_seen_at current.
-		// On active changes (print starting, progress) it fires instantly.
-		if statusChanged {
-			log.Printf("[%s] status changed → sending webhook immediately", p.Name)
 		}
 
 		go func() {
