@@ -1,17 +1,19 @@
-#!/bin/bash
-echo "Building FoxTrack Bridge for different platforms..."
+#!/usr/bin/env bash
+set -e
+APP="foxtrack-bridge"
+OUT="./dist"
+mkdir -p "$OUT"
 
-# Build for Linux (default)
-echo "Building for Linux..."
-go build -o foxtrack-bridge-linux
+echo "Downloading dependencies..."
+go mod tidy
 
-# Build for Windows (if cross-compiling)
-echo "Building for Windows..."
-GOOS=windows GOARCH=amd64 go build -o foxtrack-bridge.exe
+echo "Building for all platforms..."
+GOOS=darwin  GOARCH=arm64  go build -ldflags="-s -w" -o "$OUT/${APP}-mac-arm64"         .
+GOOS=darwin  GOARCH=amd64  go build -ldflags="-s -w" -o "$OUT/${APP}-mac-intel"         .
+GOOS=linux   GOARCH=amd64  go build -ldflags="-s -w" -o "$OUT/${APP}-linux-amd64"       .
+GOOS=linux   GOARCH=arm64  go build -ldflags="-s -w" -o "$OUT/${APP}-linux-arm64"       .
+GOOS=windows GOARCH=amd64  go build -ldflags="-s -w -H=windowsgui" -o "$OUT/${APP}-windows-amd64.exe" .
 
-# Build for macOS
-echo "Building for macOS..."
-GOOS=darwin GOARCH=amd64 go build -o foxtrack-bridge-mac
-
-echo "Build complete! Files created:"
-ls -la foxtrack-bridge*
+echo ""
+echo "Build complete. Binaries in $OUT/"
+ls -lh "$OUT/"

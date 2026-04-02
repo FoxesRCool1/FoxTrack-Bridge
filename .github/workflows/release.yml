@@ -26,13 +26,15 @@ jobs:
             runner: macos-latest
             goos: darwin
             goarch: amd64
-            asset: FoxTrack-Bridge-macOS-Intel
+            label: Intel
+            asset: FoxTrack-Bridge-macOS-Intel.zip
 
           - os: macos-arm
             runner: macos-latest
             goos: darwin
             goarch: arm64
-            asset: FoxTrack-Bridge-macOS-Apple-Silicon
+            label: Apple-Silicon
+            asset: FoxTrack-Bridge-macOS-Apple-Silicon.zip
 
           - os: linux
             runner: ubuntu-latest
@@ -53,22 +55,71 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --fix-missing gcc libgtk-3-dev libayatana-appindicator3-dev
 
-      - name: Build (Windows — no console window)
+      - name: Build (Windows)
         if: matrix.goos == 'windows'
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: 1
-        # -H windowsgui hides the console so the app runs silently in the tray
         run: go build -ldflags="-s -w -H windowsgui" -o FoxTrack-Bridge-Windows.exe .
 
-      - name: Build (macOS / Linux)
-        if: matrix.goos != 'windows'
+      - name: Build (macOS)
+        if: matrix.goos == 'darwin'
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
-        run: go build -ldflags="-s -w" -o ${{ matrix.asset }} .
+        run: |
+          go build -ldflags="-s -w" -o foxtrack-bridge-bin .
+
+          # Build .app bundle
+          APP_DIR="FoxTrack Bridge.app"
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Resources"
+          cp foxtrack-bridge-bin "$APP_DIR/Contents/MacOS/foxtrack-bridge"
+          chmod +x "$APP_DIR/Contents/MacOS/foxtrack-bridge"
+
+          cat > "$APP_DIR/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>foxtrack-bridge</string>
+            <key>CFBundleIdentifier</key>
+            <string>studio.foxtrack.bridge</string>
+            <key>CFBundleName</key>
+            <string>FoxTrack Bridge</string>
+            <key>CFBundleDisplayName</key>
+            <string>FoxTrack Bridge</string>
+            <key>CFBundleVersion</key>
+            <string>1.0.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSUIElement</key>
+            <true/>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Ad-hoc sign
+          codesign --deep --force --sign "-" "$APP_DIR"
+
+          # Zip preserving permissions
+          zip -r "${{ matrix.asset }}" "$APP_DIR" --quiet
+
+      - name: Build (Linux)
+        if: matrix.goos == 'linux'
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 1
+        run: go build -ldflags="-s -w" -o FoxTrack-Bridge-Linux .
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
