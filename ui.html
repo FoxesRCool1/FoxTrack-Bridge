@@ -59,6 +59,7 @@
             <p id="updateProgress" class="mt-3 hidden text-xs text-zinc-500"></p>
             <div class="mt-5 flex flex-wrap gap-2">
                 <button id="updateNowBtn" onclick="installUpdate()" class="bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors">Update Now</button>
+                <button id="restartNowBtn" onclick="restartForUpdate()" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors">Restart Now</button>
                 <button onclick="dismissUpdateModal()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold px-4 py-2 rounded-xl text-sm transition-colors">Later</button>
                 <button onclick="openReleaseNotes()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold px-4 py-2 rounded-xl text-sm transition-colors">Release Notes</button>
             </div>
@@ -592,8 +593,12 @@ function showUpdateModal(info) {
     updateInfo = info;
     const modal = document.getElementById('updateModal');
     const label = document.getElementById('updateVersionLabel');
+    const restartBtn = document.getElementById('restartNowBtn');
     if (!modal || !label) return;
     label.textContent = info.latestVersion || 'new version';
+    if (restartBtn) {
+        restartBtn.classList.toggle('hidden', !(info && info.pendingRestart));
+    }
     modal.classList.remove('hidden');
 }
 
@@ -625,7 +630,7 @@ async function checkForUpdate() {
 
     try {
         const info = await apiFetch('/api/update/check');
-        if (info && info.available) {
+        if (info && (info.available || info.pendingRestart)) {
             showUpdateModal(info);
         }
     } catch (_) {
@@ -640,12 +645,27 @@ async function installUpdate() {
 
     try {
         await apiFetch('/api/update/install', { method: 'POST' });
-        setUpdateProgress('Update installed. Bridge will restart now.');
-        toast('Update installed. Restarting bridge...', 'info');
+        const restartBtn = document.getElementById('restartNowBtn');
+        if (restartBtn) restartBtn.classList.remove('hidden');
+        setUpdateProgress('Update staged. Restart when you are ready to apply it.');
+        toast('Update staged. Click Restart Now when ready.', 'info');
     } catch (e) {
         setUpdateProgress('Update failed: ' + e.message, true);
         toast('Update failed: ' + e.message, 'error');
         if (btn) btn.disabled = false;
+    }
+}
+
+async function restartForUpdate() {
+    const restartBtn = document.getElementById('restartNowBtn');
+    if (restartBtn) restartBtn.disabled = true;
+    setUpdateProgress('Restarting bridge to apply update...');
+    try {
+        await apiFetch('/api/update/restart', { method: 'POST' });
+    } catch (e) {
+        setUpdateProgress('Restart failed: ' + e.message, true);
+        toast('Restart failed: ' + e.message, 'error');
+        if (restartBtn) restartBtn.disabled = false;
     }
 }
 

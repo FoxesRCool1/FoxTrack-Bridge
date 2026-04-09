@@ -56,6 +56,7 @@ func StartServer() {
 	http.HandleFunc("/api/version", handleVersion)
 	http.HandleFunc("/api/update/check", handleUpdateCheck)
 	http.HandleFunc("/api/update/install", handleUpdateInstall)
+	http.HandleFunc("/api/update/restart", handleUpdateRestart)
 	http.HandleFunc("/api/test", handleTest)
 	http.HandleFunc("/api/control/", handleControl) // /api/control/{name}/{command}
 	http.HandleFunc("/api/camera/", handleCamera)   // /api/camera/{name}
@@ -157,7 +158,26 @@ func handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "update staged, restarting"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "update staged, restart when ready"})
+}
+
+func handleUpdateRestart(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		return
+	}
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := update.RestartToApply(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "restarting to apply update"})
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
