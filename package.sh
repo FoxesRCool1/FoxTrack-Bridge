@@ -50,9 +50,9 @@ make_mac_app() {
   <key>CFBundleDisplayName</key>
   <string>FoxTrack Bridge</string>
   <key>CFBundleVersion</key>
-  <string>1.0.0</string>
+  <string>1.1.6</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0.0</string>
+  <string>1.1.6</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSUIElement</key>
