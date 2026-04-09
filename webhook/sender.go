@@ -12,18 +12,19 @@ import (
 // Payload is the JSON body sent to FoxTrack on every status change.
 // Keep this in sync with the FoxTrack webhook endpoint schema.
 type Payload struct {
-	PrinterName string `json:"printer_name"` // Matches the name in FoxTrack
-	Serial      string `json:"serial"`       // BambuLab serial number
-	Status      string `json:"status"`       // idle | printing | paused | finished | error | disconnected
-	FileName    string `json:"file_name"`    // Current file, empty if idle
-	Progress    int    `json:"progress"`     // 0–100
-	ErrorCode   string `json:"error_code"`   // Empty string if no error
-	Timestamp    int64   `json:"timestamp"`     // Unix seconds (UTC)
-	NozzleTemp   float64 `json:"nozzle_temp"`   // Celsius
-	NozzleTarget float64 `json:"nozzle_target"` // Celsius
-	BedTemp      float64 `json:"bed_temp"`      // Celsius
-	BedTarget    float64 `json:"bed_target"`    // Celsius
-	LightOn      bool    `json:"light_on"`
+	PrinterName   string  `json:"printer_name"`  // Matches the name in FoxTrack
+	Serial        string  `json:"serial"`        // BambuLab serial number
+	Status        string  `json:"status"`        // idle | printing | paused | finished | error | disconnected
+	FileName      string  `json:"file_name"`     // Current file, empty if idle
+	Progress      int     `json:"progress"`      // 0–100
+	ErrorCode     string  `json:"error_code"`    // Empty string if no error
+	Timestamp     int64   `json:"timestamp"`     // Unix seconds (UTC)
+	NozzleTemp    float64 `json:"nozzle_temp"`   // Celsius
+	NozzleTarget  float64 `json:"nozzle_target"` // Celsius
+	BedTemp       float64 `json:"bed_temp"`      // Celsius
+	BedTarget     float64 `json:"bed_target"`    // Celsius
+	LightOn       bool    `json:"light_on"`
+	TimeRemaining int     `json:"time_remaining"` // Minutes
 }
 
 // Send posts a Payload to the FoxTrack webhook URL.

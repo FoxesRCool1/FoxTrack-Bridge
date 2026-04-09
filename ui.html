@@ -40,242 +40,226 @@
         <div id="toastMsg" class="toast px-5 py-3 rounded-xl text-sm font-medium shadow-xl border"></div>
     </div>
 
-    <div class="min-h-screen flex flex-col">
-        <!-- Header -->
-        <header class="bg-zinc-900 border-b border-zinc-800 py-3 px-6 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <img src="/logo.png" alt="FoxTrack" class="h-8 w-auto">
-                <h1 class="text-xl font-bold tracking-tight">FoxTrack Bridge</h1>
+    <div id="cameraModal" class="fixed inset-0 z-40 hidden bg-zinc-950/85 backdrop-blur-sm p-4 sm:p-8">
+        <div class="h-full max-w-6xl mx-auto bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col overflow-hidden">
+            <div class="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+                <h3 class="text-sm sm:text-base font-semibold">Live Camera: <span id="cameraTitle" class="text-orange-400"></span></h3>
+                <button onclick="closeCameraModal()" class="text-zinc-400 hover:text-zinc-100 text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500">Close</button>
             </div>
-            <div class="flex items-center gap-3">
-                <span id="bridgeStatus" class="flex items-center gap-2 text-sm text-zinc-400">
-                    <span class="w-2 h-2 rounded-full bg-zinc-600 pulse"></span> Connecting…
-                </span>
-                <a href="https://github.com/FoxnTrain/FoxTrack-Bridge" target="_blank"
-                   class="flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1 rounded-full text-xs font-semibold tracking-wide transition-colors">
-                    <i class="fab fa-github"></i> GitHub
-                </a>
+            <div class="flex-1 bg-zinc-950 flex items-center justify-center p-3 sm:p-5">
+                <img id="cameraStream" alt="Camera Stream" class="max-h-full max-w-full rounded-xl border border-zinc-800 bg-zinc-900 object-contain" />
+            </div>
+        </div>
+    </div>
+
+    <div class="min-h-screen flex flex-col">
+        <header class="bg-zinc-900 border-b border-zinc-800 px-4 sm:px-6 py-4">
+            <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <img src="/logo.png" alt="FoxTrack" class="h-8 w-auto">
+                    <div>
+                        <h1 class="text-lg sm:text-xl font-semibold tracking-tight">FoxTrack Bridge</h1>
+                        <p class="text-xs text-zinc-500">Local printer telemetry and control relay</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="bridgeStatus" class="flex items-center gap-2 text-sm text-zinc-400">
+                        <span class="w-2 h-2 rounded-full bg-zinc-600 pulse"></span> Connecting...
+                    </span>
+                    <a href="https://github.com/FoxnTrain/FoxTrack-Bridge" target="_blank"
+                       class="hidden sm:inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1 rounded-full text-xs font-semibold tracking-wide transition-colors">
+                        <i class="fab fa-github"></i> GitHub
+                    </a>
+                </div>
             </div>
         </header>
 
-        <main class="flex-grow p-6">
-            <div class="max-w-3xl mx-auto space-y-5">
-
-                <!-- FoxTrack Connection -->
-                <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-                    <h2 class="text-base font-semibold mb-1 flex items-center gap-2">
-                        <i class="fas fa-key text-orange-500"></i> FoxTrack Connection
-                    </h2>
-                    <p class="text-zinc-500 text-xs mb-5">Copy your API key from FoxTrack → Settings → Integrations → 3D Printer Integration</p>
-                    <div class="flex gap-3 items-end">
-                        <div class="flex-1">
-                            <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">API Key</label>
+        <main class="flex-grow px-4 sm:px-6 py-5 sm:py-6">
+            <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-5">
+                <section class="lg:col-span-1 space-y-5">
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+                        <h2 class="text-sm font-semibold mb-1 flex items-center gap-2">
+                            <i class="fas fa-key text-orange-500"></i> FoxTrack Connection
+                        </h2>
+                        <p class="text-zinc-500 text-xs mb-4">Paste your FoxTrack API token from Settings > Integrations > 3D Printer Integration.</p>
+                        <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">API Key</label>
+                        <div class="flex gap-2 items-center">
                             <input type="password" id="apiKey" autocomplete="off"
-                                class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
-                                placeholder="Paste your FoxTrack API key">
+                                class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                placeholder="Paste API key">
+                            <button onclick="saveGlobalConfig()"
+                                class="bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition-colors">Save</button>
                         </div>
-                        <button onclick="saveGlobalConfig()"
-                            class="bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-colors flex-shrink-0">
-                            Save
-                        </button>
-                    </div>
-                    <div id="connectionStatus" class="mt-3 hidden">
-                        <span id="connectionStatusText" class="text-xs"></span>
-                    </div>
-                </div>
-
-                <!-- Add Printer -->
-                <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-                    <h2 class="text-base font-semibold mb-1 flex items-center gap-2">
-                        <i class="fas fa-plus-circle text-orange-500"></i> Add Printer
-                    </h2>
-                    <p class="text-zinc-500 text-xs mb-5">Connect a printer on your local network to FoxTrack</p>
-
-                    <!-- Brand selector -->
-                    <div class="mb-5">
-                        <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Printer Brand</label>
-                        <select id="pBrand" onchange="onBrandChange()"
-                            class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none appearance-none cursor-pointer">
-                            <option value="">Select brand…</option>
-                            <option value="bambu">BambuLab</option>
-                            <option value="creality">Creality (Beta)</option>
-                            <option value="prusa">Prusa (Beta)</option>
-                        </select>
                     </div>
 
-                    <!-- Brand instructions -->
-                    <div id="brandInstructions" class="hidden instruction-box mb-5"></div>
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+                        <h2 class="text-sm font-semibold mb-1 flex items-center gap-2">
+                            <i class="fas fa-plus-circle text-orange-500"></i> Add Printer
+                        </h2>
+                        <p class="text-zinc-500 text-xs mb-4">Connect a local-network printer to FoxTrack Bridge.</p>
 
-                    <!-- Printer fields -->
-                    <div id="printerFields" class="hidden">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                        <div class="space-y-3">
                             <div>
-                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Printer Name</label>
-                                <input type="text" id="pName" autocomplete="off"
-                                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
-                                    placeholder="e.g. Watson">
+                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Printer Brand</label>
+                                <select id="pBrand" onchange="onBrandChange()"
+                                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none appearance-none cursor-pointer">
+                                    <option value="">Select brand...</option>
+                                    <option value="bambu">BambuLab</option>
+                                    <option value="creality">Creality (Beta)</option>
+                                    <option value="prusa">Prusa (Beta)</option>
+                                </select>
                             </div>
-                            <div>
-                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">IP Address</label>
-                                <input type="text" id="pIp" autocomplete="off"
-                                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
-                                    placeholder="192.168.1.100">
-                            </div>
-                            <!-- BambuLab-only fields -->
-                            <div id="fieldSerial">
-                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">
-                                    Serial Number
-                                    <span class="ml-1 text-zinc-600 normal-case cursor-help" title="Settings → Device Info on the printer screen">(?)</span>
-                                </label>
-                                <input type="text" id="pSerial" autocomplete="off"
-                                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
-                                    placeholder="01P00A…">
-                            </div>
-                            <div id="fieldLanCode">
-                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">
-                                    LAN Access Code
-                                    <span class="ml-1 text-zinc-600 normal-case cursor-help" title="Bambu app → Device → LAN Mode">(?)</span>
-                                </label>
-                                <input type="password" id="pLanCode" autocomplete="off"
-                                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
-                                    placeholder="8-character code">
-                            </div>
-                            <!-- Prusa-only fields -->
-                            <div id="fieldPrusaKey" class="hidden">
-                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">
-                                    PrusaLink API Key
-                                    <span class="ml-1 text-zinc-600 normal-case cursor-help" title="PrusaLink web interface → Settings → API Key">(?)</span>
-                                </label>
-                                <input type="password" id="pPrusaKey" autocomplete="off"
-                                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
-                                    placeholder="PrusaLink API key">
-                            </div>
-                        </div>
 
-                        <!-- Test connection + Add buttons -->
-                        <div class="flex items-center gap-3 flex-wrap">
-                            <button onclick="testConnection()"
-                                class="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold px-4 py-2 rounded-xl text-sm transition-colors">
-                                <i class="fas fa-plug text-xs"></i> Test Connection
-                            </button>
-                            <button onclick="addPrinter()"
-                                class="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-semibold px-5 py-2 rounded-xl text-sm transition-colors">
-                                <i class="fas fa-plus text-xs"></i> Connect
-                            </button>
-                            <span id="testResult" class="text-xs hidden"></span>
+                            <div id="brandInstructions" class="hidden instruction-box"></div>
+
+                            <div id="printerFields" class="hidden space-y-3 pt-1">
+                                <div>
+                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Printer Name</label>
+                                    <input type="text" id="pName" autocomplete="off"
+                                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                        placeholder="e.g. Studio P1S">
+                                </div>
+                                <div>
+                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">IP Address</label>
+                                    <input type="text" id="pIp" autocomplete="off"
+                                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                        placeholder="192.168.1.120">
+                                </div>
+                                <div id="fieldSerial">
+                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Serial Number</label>
+                                    <input type="text" id="pSerial" autocomplete="off"
+                                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                        placeholder="01P00A...">
+                                </div>
+                                <div id="fieldLanCode">
+                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">LAN Access Code</label>
+                                    <input type="password" id="pLanCode" autocomplete="off"
+                                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                        placeholder="8-character code">
+                                </div>
+                                <div id="fieldPrusaKey" class="hidden">
+                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">PrusaLink API Key</label>
+                                    <input type="password" id="pPrusaKey" autocomplete="off"
+                                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                        placeholder="PrusaLink API key">
+                                </div>
+                                <div class="flex items-center gap-2.5 flex-wrap pt-1">
+                                    <button onclick="testConnection()"
+                                        class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold px-3.5 py-2 rounded-xl text-sm transition-colors">Test Connection</button>
+                                    <button onclick="addPrinter()"
+                                        class="bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors">Connect</button>
+                                    <span id="testResult" class="text-xs hidden"></span>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <!-- Printers list -->
-                <div>
-                    <h2 class="text-base font-semibold mb-3 flex items-center gap-2">
-                        <i class="fas fa-print text-orange-500"></i> Printers
-                        <span id="printerCount" class="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full text-xs">0</span>
-                    </h2>
-                    <div id="printersList" class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"></div>
-                </div>
-
+                <section class="lg:col-span-2">
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                        <div class="px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+                            <h2 class="text-sm sm:text-base font-semibold flex items-center gap-2">
+                                <i class="fas fa-print text-orange-500"></i>
+                                Printers
+                                <span id="printerCount" class="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full text-xs">0</span>
+                            </h2>
+                            <button onclick="pollStatus()" class="text-xs text-zinc-300 border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5">Refresh</button>
+                        </div>
+                        <div id="printersList" class="p-3 sm:p-4 space-y-3"></div>
+                    </div>
+                </section>
             </div>
         </main>
 
         <footer class="bg-zinc-900 border-t border-zinc-800 py-3 px-6 text-center text-zinc-600 text-xs">
-            FoxTrack Bridge v1.2 — 3D Printer Integration
+            FoxTrack Bridge v1.3
         </footer>
     </div>
 
 <script>
 let configuredPrinters = [];
 let liveStatus = {};
+let openRows = {};
 
-// ─── Brand config ─────────────────────────────────────────────────────────────
 const brands = {
     bambu: {
-        instructions: `
-            <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
-                <p class="text-sm font-medium text-zinc-200 flex items-center gap-2">
-                    <i class="fas fa-info-circle text-orange-500"></i> BambuLab Setup Required
-                </p>
-                <div class="space-y-2 text-xs text-zinc-400">
-                    <div class="flex items-start gap-2">
-                        <span class="text-orange-500 font-bold mt-0.5">1</span>
-                        <span>On the printer touchscreen: <strong class="text-zinc-300">Settings → Network → LAN Only Mode</strong> — toggle it on</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-orange-500 font-bold mt-0.5">2</span>
-                        <span>Scroll down and enable <strong class="text-zinc-300">Developer Mode</strong> — required for local MQTT access on newer firmware</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-orange-500 font-bold mt-0.5">3</span>
-                        <span><strong class="text-zinc-300">Serial Number</strong>: Settings → Device Info on the printer screen</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-orange-500 font-bold mt-0.5">4</span>
-                        <span><strong class="text-zinc-300">LAN Access Code</strong>: Settings → WiFi → Device Info on the printer screen</span>
-                    </div>
-                </div>
-            </div>`,
+        instructions: '<div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400">Enable LAN Only and Developer Mode on the printer, then copy Serial Number and LAN Access Code.</div>',
         fields: { serial: true, lanCode: true, prusaKey: false }
     },
     creality: {
-        instructions: `
-            <div class="bg-zinc-950 border border-amber-800/40 rounded-xl p-4 space-y-3">
-                <p class="text-sm font-medium text-zinc-200 flex items-center gap-2">
-                    <span class="bg-amber-500/20 text-amber-400 text-xs px-2 py-0.5 rounded-full font-semibold">BETA</span>
-                    Creality Setup — Klipper-based Printers
-                </p>
-                <div class="space-y-2 text-xs text-zinc-400">
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-400 font-bold mt-0.5">✓</span>
-                        <span><strong class="text-zinc-300">Supported models:</strong> K1, K1C, K1 Max, K1 SE, K2 Plus, Ender-3 V3 series, Ender-5 S1, CR-10 SE, SparkX series, and any Creality printer running Klipper with Moonraker</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-400 font-bold mt-0.5">1</span>
-                        <span>Your printer must be on the same local network as this computer</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-400 font-bold mt-0.5">2</span>
-                        <span>Find the printer's IP address on the touchscreen: <strong class="text-zinc-300">Settings → Network → IP Address</strong></span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-400 font-bold mt-0.5">3</span>
-                        <span>These printers use the Moonraker API — no access code needed, just the IP address</span>
-                    </div>
-                </div>
-            </div>`,
+        instructions: '<div class="bg-zinc-950 border border-amber-800/40 rounded-xl p-3 text-xs text-zinc-400">Creality support is beta. For now only network testing is available in Bridge.</div>',
         fields: { serial: false, lanCode: false, prusaKey: false }
     },
     prusa: {
-        instructions: `
-            <div class="bg-zinc-950 border border-amber-800/40 rounded-xl p-4 space-y-3">
-                <p class="text-sm font-medium text-zinc-200 flex items-center gap-2">
-                    <span class="bg-amber-500/20 text-amber-400 text-xs px-2 py-0.5 rounded-full font-semibold">BETA</span>
-                    Prusa Setup — MK4 / XL / Mini (PrusaLink)
-                </p>
-                <div class="space-y-2 text-xs text-zinc-400">
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-400 font-bold mt-0.5">1</span>
-                        <span>Make sure <strong class="text-zinc-300">PrusaLink</strong> is enabled on your printer — it's on by default on MK4, XL, and Mini</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-400 font-bold mt-0.5">2</span>
-                        <span>Find the printer IP on the touchscreen: <strong class="text-zinc-300">Settings → Network → IP Address</strong></span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-400 font-bold mt-0.5">3</span>
-                        <span>Get your API key: open <strong class="text-zinc-300">http://[printer-ip]</strong> in a browser → Settings → API Key</span>
-                    </div>
-                    <div class="flex items-start gap-2">
-                        <span class="text-amber-500 font-bold mt-0.5">!</span>
-                        <span class="text-amber-400/80">MK3 and older models are not directly supported.</span>
-                    </div>
-                </div>
-            </div>`,
+        instructions: '<div class="bg-zinc-950 border border-amber-800/40 rounded-xl p-3 text-xs text-zinc-400">Prusa support is beta. Add printer IP and API key. Full telemetry/control support is coming soon.</div>',
         fields: { serial: false, lanCode: false, prusaKey: true }
     }
 };
 
-// ─── Brand change handler ─────────────────────────────────────────────────────
+function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toSafeId(value) {
+    return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function formatRemaining(minutes) {
+    const m = Number(minutes || 0);
+    if (!m || m <= 0) return 'No ETA';
+    if (m < 60) return m + 'm remaining';
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return h + 'h ' + mm + 'm remaining';
+}
+
+function toast(msg, type = 'success') {
+    const el = document.getElementById('toastMsg');
+    const wrap = document.getElementById('toast');
+    const colors = {
+        success: 'bg-emerald-900/80 border-emerald-700 text-emerald-300',
+        error: 'bg-red-900/80 border-red-700 text-red-300',
+        info: 'bg-zinc-800 border-zinc-700 text-zinc-300',
+    };
+    el.className = 'toast px-5 py-3 rounded-xl text-sm font-medium shadow-xl border ' + (colors[type] || colors.info);
+    el.textContent = msg;
+    wrap.classList.remove('hidden');
+    setTimeout(() => wrap.classList.add('hidden'), 3500);
+}
+
+async function apiFetch(url, options = {}) {
+    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+    if (!res.ok) {
+        let errText = 'HTTP ' + res.status;
+        try {
+            const body = await res.json();
+            if (body && body.error) errText = body.error;
+        } catch (_) {}
+        throw new Error(errText);
+    }
+    if (res.status === 204) return null;
+    const text = await res.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return text;
+    }
+}
+
+function statusMeta(status) {
+    const map = {
+        printing: { label: 'Printing', dot: 'bg-orange-400 pulse', text: 'text-orange-300', badge: 'bg-orange-500/10 border-orange-500/40' },
+        paused: { label: 'Paused', dot: 'bg-yellow-400 pulse', text: 'text-yellow-300', badge: 'bg-yellow-500/10 border-yellow-500/40' },
+        finished: { label: 'Finished', dot: 'bg-blue-400', text: 'text-blue-300', badge: 'bg-blue-500/10 border-blue-500/40' },
+        error: { label: 'Error', dot: 'bg-red-400 pulse', text: 'text-red-300', badge: 'bg-red-500/10 border-red-500/40' },
+        disconnected: { label: 'Offline', dot: 'bg-red-800', text: 'text-red-400', badge: 'bg-red-500/10 border-red-500/40' },
+        connected: { label: 'Connected', dot: 'bg-zinc-500', text: 'text-zinc-300', badge: 'bg-zinc-700/20 border-zinc-700' },
+        idle: { label: 'Idle', dot: 'bg-emerald-400', text: 'text-emerald-300', badge: 'bg-emerald-500/10 border-emerald-500/40' },
+    };
+    return map[status] || { label: 'Connecting', dot: 'bg-zinc-500 pulse', text: 'text-zinc-400', badge: 'bg-zinc-700/20 border-zinc-700' };
+}
+
 function onBrandChange() {
     const brand = document.getElementById('pBrand').value;
     const instructionsEl = document.getElementById('brandInstructions');
@@ -295,9 +279,8 @@ function onBrandChange() {
     instructionsEl.classList.remove('hidden');
     fieldsEl.classList.remove('hidden');
 
-    document.getElementById('fieldSerial').style.display   = cfg.fields.serial   ? '' : 'none';
-    document.getElementById('fieldLanCode').style.display  = cfg.fields.lanCode  ? '' : 'none';
-    // Prusa key: must also remove the 'hidden' tailwind class
+    document.getElementById('fieldSerial').style.display = cfg.fields.serial ? '' : 'none';
+    document.getElementById('fieldLanCode').style.display = cfg.fields.lanCode ? '' : 'none';
     const prusaKeyEl = document.getElementById('fieldPrusaKey');
     if (cfg.fields.prusaKey) {
         prusaKeyEl.classList.remove('hidden');
@@ -308,9 +291,43 @@ function onBrandChange() {
     }
 }
 
-// ─── Test connection ──────────────────────────────────────────────────────────
+async function loadConfig() {
+    try {
+        const cfg = await apiFetch('/api/config');
+        if (cfg && cfg.api_key) {
+            document.getElementById('apiKey').value = cfg.api_key;
+        }
+        configuredPrinters = (cfg && cfg.printers) ? cfg.printers : [];
+        setBridgeStatus(true);
+    } catch (_) {
+        setBridgeStatus(false);
+    }
+}
+
+async function saveGlobalConfig() {
+    const apiKey = document.getElementById('apiKey').value.trim();
+    if (!apiKey) {
+        toast('Please enter your API key', 'error');
+        return;
+    }
+    try {
+        const current = await apiFetch('/api/config').catch(() => ({}));
+        await apiFetch('/api/config', {
+            method: 'POST',
+            body: JSON.stringify({
+                api_key: apiKey,
+                webhook_url: current && current.webhook_url ? current.webhook_url : '',
+                printers: configuredPrinters,
+            }),
+        });
+        toast('Settings saved', 'success');
+    } catch (e) {
+        toast('Failed to save: ' + e.message, 'error');
+    }
+}
+
 async function testConnection() {
-    const ip    = document.getElementById('pIp').value.trim();
+    const ip = document.getElementById('pIp').value.trim();
     const brand = document.getElementById('pBrand').value;
     const result = document.getElementById('testResult');
 
@@ -320,101 +337,41 @@ async function testConnection() {
     }
 
     result.className = 'text-xs text-zinc-400';
-    result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing…';
+    result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing...';
     result.classList.remove('hidden');
 
     try {
-        const res = await fetch('/api/test', {
+        const data = await apiFetch('/api/test', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip, brand })
+            body: JSON.stringify({ ip, brand }),
         });
-        const data = await res.json();
-
-        if (data.reachable) {
+        if (data && data.reachable) {
             result.className = 'text-xs text-emerald-400';
             result.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Printer reachable at ' + escHtml(ip);
         } else {
             result.className = 'text-xs text-red-400';
-            result.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Cannot reach printer — check IP and network';
+            result.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Cannot reach printer';
         }
-    } catch (e) {
-        // Fallback: simple ping-style check via the backend may not exist yet
+    } catch (_) {
         result.className = 'text-xs text-zinc-500';
-        result.innerHTML = '<i class="fas fa-info-circle mr-1"></i> Test endpoint not available — try connecting directly';
+        result.innerHTML = '<i class="fas fa-info-circle mr-1"></i> Test endpoint unavailable';
     }
 }
 
-// ─── Toast ───────────────────────────────────────────────────────────────────
-function toast(msg, type = 'success') {
-    const el = document.getElementById('toastMsg');
-    const wrap = document.getElementById('toast');
-    const colors = {
-        success: 'bg-emerald-900/80 border-emerald-700 text-emerald-300',
-        error:   'bg-red-900/80 border-red-700 text-red-300',
-        info:    'bg-zinc-800 border-zinc-700 text-zinc-300',
-    };
-    el.className = 'toast px-5 py-3 rounded-xl text-sm font-medium shadow-xl border ' + (colors[type] || colors.info);
-    el.textContent = msg;
-    wrap.classList.remove('hidden');
-    setTimeout(() => wrap.classList.add('hidden'), 3500);
-}
-
-// ─── API ─────────────────────────────────────────────────────────────────────
-async function apiFetch(url, options = {}) {
-    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.json();
-}
-
-// ─── Load config ──────────────────────────────────────────────────────────────
-async function loadConfig() {
-    try {
-        const cfg = await apiFetch('/api/config');
-        if (cfg.api_key) document.getElementById('apiKey').value = cfg.api_key;
-        configuredPrinters = cfg.printers || [];
-        setBridgeStatus(true);
-    } catch (e) {
-        setBridgeStatus(false);
-    }
-}
-
-// ─── Save settings ────────────────────────────────────────────────────────────
-async function saveGlobalConfig() {
-    const apiKey = document.getElementById('apiKey').value.trim();
-    if (!apiKey) { toast('Please enter your API key', 'error'); return; }
-    try {
-        // Preserve the existing webhook_url from backend — don't overwrite it
-        const current = await apiFetch('/api/config').catch(() => ({}));
-        await apiFetch('/api/config', {
-            method: 'POST',
-            body: JSON.stringify({
-                api_key:     apiKey,
-                webhook_url: current.webhook_url || '',
-                printers:    configuredPrinters
-            }),
-        });
-        toast('Settings saved ✓');
-    } catch (e) {
-        toast('Failed to save: ' + e.message, 'error');
-    }
-}
-
-// ─── Add printer ─────────────────────────────────────────────────────────────
 async function addPrinter() {
-    const brand   = document.getElementById('pBrand').value;
-    const name    = document.getElementById('pName').value.trim();
-    const ip      = document.getElementById('pIp').value.trim();
-    const serial  = document.getElementById('pSerial').value.trim();
+    const brand = document.getElementById('pBrand').value;
+    const name = document.getElementById('pName').value.trim();
+    const ip = document.getElementById('pIp').value.trim();
+    const serial = document.getElementById('pSerial').value.trim();
     const lanCode = document.getElementById('pLanCode').value.trim();
 
-    if (!brand)  { toast('Please select a printer brand', 'error'); return; }
-    if (!name)   { toast('Please enter a printer name', 'error'); return; }
-    if (!ip)     { toast('Please enter the IP address', 'error'); return; }
+    if (!brand) { toast('Please select a printer brand', 'error'); return; }
+    if (!name) { toast('Please enter a printer name', 'error'); return; }
+    if (!ip) { toast('Please enter the IP address', 'error'); return; }
 
     if (brand === 'bambu') {
-        if (!serial)  { toast('Serial number required — Settings → Device Info on the printer screen', 'error'); return; }
-        if (!lanCode) { toast('LAN access code required — Bambu app → Device → LAN Mode', 'error'); return; }
+        if (!serial) { toast('Bambu serial number is required', 'error'); return; }
+        if (!lanCode) { toast('Bambu LAN access code is required', 'error'); return; }
     }
 
     try {
@@ -422,123 +379,163 @@ async function addPrinter() {
             method: 'POST',
             body: JSON.stringify({ name, ip, serial, lan_code: lanCode, brand }),
         });
-        ['pName','pIp','pSerial','pLanCode'].forEach(id => document.getElementById(id).value = '');
+        ['pName', 'pIp', 'pSerial', 'pLanCode', 'pPrusaKey'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
         document.getElementById('pBrand').value = '';
         document.getElementById('brandInstructions').classList.add('hidden');
         document.getElementById('printerFields').classList.add('hidden');
         document.getElementById('testResult').classList.add('hidden');
-        toast('Connecting to ' + name + '…', 'info');
+        toast('Connecting to ' + name + '...', 'info');
         await loadConfig();
-        renderPrinters();
+        await pollStatus();
     } catch (e) {
         toast('Failed to add printer: ' + e.message, 'error');
     }
 }
 
-// ─── Remove printer ───────────────────────────────────────────────────────────
 async function removePrinter(name) {
     if (!confirm('Remove "' + name + '" from FoxTrack Bridge?')) return;
     try {
-        const cfg = await apiFetch('/api/config');
-        cfg.printers = (cfg.printers || []).filter(p => p.name !== name);
-        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify(cfg) });
-        configuredPrinters = cfg.printers;
+        await apiFetch('/api/printers/' + encodeURIComponent(name), { method: 'DELETE' });
         toast(name + ' removed', 'info');
-        renderPrinters();
+        await loadConfig();
+        await pollStatus();
     } catch (e) {
-        toast('Failed to remove: ' + e.message, 'error');
+        toast('Failed to remove printer: ' + e.message, 'error');
     }
 }
 
-// ─── Render printers ──────────────────────────────────────────────────────────
+async function sendControl(name, command, payload) {
+    try {
+        await apiFetch('/api/control/' + encodeURIComponent(name) + '/' + encodeURIComponent(command), {
+            method: 'POST',
+            body: JSON.stringify(payload || {}),
+        });
+        toast('Command sent: ' + command, 'success');
+        setTimeout(pollStatus, 800);
+    } catch (e) {
+        toast('Command failed: ' + e.message, 'error');
+    }
+}
+
+function startPrint(name) {
+    const fileRef = prompt('Enter print file URL or local printer file path (example: file:///sdcard/print.3mf)');
+    if (!fileRef) return;
+    sendControl(name, 'start', { file_name: fileRef });
+}
+
+function toggleDetails(name) {
+    openRows[name] = !openRows[name];
+    renderPrinters();
+}
+
+function openCameraModal(name) {
+    const modal = document.getElementById('cameraModal');
+    const img = document.getElementById('cameraStream');
+    document.getElementById('cameraTitle').textContent = name;
+    img.src = '/api/camera/' + encodeURIComponent(name);
+    modal.classList.remove('hidden');
+}
+
+function closeCameraModal() {
+    const modal = document.getElementById('cameraModal');
+    const img = document.getElementById('cameraStream');
+    img.src = '';
+    modal.classList.add('hidden');
+}
+
 function renderPrinters() {
-    const list  = document.getElementById('printersList');
+    const list = document.getElementById('printersList');
     const count = document.getElementById('printerCount');
     count.textContent = configuredPrinters.length;
 
     if (configuredPrinters.length === 0) {
-        list.innerHTML = `
-            <div class="p-10 text-center">
-                <i class="fas fa-print text-zinc-700 text-3xl mb-3 block"></i>
-                <p class="text-zinc-500 text-sm">No printers connected yet.<br>Add your first printer above.</p>
-            </div>`;
+        list.innerHTML = '<div class="rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-center"><p class="text-zinc-500 text-sm">No printers connected yet.</p></div>';
         return;
     }
 
-    list.innerHTML = configuredPrinters.map((p, i) => printerRow(p, i, configuredPrinters.length)).join('');
+    list.innerHTML = configuredPrinters.map(printerCard).join('');
 }
 
-function printerRow(printer, index, total) {
-    const live   = liveStatus[printer.name];
-    const status = live ? live.status : 'connecting';
-    const file   = live ? (live.file_name || '—') : '—';
-    const pct    = live ? (live.progress || 0) : 0;
-    const err    = live ? (live.error || '') : '';
-    const brand  = printer.brand || 'bambu';
+function printerCard(printer) {
+    const live = liveStatus[printer.name] || null;
+    const status = live && live.status ? live.status : 'connecting';
+    const meta = statusMeta(status);
+    const file = live && live.file_name ? live.file_name : 'No active file';
+    const progress = live && typeof live.progress === 'number' ? live.progress : 0;
+    const error = live && live.error ? live.error : '';
+    const nozzle = live && typeof live.nozzle_temp === 'number' ? live.nozzle_temp : null;
+    const nozzleTarget = live && typeof live.nozzle_target === 'number' ? live.nozzle_target : null;
+    const bed = live && typeof live.bed_temp === 'number' ? live.bed_temp : null;
+    const bedTarget = live && typeof live.bed_target === 'number' ? live.bed_target : null;
+    const lightOn = !!(live && live.light_on);
+    const timeRemaining = live && typeof live.time_remaining === 'number' ? live.time_remaining : 0;
+    const open = !!openRows[printer.name];
+    const cardId = toSafeId(printer.name);
 
-    const brandIcon = {
-        bambu:    '<span class="text-zinc-600 text-xs">BambuLab</span>',
-        creality: '<span class="text-amber-600 text-xs">Creality <span class="text-amber-700">β</span></span>',
-        prusa:    '<span class="text-amber-600 text-xs">Prusa <span class="text-amber-700">β</span></span>',
-    }[brand] || '';
-
-    const statusConfig = {
-        printing:     { dot: 'bg-orange-400 pulse', label: 'Printing',     text: 'text-orange-400'  },
-        idle:         { dot: 'bg-emerald-400',       label: 'Idle',         text: 'text-emerald-400' },
-        paused:       { dot: 'bg-yellow-400 pulse',  label: 'Paused',       text: 'text-yellow-400'  },
-        finished:     { dot: 'bg-blue-400',           label: 'Finished',     text: 'text-blue-400'    },
-        error:        { dot: 'bg-red-400 pulse',      label: 'Error',        text: 'text-red-400'     },
-        connected:    { dot: 'bg-zinc-500 pulse',     label: 'Connecting…',  text: 'text-zinc-400'    },
-        connecting:   { dot: 'bg-zinc-500 pulse',     label: 'Connecting…',  text: 'text-zinc-400'    },
-        disconnected: { dot: 'bg-red-800',            label: 'Offline',      text: 'text-red-500'     },
+    const tempDisplay = (label, now, target) => {
+        if (now === null) return '<p class="text-xs text-zinc-500">' + label + ': --</p>';
+        const nowText = Math.round(now);
+        const targetText = target === null ? '--' : Math.round(target);
+        return '<p class="text-xs text-zinc-300">' + label + ': <span class="text-zinc-100">' + nowText + 'C</span> / ' + targetText + 'C</p>';
     };
-    const sc = statusConfig[status] || statusConfig.connecting;
-    const border = index < total - 1 ? 'border-b border-zinc-800' : '';
 
-    const progressBar = status === 'printing' ? `
-        <div class="w-24 bg-zinc-800 rounded-full h-1.5 hidden sm:block">
-            <div class="h-1.5 rounded-full bg-orange-500 transition-all duration-500" style="width:${pct}%"></div>
-        </div>
-        <span class="text-zinc-400 text-xs w-8 text-right hidden sm:block">${pct}%</span>` : `
-        <div class="w-24 hidden sm:block"></div>
-        <span class="w-8 hidden sm:block"></span>`;
+    const progressBar = status === 'printing' || status === 'paused'
+        ? '<div class="w-full bg-zinc-800 rounded-full h-1.5 mt-2"><div class="h-1.5 rounded-full bg-orange-500 transition-all duration-500" style="width:' + progress + '%"></div></div>'
+        : '';
 
-    return `
-    <div class="list-row ${border} px-5 py-4 flex items-center gap-4">
-        <div class="flex items-center gap-3 min-w-0 flex-1">
-            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ${sc.dot}"></span>
-            <div class="min-w-0">
-                <p class="font-medium text-sm truncate">${escHtml(printer.name)}</p>
-                <div class="flex items-center gap-2">
-                    <p class="text-zinc-500 text-xs font-mono">${escHtml(printer.ip)}</p>
-                    ${brandIcon}
-                </div>
-            </div>
-        </div>
-        <span class="text-xs font-medium ${sc.text} w-24 flex-shrink-0 hidden sm:block">${sc.label}</span>
-        <span class="text-zinc-400 text-xs truncate flex-1 hidden md:block" title="${escHtml(file)}">${escHtml(file)}</span>
-        ${progressBar}
-        ${err ? `<span class="text-xs text-red-400 bg-red-900/20 border border-red-800/30 px-2 py-0.5 rounded-full flex-shrink-0 hidden lg:block"><i class="fas fa-exclamation-triangle mr-1"></i>Error</span>` : '<span class="w-0 hidden lg:block"></span>'}
-        <button onclick="removePrinter('${escHtml(printer.name)}')"
-            class="flex-shrink-0 text-zinc-600 hover:text-red-400 transition-colors p-1 rounded-lg hover:bg-red-500/10"
-            title="Remove ${escHtml(printer.name)}">
-            <i class="fas fa-trash text-xs"></i>
-        </button>
-    </div>`;
+    const controlsDisabled = status === 'disconnected' || status === 'connecting';
+
+    return '<article class="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden">'
+        + '<div class="px-4 py-3.5">'
+        + '<div class="flex flex-wrap items-center justify-between gap-3">'
+        + '<div class="min-w-0">'
+        + '<p class="text-sm font-semibold truncate">' + escHtml(printer.name) + '</p>'
+        + '<p class="text-xs text-zinc-500 mt-0.5">' + escHtml(printer.ip) + ' · ' + escHtml((printer.brand || 'bambu').toUpperCase()) + '</p>'
+        + '</div>'
+        + '<div class="flex items-center gap-2">'
+        + '<span class="inline-flex items-center gap-1.5 border rounded-full px-2.5 py-1 text-xs ' + meta.badge + ' ' + meta.text + '"><span class="w-2 h-2 rounded-full ' + meta.dot + '"></span>' + meta.label + '</span>'
+        + '<button onclick="toggleDetails(' + JSON.stringify(printer.name) + ')" class="text-xs text-zinc-300 border border-zinc-700 hover:border-zinc-500 rounded-lg px-2.5 py-1.5">' + (open ? 'Hide' : 'Details') + '</button>'
+        + '</div>'
+        + '</div>'
+        + '<p class="text-xs text-zinc-400 truncate mt-2" title="' + escHtml(file) + '">' + escHtml(file) + '</p>'
+        + progressBar
+        + '<div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">'
+        + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2">' + tempDisplay('Nozzle', nozzle, nozzleTarget) + '</div>'
+        + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2">' + tempDisplay('Bed', bed, bedTarget) + '</div>'
+        + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2"><p class="text-xs text-zinc-500">Light</p><p class="text-xs ' + (lightOn ? 'text-emerald-300' : 'text-zinc-300') + '">' + (lightOn ? 'On' : 'Off') + '</p></div>'
+        + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2"><p class="text-xs text-zinc-500">ETA</p><p class="text-xs text-zinc-300">' + escHtml(formatRemaining(timeRemaining)) + '</p></div>'
+        + '</div>'
+        + (error ? '<p class="mt-2 text-xs text-red-300">Error: ' + escHtml(error) + '</p>' : '')
+        + '</div>'
+        + (open
+            ? '<div id="panel-' + cardId + '" class="px-4 pb-4 border-t border-zinc-800 bg-zinc-900/60">'
+                + '<div class="pt-3 flex flex-wrap gap-2">'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'pause\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Pause</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'resume\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Resume</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'stop\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-red-700/70 text-red-300 hover:border-red-500 disabled:opacity-50">Stop</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'toggle_light\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Toggle Light</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="startPrint(' + JSON.stringify(printer.name) + ')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Start Print</button>'
+                + '<button onclick="openCameraModal(' + JSON.stringify(printer.name) + ')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500">Open Camera</button>'
+                + '<button onclick="removePrinter(' + JSON.stringify(printer.name) + ')" class="text-xs px-2.5 py-1.5 rounded-lg border border-red-700/70 text-red-300 hover:border-red-500">Remove</button>'
+                + '</div>'
+                + '<p class="mt-2 text-[11px] text-zinc-500">Start Print requires a printer file URL/path that your Bambu printer can access. If the printer rejects it, verify the file path format.</p>'
+            + '</div>'
+            : '')
+        + '</article>';
 }
 
-function escHtml(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-// ─── Poll status ──────────────────────────────────────────────────────────────
 async function pollStatus() {
     try {
-        liveStatus = await apiFetch('/api/status');
+        const data = await apiFetch('/api/status');
+        liveStatus = data || {};
         setBridgeStatus(true);
         renderPrinters();
-    } catch (e) {
+    } catch (_) {
         setBridgeStatus(false);
+        renderPrinters();
     }
 }
 
@@ -551,7 +548,6 @@ function setBridgeStatus(online) {
     }
 }
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
 (async () => {
     await loadConfig();
     renderPrinters();

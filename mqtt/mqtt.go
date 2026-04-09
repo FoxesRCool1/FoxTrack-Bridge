@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,15 +43,15 @@ type BambuReport struct {
 }
 
 type BambuPrint struct {
-	GcodeState       string  `json:"gcode_state"`
-	SubTaskName      string  `json:"subtask_name"`
-	McPercent        int     `json:"mc_percent"`
-	McPrintErrorCode string  `json:"mc_print_error_code"`
-	NozzleTemper     float64 `json:"nozzle_temper"`
+	GcodeState         string  `json:"gcode_state"`
+	SubTaskName        string  `json:"subtask_name"`
+	McPercent          int     `json:"mc_percent"`
+	McPrintErrorCode   string  `json:"mc_print_error_code"`
+	NozzleTemper       float64 `json:"nozzle_temper"`
 	NozzleTargetTemper float64 `json:"nozzle_target_temper"`
-	BedTemper        float64 `json:"bed_temper"`
-	BedTargetTemper  float64 `json:"bed_target_temper"`
-	Lights           []struct {
+	BedTemper          float64 `json:"bed_temper"`
+	BedTargetTemper    float64 `json:"bed_target_temper"`
+	Lights             []struct {
 		Node string `json:"node"`
 		Mode string `json:"mode"`
 	} `json:"lights_report"`
@@ -92,8 +93,17 @@ func GetPrintersState() map[string]*TelemetryData {
 }
 
 // SendCommand sends a control command to a named printer via MQTT.
-// command is one of: "pause", "resume", "stop", "light_on", "light_off"
+// command is one of: "pause", "resume", "stop", "light_on", "light_off", "start", "toggle_light"
 func SendCommand(printerName, command string) error {
+	return SendCommandWithArgs(printerName, command, nil)
+}
+
+// SendCommandWithArgs sends a command with optional arguments.
+// For start prints, accepted args are:
+// - file_name or file: printer-local path or URL
+// - url: explicit URL
+// - start_command: optional override for printer command name (default: project_file)
+func SendCommandWithArgs(printerName, command string, args map[string]interface{}) error {
 	clientMutex.RLock()
 	client, ok := printerClients[printerName]
 	clientMutex.RUnlock()
@@ -129,6 +139,45 @@ func SendCommand(printerName, command string) error {
 		payload = `{"system":{"sequence_id":"0","command":"ledctrl","led_node":"work_light","led_mode":"on","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}`
 	case "light_off":
 		payload = `{"system":{"sequence_id":"0","command":"ledctrl","led_node":"work_light","led_mode":"off","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}`
+	case "toggle_light":
+		if state != nil && state.LightOn {
+			payload = `{"system":{"sequence_id":"0","command":"ledctrl","led_node":"work_light","led_mode":"off","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}`
+		} else {
+			payload = `{"system":{"sequence_id":"0","command":"ledctrl","led_node":"work_light","led_mode":"on","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}`
+		}
+	case "start":
+		target := getStringArg(args, "url")
+		if target == "" {
+			target = getStringArg(args, "file_name")
+		}
+		if target == "" {
+			target = getStringArg(args, "file")
+		}
+		if target == "" {
+			return fmt.Errorf("start command requires one of: url, file_name, or file")
+		}
+
+		if !strings.Contains(target, "://") {
+			target = "file:///" + strings.TrimPrefix(target, "/")
+		}
+
+		startCommand := getStringArg(args, "start_command")
+		if startCommand == "" {
+			startCommand = "project_file"
+		}
+
+		payloadObj := map[string]interface{}{
+			"print": map[string]interface{}{
+				"sequence_id": "0",
+				"command":     startCommand,
+				"url":         target,
+			},
+		}
+		b, err := json.Marshal(payloadObj)
+		if err != nil {
+			return fmt.Errorf("failed to build start payload: %w", err)
+		}
+		payload = string(b)
 	default:
 		return fmt.Errorf("unknown command: %q", command)
 	}
@@ -137,6 +186,21 @@ func SendCommand(printerName, command string) error {
 	token.WaitTimeout(5 * time.Second)
 	log.Printf("[%s] sent command: %s", printerName, command)
 	return nil
+}
+
+func getStringArg(args map[string]interface{}, key string) string {
+	if args == nil {
+		return ""
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
 }
 
 // printerSerials maps name → serial for control commands
@@ -319,18 +383,19 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 
 		go func() {
 			payload := webhook.Payload{
-				PrinterName:  p.Name,
-				Serial:       p.Serial,
-				Status:       status,
-				FileName:     pr.SubTaskName,
-				Progress:     pr.McPercent,
-				ErrorCode:    pr.McPrintErrorCode,
-				Timestamp:    time.Now().Unix(),
-				NozzleTemp:   pr.NozzleTemper,
-				NozzleTarget: pr.NozzleTargetTemper,
-				BedTemp:      pr.BedTemper,
-				BedTarget:    pr.BedTargetTemper,
-				LightOn:      lightOn,
+				PrinterName:   p.Name,
+				Serial:        p.Serial,
+				Status:        status,
+				FileName:      pr.SubTaskName,
+				Progress:      pr.McPercent,
+				ErrorCode:     pr.McPrintErrorCode,
+				Timestamp:     time.Now().Unix(),
+				NozzleTemp:    pr.NozzleTemper,
+				NozzleTarget:  pr.NozzleTargetTemper,
+				BedTemp:       pr.BedTemper,
+				BedTarget:     pr.BedTargetTemper,
+				LightOn:       lightOn,
+				TimeRemaining: pr.McRemainingTime,
 			}
 			if err := webhook.Send(p.APIKey, p.WebhookURL, payload); err != nil {
 				log.Printf("[%s] webhook error: %v", p.Name, err)

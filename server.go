@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -112,16 +113,31 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "usage: /api/control/{printer_name}/{command}", http.StatusBadRequest)
 		return
 	}
-	printerName := parts[0]
+	printerName, err := url.PathUnescape(parts[0])
+	if err != nil {
+		http.Error(w, "invalid printer name", http.StatusBadRequest)
+		return
+	}
 	command := parts[1]
 
-	if err := mqttpkg.SendCommand(printerName, command); err != nil {
+	var args map[string]interface{}
+	if r.Body != nil {
+		defer r.Body.Close()
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&args); err != nil && err != io.EOF {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON body"})
+			return
+		}
+	}
+
+	if err := mqttpkg.SendCommandWithArgs(printerName, command, args); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "command": command})
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "command": command, "printer": printerName})
 }
 
 // handleCamera proxies the BambuLab MJPEG camera stream.
@@ -164,10 +180,10 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 
 	// Use a transport that tolerates the printer's self-signed cert situation
 	transport := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		DisableKeepAlives:   false,
-		IdleConnTimeout:     0,
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+		DialContext:       (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		DisableKeepAlives: false,
+		IdleConnTimeout:   0,
 	}
 	client := &http.Client{Transport: transport, Timeout: 0} // no timeout — stream
 
