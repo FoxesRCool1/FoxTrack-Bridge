@@ -432,6 +432,30 @@ function toggleCamera(name) {
     renderPrinters();
 }
 
+function decodePrinterName(encodedName) {
+    try {
+        return decodeURIComponent(encodedName || '');
+    } catch (_) {
+        return encodedName || '';
+    }
+}
+
+function toggleCameraEncoded(encodedName) {
+    toggleCamera(decodePrinterName(encodedName));
+}
+
+function sendControlEncoded(encodedName, command, payload) {
+    sendControl(decodePrinterName(encodedName), command, payload);
+}
+
+function startPrintEncoded(encodedName) {
+    startPrint(decodePrinterName(encodedName));
+}
+
+function removePrinterEncoded(encodedName) {
+    removePrinter(decodePrinterName(encodedName));
+}
+
 function openCameraModal(name) {
     const modal = document.getElementById('cameraModal');
     const img = document.getElementById('cameraStream');
@@ -475,6 +499,7 @@ function printerCard(printer) {
     const timeRemaining = live && typeof live.time_remaining === 'number' ? live.time_remaining : 0;
     const open = !!openRows[printer.name];
     const cardId = toSafeId(printer.name);
+    const encodedName = encodeURIComponent(printer.name);
 
     const tempDisplay = (label, now, target) => {
         if (now === null) return '<p class="text-xs text-zinc-500">' + label + ': --</p>';
@@ -498,7 +523,7 @@ function printerCard(printer) {
         + '</div>'
         + '<div class="flex items-center gap-2">'
         + '<span class="inline-flex items-center gap-1.5 border rounded-full px-2.5 py-1 text-xs ' + meta.badge + ' ' + meta.text + '"><span class="w-2 h-2 rounded-full ' + meta.dot + '"></span>' + meta.label + '</span>'
-        + '<button onclick="toggleCamera(' + JSON.stringify(printer.name) + ')" class="text-xs text-zinc-300 border border-zinc-700 hover:border-zinc-500 rounded-lg px-2.5 py-1.5">' + (open ? 'Hide Camera' : 'Camera') + '</button>'
+        + '<button onclick="toggleCameraEncoded(\'' + encodedName + '\')" class="text-xs text-zinc-300 border border-zinc-700 hover:border-zinc-500 rounded-lg px-2.5 py-1.5">' + (open ? 'Hide Camera' : 'Camera') + '</button>'
         + '</div>'
         + '</div>'
         + '<p class="text-xs text-zinc-400 truncate mt-2" title="' + escHtml(file) + '">' + escHtml(file) + '</p>'
@@ -506,7 +531,7 @@ function printerCard(printer) {
         + '<div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">'
         + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2">' + tempDisplay('Nozzle', nozzle, nozzleTarget) + '</div>'
         + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2">' + tempDisplay('Bed', bed, bedTarget) + '</div>'
-        + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'light\',{on:' + (!lightOn ? 'true' : 'false') + '})" class="rounded-lg bg-zinc-900 border p-2 text-left disabled:opacity-50 ' + (lightOn ? 'border-emerald-600/70 hover:border-emerald-500' : 'border-zinc-800 hover:border-zinc-600') + '"><p class="text-xs text-zinc-500">Light</p><p class="text-xs ' + (lightOn ? 'text-emerald-300' : 'text-zinc-300') + '">' + (lightOn ? 'On (click to turn off)' : 'Off (click to turn on)') + '</p></button>'
+        + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'light\',{on:' + (!lightOn ? 'true' : 'false') + '})" class="rounded-lg bg-zinc-900 border p-2 text-left disabled:opacity-50 ' + (lightOn ? 'border-emerald-600/70 hover:border-emerald-500' : 'border-zinc-800 hover:border-zinc-600') + '"><p class="text-xs text-zinc-500">Light</p><p class="text-xs ' + (lightOn ? 'text-emerald-300' : 'text-zinc-300') + '">' + (lightOn ? 'On (click to turn off)' : 'Off (click to turn on)') + '</p></button>'
         + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2"><p class="text-xs text-zinc-500">ETA</p><p class="text-xs text-zinc-300">' + escHtml(formatRemaining(timeRemaining)) + '</p></div>'
         + '</div>'
         + (error ? '<p class="mt-2 text-xs text-red-300">Error: ' + escHtml(error) + '</p>' : '')
@@ -514,12 +539,12 @@ function printerCard(printer) {
         + (open
             ? '<div id="panel-' + cardId + '" class="px-4 pb-4 border-t border-zinc-800 bg-zinc-900/60">'
                 + '<div class="pt-3 flex flex-wrap gap-2">'
-                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'pause\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Pause</button>'
-                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'resume\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Resume</button>'
-                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'stop\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-red-700/70 text-red-300 hover:border-red-500 disabled:opacity-50">Stop</button>'
-                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControl(' + JSON.stringify(printer.name) + ',\'light\',{on:' + (!lightOn ? 'true' : 'false') + '})" class="text-xs px-2.5 py-1.5 rounded-lg border ' + (lightOn ? 'border-emerald-600 text-emerald-300 bg-emerald-500/10 hover:border-emerald-500' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500') + ' disabled:opacity-50">' + (lightOn ? 'Light: On' : 'Light: Off') + '</button>'
-                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="startPrint(' + JSON.stringify(printer.name) + ')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Start Print</button>'
-                + '<button onclick="removePrinter(' + JSON.stringify(printer.name) + ')" class="text-xs px-2.5 py-1.5 rounded-lg border border-red-700/70 text-red-300 hover:border-red-500">Remove</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'pause\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Pause</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'resume\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Resume</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'stop\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-red-700/70 text-red-300 hover:border-red-500 disabled:opacity-50">Stop</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'light\',{on:' + (!lightOn ? 'true' : 'false') + '})" class="text-xs px-2.5 py-1.5 rounded-lg border ' + (lightOn ? 'border-emerald-600 text-emerald-300 bg-emerald-500/10 hover:border-emerald-500' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500') + ' disabled:opacity-50">' + (lightOn ? 'Light: On' : 'Light: Off') + '</button>'
+                + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="startPrintEncoded(\'' + encodedName + '\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Start Print</button>'
+                + '<button onclick="removePrinterEncoded(\'' + encodedName + '\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-red-700/70 text-red-300 hover:border-red-500">Remove</button>'
                 + '</div>'
                 + '<div class="mt-3 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950">'
                 + '<img src="/api/camera/' + encodeURIComponent(printer.name) + '" alt="Camera ' + escHtml(printer.name) + '" class="w-full max-h-72 object-contain bg-zinc-950" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'block\';">'
