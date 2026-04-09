@@ -376,11 +376,15 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 
 		status := mapGcodeState(pr.GcodeState)
 
-		// Parse light state
-		lightOn := false
-		for _, l := range pr.Lights {
-			if l.Node == "work_light" && l.Mode == "on" {
-				lightOn = true
+		// Parse light state; preserve previous value when lights_report is absent.
+		prev := GetPrinterState(p.Name)
+		lightOn := prev.LightOn
+		if len(pr.Lights) > 0 {
+			lightOn = false
+			for _, l := range pr.Lights {
+				if l.Node == "work_light" && l.Mode == "on" {
+					lightOn = true
+				}
 			}
 		}
 

@@ -515,6 +515,7 @@ function printerCard(printer) {
     const open = !!openRows[printer.name];
     const cardId = toSafeId(printer.name);
     const encodedName = encodeURIComponent(printer.name);
+    const isBambu = !printer.brand || printer.brand === 'bambu';
 
     const tempDisplay = (label, now, target) => {
         if (now === null) return '<p class="text-xs text-zinc-500">' + label + ': --</p>';
@@ -529,6 +530,45 @@ function printerCard(printer) {
 
     const controlsDisabled = status === 'disconnected' || status === 'connecting';
 
+    if (isBambu) {
+        // BambuLab card: always-visible controls, no Light card in grid, camera toggled separately
+        return '<article class="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden">'
+            + '<div class="px-4 py-3.5">'
+            + '<div class="flex flex-wrap items-center justify-between gap-3">'
+            + '<div class="min-w-0">'
+            + '<p class="text-sm font-semibold truncate">' + escHtml(printer.name) + '</p>'
+            + '<p class="text-xs text-zinc-500 mt-0.5">' + escHtml(printer.ip) + ' · ' + escHtml((printer.brand || 'bambu').toUpperCase()) + '</p>'
+            + '</div>'
+            + '<div class="flex items-center gap-2">'
+            + '<span class="inline-flex items-center gap-1.5 border rounded-full px-2.5 py-1 text-xs ' + meta.badge + ' ' + meta.text + '"><span class="w-2 h-2 rounded-full ' + meta.dot + '"></span>' + meta.label + '</span>'
+            + '<button onclick="toggleCameraEncoded(\'' + encodedName + '\')" class="text-xs text-zinc-300 border ' + (open ? 'border-orange-500/70 text-orange-300' : 'border-zinc-700 hover:border-zinc-500') + ' rounded-lg px-2.5 py-1.5">' + (open ? 'Hide Camera' : 'Camera') + '</button>'
+            + '</div>'
+            + '</div>'
+            + '<p class="text-xs text-zinc-400 truncate mt-2" title="' + escHtml(file) + '">' + escHtml(file) + '</p>'
+            + progressBar
+            + '<div class="mt-3 grid grid-cols-3 gap-2">'
+            + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2">' + tempDisplay('Nozzle', nozzle, nozzleTarget) + '</div>'
+            + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2">' + tempDisplay('Bed', bed, bedTarget) + '</div>'
+            + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-2"><p class="text-xs text-zinc-500">ETA</p><p class="text-xs text-zinc-300">' + escHtml(formatRemaining(timeRemaining)) + '</p></div>'
+            + '</div>'
+            + (error ? '<p class="mt-2 text-xs text-red-300">Error: ' + escHtml(error) + '</p>' : '')
+            + '<div class="mt-3 flex flex-wrap gap-2">'
+            + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'pause\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Pause</button>'
+            + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'resume\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">Resume</button>'
+            + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'stop\')" class="text-xs px-2.5 py-1.5 rounded-lg border border-red-700/70 text-red-300 hover:border-red-500 disabled:opacity-50">Stop</button>'
+            + '<button ' + (controlsDisabled ? 'disabled ' : '') + 'onclick="sendControlEncoded(\'' + encodedName + '\',\'light\',{on:' + (!lightOn ? 'true' : 'false') + '})" class="text-xs px-2.5 py-1.5 rounded-lg border ' + (lightOn ? 'border-emerald-600 text-emerald-300 bg-emerald-500/10 hover:border-emerald-500' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500') + ' disabled:opacity-50">' + (lightOn ? 'Light: On' : 'Light: Off') + '</button>'
+            + '</div>'
+            + '</div>'
+            + (open
+                ? '<div id="panel-' + cardId + '" class="border-t border-zinc-800">'
+                    + '<img src="/api/camera/' + encodeURIComponent(printer.name) + '" alt="Camera ' + escHtml(printer.name) + '" class="w-full max-h-72 object-contain bg-zinc-950" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'block\';">'
+                    + '<p style="display:none" class="p-3 text-xs text-zinc-500 text-center">Camera feed unavailable for this printer.</p>'
+                    + '</div>'
+                : '')
+            + '</article>';
+    }
+
+    // Non-BambuLab card: original layout
     return '<article class="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden">'
         + '<div class="px-4 py-3.5">'
         + '<div class="flex flex-wrap items-center justify-between gap-3">'
@@ -565,7 +605,7 @@ function printerCard(printer) {
                 + '<img src="/api/camera/' + encodeURIComponent(printer.name) + '" alt="Camera ' + escHtml(printer.name) + '" class="w-full max-h-72 object-contain bg-zinc-950" onerror="this.style.display=\'none\'; this.nextElementSibling.style.display=\'block\';">'
                 + '<p style="display:none" class="p-3 text-xs text-zinc-500">Camera feed unavailable for this printer.</p>'
                 + '</div>'
-                + '<p class="mt-2 text-[11px] text-zinc-500">Start Print requires a printer file URL/path that your Bambu printer can access. If the printer rejects it, verify the file path format.</p>'
+                + '<p class="mt-2 text-[11px] text-zinc-500">Start Print requires a printer file URL/path that your printer can access. If the printer rejects it, verify the file path format.</p>'
             + '</div>'
             : '')
         + '</article>';
