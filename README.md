@@ -28,7 +28,7 @@ Release builds are published for these targets only:
 
 Get the latest build from the GitHub releases page:
 
-- https://github.com/CalebEllis123/FoxTrack-Bridge/releases/latest
+- https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest
 
 ## Setup
 
