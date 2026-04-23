@@ -110,13 +110,12 @@
 
                         <div class="space-y-3">
                             <div>
-                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Printer Brand</label>
+                                <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Printer Type</label>
                                 <select id="pBrand" onchange="onBrandChange()"
                                     class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none appearance-none cursor-pointer">
-                                    <option value="">Select brand...</option>
-                                    <option value="bambu">BambuLab</option>
-                                    <option value="creality">Creality (Beta)</option>
-                                    <option value="prusa">Prusa (Beta)</option>
+                                    <option value="">Select type...</option>
+                                    <option value="bambu">Bambu Lab</option>
+                                    <option value="klipper">Klipper / Moonraker</option>
                                 </select>
                             </div>
 
@@ -129,11 +128,17 @@
                                         class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
                                         placeholder="e.g. Studio P1S">
                                 </div>
-                                <div>
+                                <div id="fieldIp">
                                     <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">IP Address</label>
                                     <input type="text" id="pIp" autocomplete="off"
                                         class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
                                         placeholder="192.168.1.120">
+                                </div>
+                                <div id="fieldMoonrakerUrl" class="hidden">
+                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Moonraker URL</label>
+                                    <input type="text" id="pMoonrakerUrl" autocomplete="off"
+                                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                                        placeholder="http://192.168.1.120:7125">
                                 </div>
                                 <div id="fieldSerial">
                                     <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Serial Number</label>
@@ -147,11 +152,11 @@
                                         class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
                                         placeholder="8-character code">
                                 </div>
-                                <div id="fieldPrusaKey" class="hidden">
-                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">PrusaLink API Key</label>
-                                    <input type="password" id="pPrusaKey" autocomplete="off"
+                                <div id="fieldKlipperKey" class="hidden">
+                                    <label class="block text-zinc-400 text-xs font-medium mb-2 uppercase tracking-wide">Moonraker API Key (Optional)</label>
+                                    <input type="password" id="pKlipperKey" autocomplete="off"
                                         class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none"
-                                        placeholder="PrusaLink API key">
+                                        placeholder="Moonraker API key">
                                 </div>
                                 <div class="flex items-center gap-2.5 flex-wrap pt-1">
                                     <button onclick="testConnection()"
@@ -206,15 +211,11 @@ let updateInfo = null;
 const brands = {
     bambu: {
         instructions: '<div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400">Enable LAN Only and Developer Mode on the printer, then copy Serial Number and LAN Access Code.</div>',
-        fields: { serial: true, lanCode: true, prusaKey: false }
+        fields: { ip: true, serial: true, lanCode: true, moonrakerUrl: false, klipperKey: false }
     },
-    creality: {
-        instructions: '<div class="bg-zinc-950 border border-amber-800/40 rounded-xl p-3 text-xs text-zinc-400">Creality support is beta. For now only network testing is available in Bridge.</div>',
-        fields: { serial: false, lanCode: false, prusaKey: false }
-    },
-    prusa: {
-        instructions: '<div class="bg-zinc-950 border border-amber-800/40 rounded-xl p-3 text-xs text-zinc-400">Prusa support is beta. Add printer IP and API key. Full telemetry/control support is coming soon.</div>',
-        fields: { serial: false, lanCode: false, prusaKey: true }
+    klipper: {
+        instructions: '<div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400">Use your Moonraker endpoint (usually http://printer-ip:7125). Add API key only if Moonraker auth is enabled.</div>',
+        fields: { ip: false, serial: false, lanCode: false, moonrakerUrl: true, klipperKey: true }
     }
 };
 
@@ -233,6 +234,10 @@ function formatRemaining(minutes) {
     const h = Math.floor(m / 60);
     const mm = m % 60;
     return h + 'h ' + mm + 'm remaining';
+}
+
+function printerTypeLabel(printer) {
+    return (printer && printer.serial && printer.lan_code && !printer.moonraker_url) ? 'Bambu' : 'Klipper';
 }
 
 function toast(msg, type = 'success') {
@@ -301,15 +306,26 @@ function onBrandChange() {
     instructionsEl.classList.remove('hidden');
     fieldsEl.classList.remove('hidden');
 
+    document.getElementById('fieldIp').style.display = cfg.fields.ip ? '' : 'none';
     document.getElementById('fieldSerial').style.display = cfg.fields.serial ? '' : 'none';
     document.getElementById('fieldLanCode').style.display = cfg.fields.lanCode ? '' : 'none';
-    const prusaKeyEl = document.getElementById('fieldPrusaKey');
-    if (cfg.fields.prusaKey) {
-        prusaKeyEl.classList.remove('hidden');
-        prusaKeyEl.style.display = '';
+
+    const moonrakerUrlEl = document.getElementById('fieldMoonrakerUrl');
+    if (cfg.fields.moonrakerUrl) {
+        moonrakerUrlEl.classList.remove('hidden');
+        moonrakerUrlEl.style.display = '';
     } else {
-        prusaKeyEl.classList.add('hidden');
-        prusaKeyEl.style.display = 'none';
+        moonrakerUrlEl.classList.add('hidden');
+        moonrakerUrlEl.style.display = 'none';
+    }
+
+    const klipperKeyEl = document.getElementById('fieldKlipperKey');
+    if (cfg.fields.klipperKey) {
+        klipperKeyEl.classList.remove('hidden');
+        klipperKeyEl.style.display = '';
+    } else {
+        klipperKeyEl.classList.add('hidden');
+        klipperKeyEl.style.display = 'none';
     }
 }
 
@@ -349,12 +365,14 @@ async function saveGlobalConfig() {
 }
 
 async function testConnection() {
-    const ip = document.getElementById('pIp').value.trim();
     const brand = document.getElementById('pBrand').value;
+    const ip = document.getElementById('pIp').value.trim();
+    const moonrakerUrl = document.getElementById('pMoonrakerUrl').value.trim();
     const result = document.getElementById('testResult');
 
-    if (!ip) {
-        toast('Enter an IP address first', 'error');
+    const target = brand === 'klipper' ? moonrakerUrl : ip;
+    if (!target) {
+        toast(brand === 'klipper' ? 'Enter a Moonraker URL first' : 'Enter an IP address first', 'error');
         return;
     }
 
@@ -365,11 +383,11 @@ async function testConnection() {
     try {
         const data = await apiFetch('/api/test', {
             method: 'POST',
-            body: JSON.stringify({ ip, brand }),
+            body: JSON.stringify({ ip, moonraker_url: moonrakerUrl }),
         });
         if (data && data.reachable) {
             result.className = 'text-xs text-emerald-400';
-            result.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Printer reachable at ' + escHtml(ip);
+            result.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Printer reachable at ' + escHtml(target);
         } else {
             result.className = 'text-xs text-red-400';
             result.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Cannot reach printer';
@@ -384,25 +402,29 @@ async function addPrinter() {
     const brand = document.getElementById('pBrand').value;
     const name = document.getElementById('pName').value.trim();
     const ip = document.getElementById('pIp').value.trim();
+    const moonrakerUrl = document.getElementById('pMoonrakerUrl').value.trim();
     const serial = document.getElementById('pSerial').value.trim();
     const lanCode = document.getElementById('pLanCode').value.trim();
-    const prusaKey = document.getElementById('pPrusaKey').value.trim();
+    const klipperKey = document.getElementById('pKlipperKey').value.trim();
 
     if (!brand) { toast('Please select a printer brand', 'error'); return; }
     if (!name) { toast('Please enter a printer name', 'error'); return; }
-    if (!ip) { toast('Please enter the IP address', 'error'); return; }
-
     if (brand === 'bambu') {
+        if (!ip) { toast('Please enter the IP address', 'error'); return; }
         if (!serial) { toast('Bambu serial number is required', 'error'); return; }
         if (!lanCode) { toast('Bambu LAN access code is required', 'error'); return; }
+    }
+
+    if (brand === 'klipper') {
+        if (!moonrakerUrl) { toast('Moonraker URL is required for Klipper', 'error'); return; }
     }
 
     try {
         await apiFetch('/api/printers', {
             method: 'POST',
-            body: JSON.stringify({ name, ip, serial, lan_code: lanCode, api_key: prusaKey, brand }),
+            body: JSON.stringify({ name, ip, serial, lan_code: lanCode, moonraker_url: moonrakerUrl, api_key: klipperKey }),
         });
-        ['pName', 'pIp', 'pSerial', 'pLanCode', 'pPrusaKey'].forEach(id => {
+        ['pName', 'pIp', 'pMoonrakerUrl', 'pSerial', 'pLanCode', 'pKlipperKey'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
@@ -504,7 +526,11 @@ function printerCard(printer) {
     const bedTarget = live && typeof live.bed_target === 'number' ? live.bed_target : null;
     const timeRemaining = live && typeof live.time_remaining === 'number' ? live.time_remaining : 0;
     const encodedName = encodeURIComponent(printer.name);
-    const isBambu = !printer.brand || printer.brand === 'bambu';
+    const isBambu = !!(printer.serial && printer.lan_code && !printer.moonraker_url);
+    const typeLabel = printerTypeLabel(printer);
+    const subtitle = isBambu
+        ? (escHtml(printer.ip || '') + ' · BAMBU')
+        : (escHtml(printer.moonraker_url || '') + ' · KLIPPER');
 
     const tempDisplay = (label, now, target) => {
         if (now === null) return '<p class="text-xs text-zinc-500">' + label + ': --</p>';
@@ -525,9 +551,11 @@ function printerCard(printer) {
             + '<div class="flex flex-wrap items-center justify-between gap-3">'
             + '<div class="min-w-0">'
             + '<p class="text-sm font-semibold truncate">' + escHtml(printer.name) + '</p>'
-            + '<p class="text-xs text-zinc-500 mt-0.5">' + escHtml(printer.ip) + ' · ' + escHtml((printer.brand || 'bambu').toUpperCase()) + '</p>'
+            + '<p class="text-xs text-zinc-500 mt-0.5">' + subtitle + '</p>'
             + '</div>'
             + '<div class="flex items-center gap-2">'
+            + '<span class="inline-flex items-center border border-zinc-700 rounded-full px-2.5 py-1 text-xs text-zinc-300 bg-zinc-800/60">Saved</span>'
+            + '<span class="inline-flex items-center border border-zinc-700 rounded-full px-2.5 py-1 text-xs text-zinc-300 bg-zinc-800/60">' + escHtml(typeLabel) + '</span>'
             + '<span class="inline-flex items-center gap-1.5 border rounded-full px-2.5 py-1 text-xs ' + meta.badge + ' ' + meta.text + '"><span class="w-2 h-2 rounded-full ' + meta.dot + '"></span>' + meta.label + '</span>'
             + '</div>'
             + '</div>'
@@ -553,9 +581,11 @@ function printerCard(printer) {
         + '<div class="flex flex-wrap items-center justify-between gap-3">'
         + '<div class="min-w-0">'
         + '<p class="text-sm font-semibold truncate">' + escHtml(printer.name) + '</p>'
-        + '<p class="text-xs text-zinc-500 mt-0.5">' + escHtml(printer.ip) + ' · ' + escHtml((printer.brand || 'bambu').toUpperCase()) + '</p>'
+        + '<p class="text-xs text-zinc-500 mt-0.5">' + subtitle + '</p>'
         + '</div>'
         + '<div class="flex items-center gap-2">'
+        + '<span class="inline-flex items-center border border-zinc-700 rounded-full px-2.5 py-1 text-xs text-zinc-300 bg-zinc-800/60">Saved</span>'
+        + '<span class="inline-flex items-center border border-zinc-700 rounded-full px-2.5 py-1 text-xs text-zinc-300 bg-zinc-800/60">' + escHtml(typeLabel) + '</span>'
         + '<span class="inline-flex items-center gap-1.5 border rounded-full px-2.5 py-1 text-xs ' + meta.badge + ' ' + meta.text + '"><span class="w-2 h-2 rounded-full ' + meta.dot + '"></span>' + meta.label + '</span>'
         + '</div>'
         + '</div>'

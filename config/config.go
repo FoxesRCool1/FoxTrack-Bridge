@@ -14,12 +14,12 @@ type Config struct {
 }
 
 type Printer struct {
-	Name    string `json:"name"`
-	IP      string `json:"ip"`
-	Serial  string `json:"serial"`
-	LANCode string `json:"lan_code,omitempty"`
-	APIKey  string `json:"api_key,omitempty"`
-	Brand   string `json:"brand,omitempty"`
+	Name         string `json:"name"`
+	IP           string `json:"ip,omitempty"`
+	Serial       string `json:"serial,omitempty"`
+	LANCode      string `json:"lan_code,omitempty"`
+	MoonrakerURL string `json:"moonraker_url,omitempty"`
+	APIKey       string `json:"api_key,omitempty"`
 }
 
 // legacyConfigPath is the old location used by previous builds.

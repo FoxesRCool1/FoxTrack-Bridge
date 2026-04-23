@@ -4,6 +4,8 @@ FoxTrack Bridge runs on the same local network as your printer and sends printer
 
 <img width="1877" height="899" alt="screenshot-2026-04-21_15-43-47" src="https://github.com/user-attachments/assets/6e4efe37-e0eb-4be4-ac98-4c042312bfa4" />
 
+Today the Bridge supports Bambu Lab local LAN access and Klipper printers through the Moonraker HTTP API.
+
 ## What it does
 
 - Connects local printers to FoxTrack with your FoxTrack API token
@@ -15,9 +17,8 @@ FoxTrack Bridge runs on the same local network as your printer and sends printer
 ## Current support
 
 - Bambu Lab: supported
-- Creality: setup flow exists, full printer integration is not confirmed to work yet
-- Prusa: setup flow exists, full printer integration is not confirmed to work yet
-  
+- Klipper (Moonraker): supported
+
 ## Downloads
 
 Release builds are published for these targets only:
@@ -56,11 +57,35 @@ For Bambu Lab:
 - Find the LAN Access Code
 - Enter those values into the Bridge dashboard
 
-For Creality and Prusa:
+For Klipper (Moonraker):
 
-- Find and enter the printer's IP address
-- (Prusa Only) Find and enter the Prusa API key
+- Use your Moonraker URL (typically `http://printer-ip:7125`)
+- Add an API key only if Moonraker authentication is enabled
 
 ## Notes about controls
 
-- Pause, resume, and stop are wired into the Bridge for supported Bambu printers. Coming soon to Prusa and Creality printers
+- Pause, resume, stop, and camera preview are available for configured printers
+- Start print is available as an advanced action and currently expects a printer-accessible file path or URL
+- If a start command fails, the file path or printer firmware behavior is the first thing to check
+
+## Development
+
+The normal app uses a system tray.
+
+For environments that cannot compile tray dependencies, there is also a headless dev build mode:
+
+```bash
+go build -tags headless .
+```
+
+Headless builds start the local web server without the tray UI.
+
+## Build targets
+
+The project is configured to build only these release targets:
+
+- Windows x64
+- Windows Arm64
+- macOS Apple Silicon
+- macOS Intel
+- Linux x64

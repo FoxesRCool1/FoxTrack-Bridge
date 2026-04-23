@@ -323,8 +323,7 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	brand := printerBrand(printerName)
-	if brand == "bambu" || brand == "" {
+	if printerIsBambu(printerName) {
 		if err := mqttpkg.SendCommandWithArgs(printerName, command, args); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -372,7 +371,7 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if found.Brand != "bambu" && found.Brand != "" {
+	if !isBambuPrinterConfig(*found) {
 		if err := lanCtrl.ProxyCamera(w, r, found.Name); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 		}
@@ -463,20 +462,29 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		IP    string `json:"ip"`
-		Brand string `json:"brand"`
+		IP           string `json:"ip"`
+		MoonrakerURL string `json:"moonraker_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	port := "8883"
-	if req.Brand == "creality" || req.Brand == "prusa" {
-		port = "80"
+	address := ""
+	if strings.TrimSpace(req.MoonrakerURL) != "" {
+		u, err := url.Parse(req.MoonrakerURL)
+		if err != nil || u.Host == "" {
+			http.Error(w, "invalid moonraker_url", http.StatusBadRequest)
+			return
+		}
+		address = u.Host
+		if !strings.Contains(address, ":") {
+			address = net.JoinHostPort(address, "7125")
+		}
+	} else {
+		address = net.JoinHostPort(req.IP, "8883")
 	}
 
-	address := net.JoinHostPort(req.IP, port)
 	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
 	reachable := err == nil
 	if conn != nil {
@@ -537,11 +545,11 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		if err := config.SaveConfig(cfg); err != nil {
 			log.Printf("Warning: failed to save config: %v", err)
 		}
-		if p.Brand == "bambu" || p.Brand == "" {
+		if isBambuPrinterConfig(p) {
 			mqttpkg.ConnectPrinter(mqttPrinter(p, cfg))
 		} else {
 			lanCtrl.AddOrUpdatePrinter(p, cfg.WebhookURL, cfg.APIKey)
-			log.Printf("[%s] connected via LAN controller (%s)", p.Name, p.Brand)
+			log.Printf("[%s] connected via Moonraker", p.Name)
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
@@ -652,20 +660,33 @@ func syncPrintersToSupabase(cfg *config.Config) {
 
 func syncPrinterConnections(cfg *config.Config) {
 	for _, p := range cfg.Printers {
-		if p.Brand == "bambu" || p.Brand == "" {
+		if isBambuPrinterConfig(p) {
 			mqttpkg.ConnectPrinter(mqttPrinter(p, cfg))
 		}
 	}
 	lanCtrl.SyncPrinters(cfg.Printers, cfg.WebhookURL, cfg.APIKey)
 }
 
-func printerBrand(name string) string {
+func printerIsBambu(name string) bool {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
 	for _, p := range configStore.Printers {
 		if p.Name == name {
-			return p.Brand
+			return isBambuPrinterConfig(p)
 		}
 	}
-	return ""
+	return false
+}
+
+func isBambuPrinterConfig(p config.Printer) bool {
+	if strings.TrimSpace(p.Serial) == "" {
+		return false
+	}
+	if strings.TrimSpace(p.LANCode) == "" {
+		return false
+	}
+	if strings.TrimSpace(p.MoonrakerURL) != "" {
+		return false
+	}
+	return true
 }

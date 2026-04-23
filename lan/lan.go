@@ -35,7 +35,7 @@ func NewController() *Controller {
 func (c *Controller) SyncPrinters(printers []configpkg.Printer, webhookURL, foxAPIKey string) {
 	keep := make(map[string]bool)
 	for _, p := range printers {
-		if p.Brand == "bambu" || p.Brand == "" {
+		if isBambuPrinter(p) || strings.TrimSpace(p.MoonrakerURL) == "" {
 			continue
 		}
 		keep[p.Name] = true
@@ -58,7 +58,7 @@ func (c *Controller) AddOrUpdatePrinter(p configpkg.Printer, webhookURL, foxAPIK
 	if p.Name == "" {
 		return
 	}
-	if p.Brand == "bambu" || p.Brand == "" {
+	if isBambuPrinter(p) || strings.TrimSpace(p.MoonrakerURL) == "" {
 		return
 	}
 
@@ -106,14 +106,7 @@ func (c *Controller) SendCommand(name, command string, args map[string]interface
 		return fmt.Errorf("printer %q not found", name)
 	}
 
-	switch p.Brand {
-	case "creality":
-		return c.sendCrealityCommand(p, state, command, args)
-	case "prusa":
-		return c.sendPrusaCommand(p, command)
-	default:
-		return fmt.Errorf("brand %q not supported", p.Brand)
-	}
+	return c.sendKlipperCommand(p, state, command, args)
 }
 
 func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name string) error {
@@ -131,9 +124,7 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name st
 		if err != nil {
 			continue
 		}
-		if p.Brand == "prusa" && p.APIKey != "" {
-			req.Header.Set("X-Api-Key", p.APIKey)
-		}
+		applyMoonrakerAuth(req, p)
 		resp, err := client.Do(req)
 		if err != nil {
 			continue
@@ -160,7 +151,7 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name st
 }
 
 func (c *Controller) pollLoop(p configpkg.Printer, webhookURL, foxAPIKey string, stop <-chan struct{}) {
-	ticker := time.NewTicker(4 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -170,18 +161,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, webhookURL, foxAPIKey string,
 		default:
 		}
 
-		var (
-			t   mqttpkg.TelemetryData
-			err error
-		)
-		switch p.Brand {
-		case "creality":
-			t, err = fetchCrealityTelemetry(p)
-		case "prusa":
-			t, err = fetchPrusaTelemetry(p)
-		default:
-			err = fmt.Errorf("unsupported brand %q", p.Brand)
-		}
+		t, relayPayload, err := fetchKlipperTelemetry(p)
 		if err != nil {
 			t = mqttpkg.TelemetryData{Status: "disconnected", Error: err.Error()}
 		}
@@ -190,27 +170,11 @@ func (c *Controller) pollLoop(p configpkg.Printer, webhookURL, foxAPIKey string,
 		t.Timestamp = time.Now().Unix()
 
 		c.mu.Lock()
-		prev := c.states[p.Name]
 		c.states[p.Name] = &t
 		c.mu.Unlock()
 
-		if webhookURL != "" && foxAPIKey != "" && shouldSendWebhook(prev, &t) {
-			payload := webhook.Payload{
-				PrinterName:   p.Name,
-				Serial:        p.Serial,
-				Status:        t.Status,
-				FileName:      t.FileName,
-				Progress:      t.Progress,
-				ErrorCode:     t.Error,
-				Timestamp:     t.Timestamp,
-				NozzleTemp:    t.NozzleTemp,
-				NozzleTarget:  t.NozzleTarget,
-				BedTemp:       t.BedTemp,
-				BedTarget:     t.BedTarget,
-				LightOn:       t.LightOn,
-				TimeRemaining: t.TimeRemaining,
-			}
-			if err := webhook.Send(foxAPIKey, webhookURL, payload); err != nil {
+		if webhookURL != "" && foxAPIKey != "" && err == nil {
+			if err := webhook.SendRelay(foxAPIKey, webhookURL, p.MoonrakerURL, p.Name, relayPayload); err != nil {
 				log.Printf("[%s] webhook error: %v", p.Name, err)
 			}
 		}
@@ -260,24 +224,28 @@ func sendJSONRequest(client *http.Client, method, u string, headers map[string]s
 	return out, nil
 }
 
-func fetchCrealityTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, error) {
+func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.RelayPayload, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	u := fmt.Sprintf("http://%s/printer/objects/query?print_stats&extruder&heater_bed&virtual_sdcard", p.IP)
-	m, err := sendJSONRequest(client, "GET", u, nil, nil)
+	u := moonrakerURL(p, "/printer/objects/query?print_stats&heater_bed&extruder&display_status&virtual_sdcard")
+	m, err := sendJSONRequest(client, "GET", u, moonrakerAuthHeaders(p), nil)
 	if err != nil {
-		return mqttpkg.TelemetryData{}, err
+		return mqttpkg.TelemetryData{}, webhook.RelayPayload{}, err
 	}
 
 	status := nestedMap(m, "result", "status")
 	printStats := nestedMapAny(status, "print_stats")
 	extruder := nestedMapAny(status, "extruder")
 	bed := nestedMapAny(status, "heater_bed")
+	displayStatus := nestedMapAny(status, "display_status")
 	virtualSD := nestedMapAny(status, "virtual_sdcard")
 
 	stateRaw := lowerString(stringAny(anyFromMap(printStats, "state")))
-	state := mapCrealityState(stateRaw)
+	state := mapKlipperState(stateRaw)
 	fileName := stringAny(anyFromMap(printStats, "filename"))
-	progressF := floatAny(anyFromMap(virtualSD, "progress"))
+	progressF := floatAny(anyFromMap(displayStatus, "progress"))
+	if progressF == 0 {
+		progressF = floatAny(anyFromMap(virtualSD, "progress"))
+	}
 	progress := int(progressF * 100)
 	if progress > 100 {
 		progress = 100
@@ -295,6 +263,18 @@ func fetchCrealityTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, error) 
 		}
 	}
 
+	relay := webhook.RelayPayload{
+		Print: webhook.RelayPrint{
+			GcodeState:         mapMoonrakerRelayState(stateRaw),
+			SubTaskName:        fileName,
+			McPercent:          progress,
+			NozzleTemper:       floatAny(anyFromMap(extruder, "temperature")),
+			NozzleTargetTemper: floatAny(anyFromMap(extruder, "target")),
+			BedTemper:          floatAny(anyFromMap(bed, "temperature")),
+			BedTargetTemper:    floatAny(anyFromMap(bed, "target")),
+		},
+	}
+
 	return mqttpkg.TelemetryData{
 		Status:        state,
 		FileName:      fileName,
@@ -304,10 +284,10 @@ func fetchCrealityTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, error) 
 		BedTemp:       floatAny(anyFromMap(bed, "temperature")),
 		BedTarget:     floatAny(anyFromMap(bed, "target")),
 		TimeRemaining: remaining,
-	}, nil
+	}, relay, nil
 }
 
-func mapCrealityState(state string) string {
+func mapKlipperState(state string) string {
 	switch state {
 	case "printing":
 		return "printing"
@@ -327,96 +307,39 @@ func mapCrealityState(state string) string {
 	}
 }
 
-func fetchPrusaTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, error) {
-	client := &http.Client{Timeout: 6 * time.Second}
-	headers := map[string]string{}
-	if p.APIKey != "" {
-		headers["X-Api-Key"] = p.APIKey
-	}
-
-	statusURL := fmt.Sprintf("http://%s/api/v1/status", p.IP)
-	statusResp, err := sendJSONRequest(client, "GET", statusURL, headers, nil)
-	if err != nil {
-		return mqttpkg.TelemetryData{}, err
-	}
-
-	state := strings.ToLower(stringAny(nestedAny(statusResp, "printer", "state")))
-	if state == "" {
-		state = strings.ToLower(stringAny(nestedAny(statusResp, "job", "state")))
-	}
-	state = mapPrusaState(state)
-
-	job := nestedMap(statusResp, "job")
-	fileName := stringAny(nestedAnyAny(job, "file", "display_name"))
-	if fileName == "" {
-		fileName = stringAny(nestedAnyAny(job, "file", "name"))
-	}
-
-	progressRaw := floatAny(anyFromMap(job, "progress"))
-	progress := int(progressRaw)
-	if progressRaw > 0 && progressRaw <= 1 {
-		progress = int(progressRaw * 100)
-	}
-	if progress > 100 {
-		progress = 100
-	}
-
-	nozzle := floatAny(nestedAny(statusResp, "telemetry", "temp-nozzle"))
-	if nozzle == 0 {
-		nozzle = floatAny(nestedAny(statusResp, "printer", "temp_nozzle"))
-	}
-	bed := floatAny(nestedAny(statusResp, "telemetry", "temp-bed"))
-	if bed == 0 {
-		bed = floatAny(nestedAny(statusResp, "printer", "temp_bed"))
-	}
-
-	remaining := int(floatAny(anyFromMap(job, "time_remaining")) / 60)
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	return mqttpkg.TelemetryData{
-		Status:        state,
-		FileName:      fileName,
-		Progress:      progress,
-		NozzleTemp:    nozzle,
-		BedTemp:       bed,
-		TimeRemaining: remaining,
-	}, nil
-}
-
-func mapPrusaState(state string) string {
+func mapMoonrakerRelayState(state string) string {
 	switch state {
 	case "printing":
-		return "printing"
+		return "RUNNING"
 	case "paused":
-		return "paused"
-	case "finished", "complete":
-		return "finished"
-	case "error", "stopped":
-		return "error"
-	case "idle", "ready", "operational":
-		return "idle"
+		return "PAUSE"
+	case "complete", "completed":
+		return "FINISH"
+	case "error":
+		return "FAILED"
+	case "standby", "ready":
+		return "IDLE"
 	default:
 		if state == "" {
-			return "connected"
+			return "IDLE"
 		}
-		return state
+		return strings.ToUpper(state)
 	}
 }
 
-func (c *Controller) sendCrealityCommand(p configpkg.Printer, state *mqttpkg.TelemetryData, command string, args map[string]interface{}) error {
+func (c *Controller) sendKlipperCommand(p configpkg.Printer, state *mqttpkg.TelemetryData, command string, args map[string]interface{}) error {
 	client := &http.Client{Timeout: 6 * time.Second}
+	headers := moonrakerAuthHeaders(p)
 
 	switch command {
 	case "pause":
-		_, err := sendJSONRequest(client, "POST", fmt.Sprintf("http://%s/printer/print/pause", p.IP), nil, nil)
+		_, err := sendJSONRequest(client, "POST", moonrakerURL(p, "/printer/print/pause"), headers, nil)
 		return err
 	case "resume":
-		_, err := sendJSONRequest(client, "POST", fmt.Sprintf("http://%s/printer/print/resume", p.IP), nil, nil)
+		_, err := sendJSONRequest(client, "POST", moonrakerURL(p, "/printer/print/resume"), headers, nil)
 		return err
 	case "stop":
-		_, err := sendJSONRequest(client, "POST", fmt.Sprintf("http://%s/printer/print/cancel", p.IP), nil, nil)
+		_, err := sendJSONRequest(client, "POST", moonrakerURL(p, "/printer/print/cancel"), headers, nil)
 		return err
 	case "start":
 		filename := getArgString(args, "file_name")
@@ -426,8 +349,8 @@ func (c *Controller) sendCrealityCommand(p configpkg.Printer, state *mqttpkg.Tel
 		if filename == "" {
 			return fmt.Errorf("start requires file_name")
 		}
-		body := strings.NewReader(fmt.Sprintf(`{"filename":%q}`, filename))
-		_, err := sendJSONRequest(client, "POST", fmt.Sprintf("http://%s/printer/print/start", p.IP), map[string]string{"Content-Type": "application/json"}, body)
+		startURL := moonrakerURL(p, "/printer/print/start?filename="+url.QueryEscape(filename))
+		_, err := sendJSONRequest(client, "POST", startURL, headers, nil)
 		return err
 	case "light", "toggle_light", "light_on", "light_off":
 		desiredOn := false
@@ -448,7 +371,7 @@ func (c *Controller) sendCrealityCommand(p configpkg.Printer, state *mqttpkg.Tel
 		if !hasDesired {
 			desiredOn = !(state != nil && state.LightOn)
 		}
-		device, err := c.findCrealityLightDevice(client, p)
+		device, err := c.findKlipperLightDevice(client, p)
 		if err != nil {
 			return err
 		}
@@ -456,15 +379,15 @@ func (c *Controller) sendCrealityCommand(p configpkg.Printer, state *mqttpkg.Tel
 		if desiredOn {
 			action = "on"
 		}
-		return setCrealityLight(client, p, device, action)
+		return setKlipperLight(client, p, device, action)
 	default:
-		return fmt.Errorf("unsupported command for creality: %s", command)
+		return fmt.Errorf("unsupported command for klipper: %s", command)
 	}
 }
 
-func (c *Controller) findCrealityLightDevice(client *http.Client, p configpkg.Printer) (string, error) {
-	u := fmt.Sprintf("http://%s/machine/device_power/devices", p.IP)
-	m, err := sendJSONRequest(client, "GET", u, nil, nil)
+func (c *Controller) findKlipperLightDevice(client *http.Client, p configpkg.Printer) (string, error) {
+	u := moonrakerURL(p, "/machine/device_power/devices")
+	m, err := sendJSONRequest(client, "GET", u, moonrakerAuthHeaders(p), nil)
 	if err != nil {
 		return "", err
 	}
@@ -507,13 +430,14 @@ func (c *Controller) findCrealityLightDevice(client *http.Client, p configpkg.Pr
 	return fallback, nil
 }
 
-func setCrealityLight(client *http.Client, p configpkg.Printer, device, action string) error {
+func setKlipperLight(client *http.Client, p configpkg.Printer, device, action string) error {
+	headers := moonrakerAuthHeaders(p)
 	queries := []string{
-		fmt.Sprintf("http://%s/machine/device_power/device?device=%s&action=%s", p.IP, url.QueryEscape(device), url.QueryEscape(action)),
-		fmt.Sprintf("http://%s/machine/device_power/set?device=%s&action=%s", p.IP, url.QueryEscape(device), url.QueryEscape(action)),
+		moonrakerURL(p, "/machine/device_power/device?device="+url.QueryEscape(device)+"&action="+url.QueryEscape(action)),
+		moonrakerURL(p, "/machine/device_power/set?device="+url.QueryEscape(device)+"&action="+url.QueryEscape(action)),
 	}
 	for _, q := range queries {
-		_, err := sendJSONRequest(client, "POST", q, nil, nil)
+		_, err := sendJSONRequest(client, "POST", q, headers, nil)
 		if err == nil {
 			return nil
 		}
@@ -521,46 +445,27 @@ func setCrealityLight(client *http.Client, p configpkg.Printer, device, action s
 	return fmt.Errorf("failed to toggle light device %q", device)
 }
 
-func (c *Controller) sendPrusaCommand(p configpkg.Printer, command string) error {
-	client := &http.Client{Timeout: 6 * time.Second}
-	headers := map[string]string{"Content-Type": "application/json"}
-	if p.APIKey != "" {
-		headers["X-Api-Key"] = p.APIKey
-	}
-
-	endpoint := ""
-	switch command {
-	case "pause":
-		endpoint = "/api/v1/job/pause"
-	case "resume":
-		endpoint = "/api/v1/job/resume"
-	case "stop":
-		endpoint = "/api/v1/job/cancel"
-	case "light", "toggle_light", "light_on", "light_off":
-		return fmt.Errorf("Prusa light control is not exposed by default PrusaLink API")
-	case "start":
-		return fmt.Errorf("Prusa remote start requires file selection in PrusaLink and is not implemented yet")
-	default:
-		return fmt.Errorf("unsupported command for prusa: %s", command)
-	}
-
-	u := fmt.Sprintf("http://%s%s", p.IP, endpoint)
-	_, err := sendJSONRequest(client, "POST", u, headers, strings.NewReader("{}"))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func cameraCandidates(p configpkg.Printer) []string {
-	if p.Brand == "bambu" {
+	if isBambuPrinter(p) {
 		return []string{fmt.Sprintf("https://%s:6000/mjpeg/1", p.IP)}
 	}
-	return []string{
-		fmt.Sprintf("http://%s/webcam/?action=stream", p.IP),
-		fmt.Sprintf("http://%s/webcam/?action=snapshot", p.IP),
-		fmt.Sprintf("http://%s/snapshot", p.IP),
+
+	base := strings.TrimRight(p.MoonrakerURL, "/")
+	out := []string{
+		base + "/webcam/?action=stream",
+		base + "/webcam/?action=snapshot",
+		base + "/snapshot",
 	}
+	if u, err := url.Parse(base); err == nil && u.Scheme != "" && u.Host != "" {
+		hostBase := u.Scheme + "://" + u.Host
+		out = append(out,
+			hostBase+"/webcam/?action=stream",
+			hostBase+"/webcam/?action=snapshot",
+			hostBase+"/snapshot",
+		)
+	}
+
+	return out
 }
 
 func insecureTransport() *http.Transport {
@@ -582,6 +487,44 @@ func getArgString(args map[string]interface{}, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+func moonrakerURL(p configpkg.Printer, path string) string {
+	base := strings.TrimSpace(strings.TrimRight(p.MoonrakerURL, "/"))
+	if base == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "/") {
+		return base + path
+	}
+	return base + "/" + path
+}
+
+func moonrakerAuthHeaders(p configpkg.Printer) map[string]string {
+	headers := map[string]string{}
+	if strings.TrimSpace(p.APIKey) != "" {
+		headers["X-Api-Key"] = p.APIKey
+	}
+	return headers
+}
+
+func applyMoonrakerAuth(req *http.Request, p configpkg.Printer) {
+	for k, v := range moonrakerAuthHeaders(p) {
+		req.Header.Set(k, v)
+	}
+}
+
+func isBambuPrinter(p configpkg.Printer) bool {
+	if strings.TrimSpace(p.Serial) == "" {
+		return false
+	}
+	if strings.TrimSpace(p.LANCode) == "" {
+		return false
+	}
+	if strings.TrimSpace(p.MoonrakerURL) != "" {
+		return false
+	}
+	return true
 }
 
 func nestedMap(m map[string]interface{}, keys ...string) map[string]interface{} {
@@ -613,30 +556,6 @@ func nestedMapAny(m map[string]interface{}, key string) map[string]interface{} {
 		return map[string]interface{}{}
 	}
 	return next
-}
-
-func nestedAny(m map[string]interface{}, keys ...string) interface{} {
-	var cur interface{} = m
-	for _, k := range keys {
-		mm, ok := cur.(map[string]interface{})
-		if !ok {
-			return nil
-		}
-		cur = mm[k]
-	}
-	return cur
-}
-
-func nestedAnyAny(m map[string]interface{}, k1, k2 string) interface{} {
-	v, ok := m[k1]
-	if !ok {
-		return nil
-	}
-	mm, ok := v.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	return mm[k2]
 }
 
 func anyFromMap(m map[string]interface{}, key string) interface{} {
