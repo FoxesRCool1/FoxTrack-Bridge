@@ -327,6 +327,11 @@ function onBrandChange() {
         klipperKeyEl.classList.add('hidden');
         klipperKeyEl.style.display = 'none';
     }
+
+    const pNameInput = document.getElementById('pName');
+    if (pNameInput) {
+        pNameInput.placeholder = cfg.fields.moonrakerUrl ? 'e.g. Creality K1' : 'e.g. Studio P1S';
+    }
 }
 
 async function loadConfig() {
@@ -687,6 +692,7 @@ async function installUpdate() {
         await apiFetch('/api/update/install', { method: 'POST' });
         const restartBtn = document.getElementById('restartNowBtn');
         if (restartBtn) restartBtn.classList.remove('hidden');
+        if (btn) btn.classList.add('hidden');
         setUpdateProgress('Update staged. Restart when you are ready to apply it.');
         toast('Update staged. Click Restart Now when ready.', 'info');
     } catch (e) {
