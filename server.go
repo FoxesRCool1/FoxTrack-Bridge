@@ -492,11 +492,12 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 // protocol on port 6000.
 //
 // Auth: 80-byte binary struct (NOT JSON):
-//   [0:4]  = 0x40 (LE u32) — magic
-//   [4:8]  = 0x3000 (LE u32) — command
-//   [8:16] = 8 zero bytes — padding
-//   [16:48] = "bblp" NUL-padded to 32 bytes — username
-//   [48:80] = access_code NUL-padded to 32 bytes — password
+//
+//	[0:4]  = 0x40 (LE u32) — magic
+//	[4:8]  = 0x3000 (LE u32) — command
+//	[8:16] = 8 zero bytes — padding
+//	[16:48] = "bblp" NUL-padded to 32 bytes — username
+//	[48:80] = access_code NUL-padded to 32 bytes — password
 //
 // Each frame: 16-byte header where bytes [0:4] are the LE u32 JPEG payload size,
 // followed by that many bytes of JPEG data.
@@ -519,8 +520,8 @@ func bambuCameraStream(w http.ResponseWriter, ip, lanCode, printerName string) {
 	binary.LittleEndian.PutUint32(auth[0:4], 0x40)   // magic
 	binary.LittleEndian.PutUint32(auth[4:8], 0x3000) // command
 	// bytes [8:16] remain zero — padding
-	copy(auth[16:48], []byte("bblp"))     // username field, NUL-padded to 32 bytes
-	copy(auth[48:80], []byte(lanCode))    // password field, NUL-padded to 32 bytes
+	copy(auth[16:48], []byte("bblp"))  // username field, NUL-padded to 32 bytes
+	copy(auth[48:80], []byte(lanCode)) // password field, NUL-padded to 32 bytes
 
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := conn.Write(auth); err != nil {
@@ -633,6 +634,7 @@ type redactedPrinter struct {
 	APIKey       string `json:"api_key"`
 	APIKeySet    bool   `json:"api_key_set"`
 	WebcamURL    string `json:"webcam_url,omitempty"`
+	CameraHidden bool   `json:"camera_hidden"`
 }
 
 // redactedConfig mirrors config.Config with the FoxTrack cloud tokens blanked
@@ -656,6 +658,7 @@ func redactPrinter(p config.Printer) redactedPrinter {
 		MoonrakerURL: p.MoonrakerURL,
 		APIKeySet:    p.APIKey != "",
 		WebcamURL:    p.WebcamURL,
+		CameraHidden: p.CameraHidden,
 	}
 }
 
@@ -809,6 +812,7 @@ var errRefuseClearPrinters = errors.New("This save would remove all of your save
 //   - if the body carries "printers": [] while printers currently exist, the
 //     update is refused unless it also carries "confirm_clear_printers": true;
 //   - otherwise the printer list is replaced as given.
+//
 // Blank top-level/per-printer secrets are re-filled from old. old is not mutated.
 func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error) {
 	var raw map[string]json.RawMessage
@@ -948,6 +952,60 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method == "OPTIONS" {
+		return
+	}
+	if r.Method == "PATCH" {
+		type patchBody struct {
+			CameraHidden *bool `json:"camera_hidden"`
+		}
+		var pb patchBody
+		if err := json.NewDecoder(r.Body).Decode(&pb); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if pb.CameraHidden == nil {
+			http.Error(w, "camera_hidden is required", http.StatusBadRequest)
+			return
+		}
+		token := strings.TrimPrefix(r.URL.Path, "/api/printers/")
+		if token == "" {
+			http.Error(w, "missing printer id or name", http.StatusBadRequest)
+			return
+		}
+		configMutex.Lock()
+		matchByID := false
+		for _, p := range configStore.Printers {
+			if p.ID != "" && p.ID == token {
+				matchByID = true
+				break
+			}
+		}
+		var matched *config.Printer
+		for i := range configStore.Printers {
+			matches := configStore.Printers[i].Name == token
+			if matchByID {
+				matches = configStore.Printers[i].ID == token
+			}
+			if matches {
+				matched = &configStore.Printers[i]
+				break
+			}
+		}
+		if matched == nil {
+			configMutex.Unlock()
+			http.Error(w, "printer not found", http.StatusNotFound)
+			return
+		}
+		matched.CameraHidden = *pb.CameraHidden
+		snapshot := *matched
+		cfg := configStore
+		configMutex.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if err := config.SaveConfig(cfg); err != nil {
+			http.Error(w, "failed to save config", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(redactPrinter(snapshot))
 		return
 	}
 	if r.Method != "DELETE" {
@@ -1095,7 +1153,6 @@ func handleHistoryByPrinter(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"records": records})
 }
-
 
 func isBambuPrinterConfig(p config.Printer) bool {
 	if strings.TrimSpace(p.Serial) == "" {
