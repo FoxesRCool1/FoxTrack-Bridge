@@ -31,6 +31,9 @@ type Printer struct {
 	// so history lookups can still find prints made under an old name. Always
 	// empty until the edit-printer feature starts appending to it on rename.
 	PreviousNames []string `json:"previous_names,omitempty"`
+	// CameraHidden hides this printer's camera on the dashboard only. It does not
+	// affect snapshot sends. Zero value is false, so existing configs stay visible.
+	CameraHidden  bool     `json:"camera_hidden,omitempty"`
 }
 
 // NewPrinterID returns a fresh, server-generated printer ID: 16 random bytes,
