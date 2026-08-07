@@ -853,7 +853,7 @@ function renderPrinters() {
     // Drop cards for printers no longer configured.
     const currentIds = new Set(configuredPrinters.map(p => p.id));
     for (const [id, entry] of printerCardEls) {
-        if (!currentIds.has(id)) { entry.el.remove(); printerCardEls.delete(id); }
+        if (!currentIds.has(id)) { teardownCamera(entry); entry.el.remove(); printerCardEls.delete(id); }
     }
     // Clear a leftover empty-state placeholder (or any stale markup) before the
     // create/patch loop below — it isn't tracked in printerCardEls.
@@ -945,7 +945,20 @@ function createPrinterCard(printer) {
     return { el, hooks: collectHooks(el) };
 }
 
+// Single owner rule: the live camera connection belongs to entry.hooks.camImg and
+// nowhere else. Any path that detaches, rebuilds, or removes a card must call this
+// first, because clearing src is the only way to close the backend stream. Relying
+// on the browser to abort on detach is implicit GC timing, not a guaranteed close.
+function teardownCamera(entry) {
+    if (!entry || !entry.hooks) return;
+    const camImg = entry.hooks.camImg;
+    if (!camImg) return;
+    camImg.onload = camImg.onerror = null;
+    camImg.src = '';
+}
+
 function refreshCardContent(entry, printer) {
+    teardownCamera(entry);
     applyCardShell(entry.el, printer);
     entry.hooks = collectHooks(entry.el); // old hooks are detached once innerHTML is reassigned
 }
@@ -1293,7 +1306,7 @@ function toggleCamera(enc) {
     } else {
         cameraLoading.delete(enc);
         camPanel.classList.add('hidden');
-        if (camImg) { camImg.onload = camImg.onerror = null; camImg.src = ''; }
+        teardownCamera(entry);
     }
 }
 
