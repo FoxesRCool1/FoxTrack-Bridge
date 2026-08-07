@@ -843,7 +843,7 @@ function renderPrinters() {
 
     if (configuredPrinters.length === 0) {
         printerCardEls.clear();
-        list.innerHTML = '<div class="col-span-2 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-center">'
+        list.innerHTML = '<div class="col-span-full rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-center">'
             + '<p class="text-zinc-400 text-sm">No printers connected.</p>'
             + '<button onclick="openAddPrinterModal()" class="mt-3 btn-primary inline-block">Add Printer</button>'
             + '</div>';
