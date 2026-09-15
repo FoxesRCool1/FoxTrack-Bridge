@@ -213,7 +213,7 @@
                     <select id="pBrand" onchange="onBrandChange()" class="field">
                         <option value="">Select type…</option>
                         <option value="bambu">Bambu Lab (LAN mode)</option>
-                        <option value="bambu_cloud">Bambu Lab (cloud)</option>
+                        <option value="bambu_cloud">Bambu Lab (cloud, experimental)</option>
                         <option value="klipper">Klipper / Moonraker</option>
                     </select>
                     <i class="fas fa-chevron-down"></i>
@@ -420,10 +420,10 @@
             </section>
             <section id="cloudCard" class="rounded-lg border border-border bg-panel p-5">
                 <div class="flex items-start justify-between gap-3 mb-1">
-                    <h2 class="font-heading text-xl font-medium leading-tight">Bambu Cloud <span class="font-sans text-xs text-text-2">optional</span></h2>
+                    <h2 class="font-heading text-xl font-medium leading-tight">Bambu Cloud <span class="font-sans align-middle inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Experimental</span></h2>
                     <span id="cloudMqtt" class="hidden text-xs text-text-2 flex items-center gap-1.5 mt-1 shrink-0"><span class="cloud-dot w-1.5 h-1.5 rounded-full bg-text-2"></span><span class="cloud-text">Off</span></span>
                 </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">Link your Bambu account to add printers that are not in LAN mode. Cloud printers report status and can toggle the light; every other control needs LAN mode. The Bridge keeps one connection for the whole account and backs off slowly after errors, so the account stays inside Bambu's limits.</p>
+                <p class="text-sm leading-relaxed text-text-2 mb-4">This feature is experimental. Link your Bambu account to add printers that are not in LAN mode. Cloud printers report status and can toggle the light; every other control needs LAN mode. The Bridge keeps one connection for the whole account and backs off slowly after errors, so the account stays inside Bambu's limits.</p>
                 <div id="cloudUnlinked">
                     <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_10rem] gap-3">
                         <div>
@@ -538,7 +538,7 @@ const brands = {
         fields: { ip: true, serial: true, lanCode: true, moonrakerUrl: false, klipperKey: false, webcamUrl: false }
     },
     bambu_cloud: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Uses the Bambu account linked in Settings. Cloud printers report status and can toggle the light; pause, stop, speed and fan need LAN mode. The camera works when the printer is on this network: its address is learned from the printer, or you can type it below.</div>',
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Experimental. Uses the Bambu account linked in Settings. Cloud printers report status and can toggle the light; pause, stop, speed and fan need LAN mode. The camera works when the printer is on this network: its address is learned from the printer, or you can type it below.</div>',
         fields: { ip: true, serial: false, lanCode: false, moonrakerUrl: false, klipperKey: false, webcamUrl: false, cloudDevices: true }
     },
     klipper: {
