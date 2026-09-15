@@ -57,7 +57,10 @@ func onCloudIP(serial, ip string) {
 			changed = true
 		}
 	}
-	cfg := configStore
+	var cfg *config.Config
+	if changed {
+		cfg = configStore.Clone()
+	}
 	configMutex.Unlock()
 	if !changed {
 		return
@@ -89,7 +92,7 @@ func storeCloudSession(sess *cloud.Session) {
 		IssuedAt:     sess.IssuedAt,
 		ExpiresAt:    sess.ExpiresAt,
 	}
-	cfg := configStore
+	cfg := configStore.Clone()
 	configMutex.Unlock()
 	if err := config.SaveConfig(cfg); err != nil {
 		log.Printf("Warning: failed to save config: %v", err)
@@ -107,7 +110,7 @@ func expireCloudToken() {
 		return
 	}
 	configStore.BambuCloud.ExpiresAt = time.Now().Unix()
-	cfg := configStore
+	cfg := configStore.Clone()
 	configMutex.Unlock()
 	if err := config.SaveConfig(cfg); err != nil {
 		log.Printf("Warning: failed to save config: %v", err)
@@ -294,7 +297,7 @@ func handleCloudUnlink(w http.ResponseWriter, r *http.Request) {
 	}
 	configMutex.Lock()
 	configStore.BambuCloud = nil
-	cfg := configStore
+	cfg := configStore.Clone()
 	configMutex.Unlock()
 	if err := config.SaveConfig(cfg); err != nil {
 		log.Printf("Warning: failed to save config: %v", err)

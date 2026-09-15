@@ -775,6 +775,35 @@ func rejectNewlyIntroducedDuplicateNames(oldPrinters, newPrinters []config.Print
 	return nil
 }
 
+// errBlankPrinterName marks a save rejected because it would add a printer with
+// no name. A nameless printer is not just cosmetic: control, camera, history and
+// the MQTT/Moonraker drivers are all keyed by name, so a blank one both fails
+// every lookup and blocks the next printer from using a blank-ish name.
+// Matched via errors.Is in handleConfig to pick the right HTTP status.
+var errBlankPrinterName = errors.New("every printer must have a name")
+
+// rejectNewlyBlankNames checks a full-replace printer list against the previous
+// one and rejects only a nameless entry that the payload itself introduces. A
+// blank name already on disk is grandfathered through for the same reason a
+// pre-existing duplicate is (see rejectNewlyIntroducedDuplicateNames): no
+// name check existed before, and a strict reject would leave such an install
+// permanently unable to save any change, including the rename that would fix it.
+func rejectNewlyBlankNames(oldPrinters, newPrinters []config.Printer) error {
+	countBlank := func(printers []config.Printer) int {
+		n := 0
+		for _, p := range printers {
+			if strings.TrimSpace(p.Name) == "" {
+				n++
+			}
+		}
+		return n
+	}
+	if countBlank(newPrinters) > countBlank(oldPrinters) {
+		return errBlankPrinterName
+	}
+	return nil
+}
+
 func redactConfig(cfg *config.Config) redactedConfig {
 	out := redactedConfig{
 		APIKeySet:          cfg.APIKey != "",
@@ -840,6 +869,12 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 		if p.APIKey == "" {
 			p.APIKey = prev.APIKey
 		}
+		// PreviousNames has no redacted-view counterpart, so a client echoing
+		// back the config it was given always omits it. Treat "absent" as "keep"
+		// rather than letting a round-trip drop the rename history.
+		if len(p.PreviousNames) == 0 && len(prev.PreviousNames) > 0 {
+			p.PreviousNames = append([]string(nil), prev.PreviousNames...)
+		}
 	}
 }
 
@@ -875,6 +910,14 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 
 	_, printersPresent := raw["printers"]
 	newCfg := incoming
+	// Every top-level setting is partial: a body that omits a key leaves the
+	// stored value alone. Blank secrets are handled by applyStoredSecrets below;
+	// auto_update is a bool, so "absent" is the only way to say "leave it" — and
+	// without this, a Settings save made from a dashboard whose /api/config load
+	// failed would silently turn auto-update off.
+	if _, ok := raw["auto_update"]; !ok && old != nil {
+		newCfg.AutoUpdate = old.AutoUpdate
+	}
 	switch {
 	case !printersPresent:
 		// Partial update: never touch printers. Copy so old is never aliased.
@@ -891,6 +934,9 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 		assignMissingIDs(newCfg.Printers)
 		if old != nil {
 			if err := rejectNewlyIntroducedDuplicateNames(old.Printers, newCfg.Printers); err != nil {
+				return nil, err
+			}
+			if err := rejectNewlyBlankNames(old.Printers, newCfg.Printers); err != nil {
 				return nil, err
 			}
 		}
@@ -927,9 +973,10 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		configStore = newCfg
+		snapshot := newCfg.Clone()
 		configMutex.Unlock()
-		syncPrinterConnections(oldCfg, newCfg)
-		if err := config.SaveConfig(newCfg); err != nil {
+		syncPrinterConnections(oldCfg, snapshot)
+		if err := config.SaveConfig(snapshot); err != nil {
 			log.Printf("Warning: failed to save config: %v", err)
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -971,6 +1018,15 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 			p.Connection = "" // LAN is the zero value; never store an unknown mode
 		}
 
+		// Trim on create only — an existing printer's name is its lookup key and
+		// is never rewritten behind the user's back.
+		p.Name = strings.TrimSpace(p.Name)
+		if p.Name == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": errBlankPrinterName.Error()})
+			return
+		}
+
 		configMutex.Lock()
 		if hasDuplicateName(configStore.Printers, p) {
 			configMutex.Unlock()
@@ -982,7 +1038,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		// create, so "generated once on creation" is an actual guarantee.
 		p.ID = config.NewPrinterID()
 		configStore.Printers = append(configStore.Printers, p)
-		cfg := configStore
+		cfg := configStore.Clone()
 		configMutex.Unlock()
 
 		if err := config.SaveConfig(cfg); err != nil {
@@ -1058,7 +1114,7 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		}
 		matched.CameraHidden = *pb.CameraHidden
 		snapshot := *matched
-		cfg := configStore
+		cfg := configStore.Clone()
 		configMutex.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if err := config.SaveConfig(cfg); err != nil {
@@ -1099,10 +1155,20 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		}
 		printers = append(printers, p)
 	}
+	if len(removedNames) == 0 {
+		// Nothing matched: leave the stored list exactly as it was (the
+		// compaction above is a no-op in that case) and say so, rather than
+		// reporting a delete that never happened.
+		configMutex.Unlock()
+		http.Error(w, "printer not found", http.StatusNotFound)
+		return
+	}
 	configStore.Printers = printers
-	cfg := configStore
+	cfg := configStore.Clone()
 	configMutex.Unlock()
-	_ = config.SaveConfig(cfg)
+	if err := config.SaveConfig(cfg); err != nil {
+		log.Printf("Warning: failed to save config: %v", err)
+	}
 	// Stop whichever connection type each removed printer had. Both calls
 	// are no-ops for names they don't manage, so no need to know which type
 	// it was.
