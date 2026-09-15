@@ -25,6 +25,7 @@ import (
 	mqttpkg "foxtrack-bridge/mqtt"
 	"foxtrack-bridge/update"
 	"foxtrack-bridge/version"
+	"foxtrack-bridge/webhook"
 )
 
 var (
@@ -114,6 +115,7 @@ func StartServer(port int) {
 	http.HandleFunc("/api/printers", handlePrinters)
 	http.HandleFunc("/api/printers/", handlePrinterByName) // DELETE /api/printers/{name}
 	http.HandleFunc("/api/status", handleStatus)
+	http.HandleFunc("/api/relay-health", handleRelayHealth)
 	http.HandleFunc("/api/version", handleVersion)
 	http.HandleFunc("/api/update/check", handleUpdateCheck)
 	http.HandleFunc("/api/update/install", handleUpdateInstall)
@@ -242,6 +244,55 @@ func jsonHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 }
 
+// foxtrackWebOrigins are the browser origins allowed to call this bridge's
+// control and camera endpoints cross-origin.
+//
+// The FoxTrack web app tries the local bridge first for pause/resume/stop/light
+// and falls back to the cloud command queue when that call fails. With no CORS
+// headers the browser rejected every response, so the fast path always looked
+// like it had failed — *after* the bridge had already executed the command —
+// and the queued copy then ran it a second time a few seconds later.
+//
+// Deliberately an allow-list rather than "*": /api/control has no auth of its
+// own, so a wildcard would let any page the user happens to visit read their
+// printer state and drive their printers.
+var foxtrackWebOrigins = map[string]bool{
+	"https://foxtrack.studio":     true,
+	"https://www.foxtrack.studio": true,
+}
+
+// isFoxTrackWebOrigin also accepts a loopback dev server, so the web app can be
+// developed against a real bridge. That grants nothing new: any process already
+// on this machine can reach the bridge's unauthenticated API directly.
+func isFoxTrackWebOrigin(origin string) bool {
+	if foxtrackWebOrigins[origin] {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return u.Scheme == "http" && (host == "localhost" || host == "127.0.0.1" || host == "::1")
+}
+
+// allowWebOrigin echoes an allowed Origin back as CORS headers. Chrome's
+// Private Network Access check additionally requires the private-network header
+// before a public HTTPS page may reach a loopback or LAN address, so preflights
+// for these endpoints fail without it.
+func allowWebOrigin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Vary", "Origin")
+	origin := r.Header.Get("Origin")
+	if origin == "" || !isFoxTrackWebOrigin(origin) {
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Private-Network", "true")
+	w.Header().Set("Access-Control-Max-Age", "600")
+}
+
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(uiHTML)
@@ -318,6 +369,23 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[status] dropped live status for %d printer(s) with no matching config entry: %v", len(dropped), dropped)
 	}
 	json.NewEncoder(w).Encode(byID)
+}
+
+// handleRelayHealth reports a FoxTrack rejection the user has to act on: a
+// revoked or mistyped bridge token, or a workspace whose plan no longer covers
+// the Bridge. Those answers never change on a retry, so they used to be tried
+// three times and dropped — the dashboard looked healthy while nothing at all
+// reached FoxTrack. Returns {"problem": null} when the relay is fine.
+func handleRelayHealth(w http.ResponseWriter, r *http.Request) {
+	jsonHeaders(w)
+	if r.Method == "OPTIONS" {
+		return
+	}
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"problem": webhook.RelayHealth()})
 }
 
 func handleVersion(w http.ResponseWriter, r *http.Request) {
@@ -409,6 +477,7 @@ func handleUpdateRestart(w http.ResponseWriter, r *http.Request) {
 // Commands: pause, resume, stop, light_on, light_off
 func handleControl(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
+	allowWebOrigin(w, r)
 	if r.Method == "OPTIONS" {
 		return
 	}
@@ -462,6 +531,7 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 // URL: /api/camera/{printerName}
 // BambuLab streams MJPEG on port 6000 with basic auth (bblp:lancode).
 func handleCamera(w http.ResponseWriter, r *http.Request) {
+	allowWebOrigin(w, r)
 	if r.Method == "OPTIONS" {
 		return
 	}

@@ -347,6 +347,19 @@
             </div>
         </div>
     </div>
+    <!-- FoxTrack refused our telemetry and a retry will not help: bad token, or
+         a plan that no longer covers the Bridge. Persistent, not a toast --
+         the user has to go and fix something. -->
+    <div id="relayHealth" class="hidden px-5 pb-3">
+        <div class="rounded-lg border border-danger-50 bg-panel px-4 py-3 flex items-start gap-3">
+            <i class="fas fa-circle-exclamation text-danger mt-0.5 shrink-0"></i>
+            <div class="min-w-0">
+                <p class="text-sm font-medium leading-tight">FoxTrack is not accepting this bridge's data</p>
+                <p id="relayHealthMsg" class="mt-1 text-xs leading-relaxed text-text-2"></p>
+                <p id="relayHealthSince" class="mt-1 text-xs text-text-2"></p>
+            </div>
+        </div>
+    </div>
     <p id="cloudNotice" class="hidden px-5 pb-3 text-xs text-warning"></p>
 
     <!-- View: Printers -->
@@ -1721,6 +1734,35 @@ async function pollStatus() {
     } catch (_) { setBridgeStatus(false); renderPrinters(); }
 }
 
+// ── Relay health ──────────────────────────────────────────────────────────────
+
+// A bad token or an expired plan makes every send fail identically forever.
+// Without this the bridge looked perfectly healthy while FoxTrack received
+// nothing, so surface it and leave it on screen until it clears.
+async function pollRelayHealth() {
+    const wrap = document.getElementById('relayHealth');
+    if (!wrap) return;
+    try {
+        const data = await apiFetch('/api/relay-health');
+        const problem = data && data.problem;
+        if (!problem) { wrap.classList.add('hidden'); return; }
+        document.getElementById('relayHealthMsg').textContent = problem.message || '';
+        const since = document.getElementById('relayHealthSince');
+        if (problem.since) {
+            const t = new Date(problem.since);
+            since.textContent = 'Since ' + t.toLocaleString() +
+                (problem.printer ? ' \u00b7 first seen on ' + problem.printer : '');
+            since.classList.remove('hidden');
+        } else {
+            since.classList.add('hidden');
+        }
+        wrap.classList.remove('hidden');
+    } catch (_) {
+        // The bridge itself is unreachable; the header status dot already says so.
+        wrap.classList.add('hidden');
+    }
+}
+
 // ── Camera ────────────────────────────────────────────────────────────────────
 
 // Panels/buttons are never destroyed by a poll under keyed patch rendering, so a
@@ -2194,6 +2236,8 @@ async function restartForUpdate() {
     renderPrinters();
     await pollStatus();
     setInterval(pollStatus, 5000);
+    await pollRelayHealth();
+    setInterval(pollRelayHealth, 20000);
     await loadCloudStatus();
     setInterval(loadCloudStatus, 30000);
 

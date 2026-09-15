@@ -39,6 +39,8 @@ type Controller struct {
 	snapLastTMu    sync.Mutex
 	snapInFlight   map[string]bool
 	snapInFlightMu sync.Mutex
+	relayLastT     map[string]int64
+	relayLastTMu   sync.Mutex
 }
 
 func NewController() *Controller {
@@ -49,7 +51,32 @@ func NewController() *Controller {
 		sessions:     map[string]*printSession{},
 		snapLastT:    map[string]int64{},
 		snapInFlight: map[string]bool{},
+		relayLastT:   map[string]int64{},
 	}
+}
+
+// relayHeartbeatSec floors how often telemetry reaches FoxTrack, whether or not
+// anything changed. FoxTrack marks a printer offline after 90s of silence and
+// disables its controls, so the floor must sit comfortably under that.
+const relayHeartbeatSec = 60
+
+// shouldRelay reports whether this poll should push telemetry to FoxTrack, and
+// records the send when it says yes.
+//
+// A change-only gate is not enough: an idle Klipper printer settles at ambient
+// and then reports the same numbers for minutes at a time, so it used to fall
+// silent and show as offline on the website while the bridge was perfectly
+// healthy — taking its pause/stop buttons with it. mqtt.go already applies this
+// same one-a-minute heartbeat to Bambu printers.
+func (c *Controller) shouldRelay(name string, prev, curr *mqttpkg.TelemetryData, now int64) bool {
+	c.relayLastTMu.Lock()
+	defer c.relayLastTMu.Unlock()
+
+	if !mqttpkg.ShouldSendWebhook(prev, curr) && now-c.relayLastT[name] < relayHeartbeatSec {
+		return false
+	}
+	c.relayLastT[name] = now
+	return true
 }
 
 func (c *Controller) SyncPrinters(printers []configpkg.Printer, foxAPIKey, fox2APIKey string) {
@@ -277,7 +304,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 				c.sessionMu.Unlock()
 			}
 
-			if err == nil && mqttpkg.ShouldSendWebhook(prev, &t) {
+			if err == nil && c.shouldRelay(p.Name, prev, &t, time.Now().Unix()) {
 				if foxAPIKey != "" {
 					if err := webhook.SendRelay(foxAPIKey, webhook.URL, p.Name, p.Name, relayPayload); err != nil {
 						log.Printf("[%s] webhook error: %v", p.Name, err)

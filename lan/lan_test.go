@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	configpkg "foxtrack-bridge/config"
+	mqttpkg "foxtrack-bridge/mqtt"
 )
 
 func TestFetchKlipperTelemetry_MapsFieldsAndUsesHeader(t *testing.T) {
@@ -168,5 +169,60 @@ func TestMapMoonrakerRelayState(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("state %q: expected %q, got %q", tc.in, tc.want, got)
 		}
+	}
+}
+
+// FoxTrack marks a printer offline after 90s without a relay and disables its
+// controls. A change-only gate let an idle Klipper printer — which settles at
+// ambient and then reports identical numbers for minutes — fall silent and show
+// as offline while the bridge was perfectly healthy.
+func TestShouldRelay_HeartbeatsWhileNothingChanges(t *testing.T) {
+	c := NewController()
+	idle := &mqttpkg.TelemetryData{Status: "idle", NozzleTemp: 24, BedTemp: 24}
+
+	if !c.shouldRelay("Prusa", nil, idle, 1000) {
+		t.Fatal("the first reading must always be relayed")
+	}
+
+	// Same reading, one second later: nothing to say yet.
+	if c.shouldRelay("Prusa", idle, idle, 1001) {
+		t.Error("an unchanged reading must not relay immediately after one was sent")
+	}
+
+	// Still nothing changed, but the site is about to call this printer offline.
+	if !c.shouldRelay("Prusa", idle, idle, 1000+relayHeartbeatSec) {
+		t.Errorf("an unchanged reading must still relay after %ds so the printer stays online", relayHeartbeatSec)
+	}
+
+	// The heartbeat resets on every send rather than free-running.
+	if c.shouldRelay("Prusa", idle, idle, 1000+relayHeartbeatSec+1) {
+		t.Error("the heartbeat window must restart from the last send")
+	}
+}
+
+// The heartbeat must not swallow real changes: those still relay at once.
+func TestShouldRelay_ChangeRelaysImmediately(t *testing.T) {
+	c := NewController()
+	idle := &mqttpkg.TelemetryData{Status: "idle", NozzleTemp: 24, BedTemp: 24}
+	printing := &mqttpkg.TelemetryData{Status: "printing", NozzleTemp: 215, BedTemp: 60, FileName: "cube.gcode"}
+
+	if !c.shouldRelay("Prusa", nil, idle, 2000) {
+		t.Fatal("first reading")
+	}
+	if !c.shouldRelay("Prusa", idle, printing, 2001) {
+		t.Error("a status change must relay at once, not wait for the heartbeat")
+	}
+}
+
+// Each printer keeps its own heartbeat clock.
+func TestShouldRelay_IsPerPrinter(t *testing.T) {
+	c := NewController()
+	idle := &mqttpkg.TelemetryData{Status: "idle", NozzleTemp: 24}
+
+	if !c.shouldRelay("Prusa", nil, idle, 3000) {
+		t.Fatal("first reading for Prusa")
+	}
+	if !c.shouldRelay("Ender", nil, idle, 3000) {
+		t.Error("a second printer must not inherit the first printer's heartbeat clock")
 	}
 }
