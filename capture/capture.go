@@ -62,15 +62,20 @@ func BambuFrame(ip, lanCode, printerName string) ([]byte, error) {
 	}
 }
 
+// snapshotTransport is shared by every webcam fetch. A per-call transport owns a
+// connection pool nothing ever closes, so each snapshot left an idle socket open
+// for the life of the process. See lan.sharedInsecureTransport.
+var snapshotTransport = &http.Transport{
+	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+	MaxIdleConns:        100,
+	MaxIdleConnsPerHost: 4,
+	IdleConnTimeout:     90 * time.Second,
+}
+
 // KlipperFrame fetches a single JPEG snapshot from the given webcam URL.
 // Handles both plain JPEG responses and MJPEG multipart streams (returns the first frame).
 func KlipperFrame(webcamURL string) ([]byte, error) {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
+	client := &http.Client{Timeout: 10 * time.Second, Transport: snapshotTransport}
 	resp, err := client.Get(webcamURL)
 	if err != nil {
 		return nil, fmt.Errorf("GET: %w", err)

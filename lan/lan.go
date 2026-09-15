@@ -704,10 +704,23 @@ func cameraCandidates(p configpkg.Printer) []string {
 	return out
 }
 
+// sharedInsecureTransport is created once and reused by every Moonraker and
+// webcam request. An http.Transport owns a connection pool, so building a fresh
+// one per request meant every poll opened a new keep-alive connection that the
+// discarded transport never closed — with a 2-8s poll interval those idle
+// sockets accumulated for the life of the process until the bridge ran out of
+// file descriptors. One shared transport reuses connections and, unlike a bare
+// &http.Transport{}, retires idle ones on a timer. Transports are safe for
+// concurrent use by design.
+var sharedInsecureTransport = &http.Transport{
+	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+	MaxIdleConns:        100,
+	MaxIdleConnsPerHost: 4,
+	IdleConnTimeout:     90 * time.Second,
+}
+
 func insecureTransport() *http.Transport {
-	return &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
+	return sharedInsecureTransport
 }
 
 func getArgString(args map[string]interface{}, key string) string {
