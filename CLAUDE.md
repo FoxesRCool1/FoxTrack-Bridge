@@ -40,3 +40,22 @@ Before pushing any release tag:
 4. Verify `/tailwind.css`, `/icons.css`, `/fonts.css`, and
    `/fonts/inter-latin.woff2` return 200.
 5. Only then merge, tag, and push.
+
+<!-- local-delegation:start -->
+## Local model delegation
+
+**Reads.** Use `/ask-local` for exploration, inventory, triage, log and stack
+trace reading, and any "find every X" question. Do not read files yourself to
+explore. Read a file directly only when you need its exact contents to write
+something correct.
+
+**Writes.** Implementation work goes through `/delegate`. Never open the diff
+of a task the runner marked green.
+
+Delegate: types, pure logic, data access following an existing pattern,
+component scaffolding, test suites, repetitive edits across similar files.
+
+Never delegate: anything on the hard-boundary list in .llm/recipe.md, or any
+decision the user has not already made.
+
+<!-- local-delegation:end -->

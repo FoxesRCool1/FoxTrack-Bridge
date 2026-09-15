@@ -24,3 +24,6 @@ foxtrack-bridge-linux
 
 # Logs
 build.log
+.llm/
+*.prev
+.claude/settings.local.json
