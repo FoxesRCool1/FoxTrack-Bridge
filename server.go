@@ -257,8 +257,9 @@ func jsonHeaders(w http.ResponseWriter) {
 // own, so a wildcard would let any page the user happens to visit read their
 // printer state and drive their printers.
 var foxtrackWebOrigins = map[string]bool{
-	"https://foxtrack.studio":     true,
-	"https://www.foxtrack.studio": true,
+	"https://foxtrack.studio":           true,
+	"https://www.foxtrack.studio":       true,
+	"https://foxtrack-beta.lovable.app": true,
 }
 
 // isFoxTrackWebOrigin also accepts a loopback dev server, so the web app can be

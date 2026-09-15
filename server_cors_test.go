@@ -13,6 +13,22 @@ import (
 // second time. These tests pin the headers that make the fast path honest.
 
 func TestAllowWebOrigin_EchoesFoxTrackOrigin(t *testing.T) {
+	for _, origin := range []string{
+		"https://foxtrack.studio",
+		"https://www.foxtrack.studio",
+		"https://foxtrack-beta.lovable.app",
+	} {
+		req := httptest.NewRequest("POST", "/api/control/X1C/pause", nil)
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+
+		allowWebOrigin(rec, req)
+
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Errorf("origin %q: Allow-Origin = %q, want it echoed back", origin, got)
+		}
+	}
+
 	req := httptest.NewRequest("POST", "/api/control/X1C/pause", nil)
 	req.Header.Set("Origin", "https://foxtrack.studio")
 	rec := httptest.NewRecorder()
@@ -20,9 +36,6 @@ func TestAllowWebOrigin_EchoesFoxTrackOrigin(t *testing.T) {
 	allowWebOrigin(rec, req)
 
 	h := rec.Header()
-	if got := h.Get("Access-Control-Allow-Origin"); got != "https://foxtrack.studio" {
-		t.Errorf("Allow-Origin = %q, want the caller's origin echoed back", got)
-	}
 	// Chrome refuses a public HTTPS page reaching a loopback address without this.
 	if got := h.Get("Access-Control-Allow-Private-Network"); got != "true" {
 		t.Errorf("Allow-Private-Network = %q, want true", got)
@@ -40,6 +53,12 @@ func TestAllowWebOrigin_RefusesUnknownOrigin(t *testing.T) {
 		"https://foxtrack.studio.evil.example",
 		"http://foxtrack.studio",
 		"https://notfoxtrack.studio",
+		// lovable.app is a shared host, so the beta entry must stay an exact
+		// match: a *.lovable.app wildcard would hand every project on it our
+		// printers.
+		"https://other-project.lovable.app",
+		"https://foxtrack-beta.lovable.app.evil.example",
+		"http://foxtrack-beta.lovable.app",
 	} {
 		req := httptest.NewRequest("POST", "/api/control/X1C/pause", nil)
 		req.Header.Set("Origin", origin)
