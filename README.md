@@ -296,9 +296,35 @@ The `headless` tag runs the suite without the system tray dependency and include
 
 ---
 
+## Bambu Cloud (printers not in LAN mode)
+
+Bambu printers can also be added through your Bambu account instead of LAN mode. Open **Settings > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer with the type **Bambu Lab (cloud)** and pick it from the list.
+
+What cloud printers can do:
+
+- Status, temperatures, progress, AMS and the light toggle work.
+- Pause, stop, speed, fan and GCode do **not** work over the cloud. Bambu's 2025+ firmware rejects every command except the light from third-party clients, so those buttons are hidden. Use LAN mode for full control.
+- The camera works when the printer is on the same network as the Bridge. The account hands back the printer's LAN access code, and the printer reports its own LAN address, so nothing needs typing. You can also enter the IP when adding the printer.
+
+How the Bridge stays inside Bambu's limits (Bambu bans accounts for 24 hours to 7 days when it sees connection churn):
+
+- One MQTT connection for the whole account, no matter how many cloud printers.
+- Reconnects back off from 5 seconds to 5 minutes with jitter. After 10 failures, or 3 refused connections in a row, it pauses for 30 minutes and tells you why.
+- A rejected sign-in is final: the Bridge stops and asks you to link the account again. It never signs in on its own.
+- Sign-in is limited to once a minute, a Cloudflare block pauses sign-in for 5 minutes, and the device list is cached for a minute.
+- A full state request goes to a printer at most once a minute.
+
+Tokens last about 90 days and cannot be renewed. The dashboard warns a week before the token expires. If sign-in is blocked by Cloudflare, "Paste a token instead" accepts a token from a signed-in Bambu session.
+
+Config: the account is stored under `bambu_cloud` in `config.json` (the file is mode 0600) and each cloud printer carries `"connection": "cloud"`. Both are additive; existing configs and LAN printers are untouched. Design notes and sources: [docs/bambu-cloud.md](docs/bambu-cloud.md).
+
+---
+
 ## Regenerating dashboard assets
 
-The dashboard loads no external resources. Tailwind CSS, the Inter font, and the icons are committed under `web/` and embedded in the binary. Attribution is in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+The dashboard loads no external resources. Tailwind CSS, the fonts, and the icons are committed under `web/` and embedded in the binary. Attribution is in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+Design: the dashboard follows the FoxTrack web app's design system. Colours are tokens (`--bg`, `--panel`, `--surface`, `--border`, `--text`, `--text-2`, `--accent`, `--link`, `--danger`, `--warning`) defined in the `<style>` block of `web/ui.html` for two themes, Paper (light, the default) and Ink (dark). The theme button in the top bar switches them; the choice is stored in the browser under `foxtrack.theme`. Tailwind utilities such as `bg-panel`, `text-text-2`, `border-border` and `bg-brand` map onto the tokens through `web/tailwind.config.js`. Never put a Tailwind palette colour or a hex value in the markup; `go test -tags headless ./...` fails if one appears.
 
 Tailwind: after changing classes in `web/ui.html`, regenerate `web/tailwind.css` with the standalone CLI (no Node required):
 
@@ -310,9 +336,11 @@ chmod +x web/tailwindcss
 ./web/tailwindcss -c web/tailwind.config.js -i web/tailwind.input.css -o web/tailwind.css --minify
 ```
 
-Fonts: `web/fonts/inter-latin.woff2` is a latin subset of Inter (variable, weights 400 to 600), served through `web/fonts.css`. Replace the file to update it.
+Fonts: `web/fonts/inter-latin.woff2` is a latin subset of Inter (variable, weights 400 to 600) for every control and label, and `web/fonts/cormorant-garamond-latin-500.woff2` is the heading face used for titles and big numbers (`font-heading`). Both are served through `web/fonts.css`. Replace a file to update it.
 
-Icons: `web/icons.css` holds the Font Awesome Free 6.4.0 icons used by `web/ui.html`, encoded as inline SVG masks. To add an icon, add a `.fa-<name>` rule with the glyph's SVG path (see the file header). `go test -tags headless ./...` fails if `web/ui.html` uses an icon that `web/icons.css` does not define.
+Icons: `web/icons.css` holds the Lucide icons used by `web/ui.html`, encoded as inline SVG masks so they take the current text colour. Class names keep the historical `.fa-<name>` form. To add an icon, add a `.fa-<name>` rule with the Lucide SVG body (same format as the existing rules). `go test -tags headless ./...` fails if `web/ui.html` uses an icon that `web/icons.css` does not define.
+
+Logos: `assets/logo-light.png` and `assets/logo-dark.png` are the FoxTrack header marks, one per theme, served at `/logo-light.png` and `/logo-dark.png`. `assets/logo.png` stays as the app icon and notification image.
 
 The generated files are committed. No asset tooling runs during `go build` or the Docker build.
 

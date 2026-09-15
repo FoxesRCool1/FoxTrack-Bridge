@@ -16,6 +16,32 @@ type Config struct {
 	FoxTrack2APIKey string    `json:"foxtrack2_api_key,omitempty"`
 	Printers        []Printer `json:"printers"`
 	AutoUpdate      bool      `json:"auto_update,omitempty"`
+	// BambuCloud is the linked Bambu Lab account, if any. Optional and
+	// additive: a config without it keeps loading unchanged.
+	BambuCloud *BambuCloud `json:"bambu_cloud,omitempty"`
+}
+
+// BambuCloud holds one signed-in Bambu Lab account. AccessToken is a secret
+// and must never leave the server (see redactConfig in server.go). Times are
+// unix seconds. Bambu issues tokens for about 90 days and offers no refresh,
+// so ExpiresAt is when the user has to sign in again.
+type BambuCloud struct {
+	Region       string `json:"region,omitempty"` // "global" (default) or "cn"
+	Email        string `json:"email,omitempty"`
+	AccessToken  string `json:"access_token,omitempty"`
+	MQTTUsername string `json:"mqtt_username,omitempty"` // u_<uid>
+	IssuedAt     int64  `json:"token_issued_at,omitempty"`
+	ExpiresAt    int64  `json:"token_expires_at,omitempty"`
+}
+
+// Linked reports whether an account token is stored.
+func (b *BambuCloud) Linked() bool {
+	return b != nil && b.AccessToken != ""
+}
+
+// Expired reports whether the stored token is past its expiry.
+func (b *BambuCloud) Expired(now int64) bool {
+	return b != nil && b.ExpiresAt > 0 && now >= b.ExpiresAt
 }
 
 type Printer struct {
@@ -34,6 +60,18 @@ type Printer struct {
 	// CameraHidden hides this printer's camera on the dashboard only. It does not
 	// affect snapshot sends. Zero value is false, so existing configs stay visible.
 	CameraHidden  bool     `json:"camera_hidden,omitempty"`
+	// Connection selects how a Bambu printer is reached: "" or "lan" is the
+	// printer's own MQTT broker (LAN mode), "cloud" is Bambu Cloud. The zero
+	// value keeps every existing config on LAN. Klipper printers ignore it.
+	Connection string `json:"connection,omitempty"`
+}
+
+// ConnectionCloud marks a Bambu printer reached through Bambu Cloud.
+const ConnectionCloud = "cloud"
+
+// IsCloud reports whether the printer is reached through Bambu Cloud.
+func (p Printer) IsCloud() bool {
+	return p.Connection == ConnectionCloud
 }
 
 // NewPrinterID returns a fresh, server-generated printer ID: 16 random bytes,

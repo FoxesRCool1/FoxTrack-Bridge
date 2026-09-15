@@ -27,3 +27,18 @@
   font-display: swap;
   src: url('/fonts/inter-latin.woff2') format('woff2');
 }
+
+/*
+ * Cormorant Garamond 500 (latin subset) — https://github.com/CatharsisFonts/Cormorant
+ * Copyright 2015 The Cormorant Project Authors.
+ * Licensed under the SIL Open Font License 1.1 — see THIRD_PARTY_LICENSES.md
+ *
+ * The FoxTrack heading face: titles and big numbers only (font-heading).
+ */
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/cormorant-garamond-latin-500.woff2') format('woff2');
+}

@@ -119,3 +119,64 @@ func TestAllUsedIconsDefined(t *testing.T) {
 		}
 	}
 }
+
+func TestHeadingFontEmbedded(t *testing.T) {
+	data, err := fontsFS.ReadFile("web/fonts/cormorant-garamond-latin-500.woff2")
+	if err != nil {
+		t.Fatalf("embedded font web/fonts/cormorant-garamond-latin-500.woff2 missing: %v", err)
+	}
+	if !bytes.HasPrefix(data, []byte("wOF2")) {
+		t.Error("cormorant-garamond-latin-500.woff2 is not a woff2 file (bad magic)")
+	}
+	if !bytes.Contains(fontsCSS, []byte("/fonts/cormorant-garamond-latin-500.woff2")) {
+		t.Error("fonts.css does not reference the heading font")
+	}
+}
+
+func TestLogoVariantsEmbedded(t *testing.T) {
+	pngMagic := []byte("\x89PNG")
+	for name, body := range map[string][]byte{"logo-light.png": logoLightPNG, "logo-dark.png": logoDarkPNG} {
+		if !bytes.HasPrefix(body, pngMagic) {
+			t.Errorf("%s: not a PNG (bad magic) or empty", name)
+		}
+	}
+}
+
+func TestPNGHandlerServesPNG(t *testing.T) {
+	for _, body := range [][]byte{logoLightPNG, logoDarkPNG} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/logo-light.png", nil)
+		pngHandler(body)(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+			t.Errorf("Content-Type = %q, want image/png", ct)
+		}
+		if rec.Body.Len() == 0 {
+			t.Error("empty body")
+		}
+	}
+}
+
+func TestUIReferencesThemeLogos(t *testing.T) {
+	for _, want := range []string{`src="/logo-light.png"`, `src="/logo-dark.png"`, `data-theme="paper"`, `foxtrack.theme`} {
+		if !bytes.Contains(uiHTML, []byte(want)) {
+			t.Errorf("ui.html missing %q", want)
+		}
+	}
+}
+
+// The dashboard follows the FoxTrack design tokens (bg-panel, text-text-2,
+// border-border, bg-brand …). A Tailwind palette colour or a white/black
+// utility would not follow the theme, so none may creep back in.
+func TestUIUsesNoPaletteColors(t *testing.T) {
+	re := regexp.MustCompile(`\b(?:bg|text|border|ring|from|to|divide)-(?:zinc|gray|slate|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|white|black)(?:-\d+)?(?:/\d+)?\b`)
+	if m := re.FindAll(uiHTML, -1); len(m) > 0 {
+		seen := map[string]bool{}
+		for _, b := range m {
+			seen[string(b)] = true
+		}
+		t.Errorf("ui.html uses Tailwind palette colours instead of design tokens: %v", seen)
+	}
+}

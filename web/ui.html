@@ -1,182 +1,296 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="paper">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FoxTrack Bridge</title>
+    <!-- Apply the stored theme before first paint so there is no flash. The map
+         mirrors the FoxTrack web app: its legacy "light"/"dark" values (and its
+         other dark themes) fold onto the two themes the Bridge ships. -->
+    <script>(function(){try{var m={light:'paper',dark:'ink',system:'paper',paper:'paper',ink:'ink',forest:'ink',dusk:'ink'};var t=m[localStorage.getItem('foxtrack.theme')]||'paper';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/fonts.css">
     <link rel="stylesheet" href="/icons.css">
     <link rel="stylesheet" href="/tailwind.css">
     <style>
-        .pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-        input::placeholder { color: #3e4046; }
-        select option { background: #17171a; color: #e3e4e6; }
-        .toast { animation: slideIn 0.3s ease; }
-        @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
-        .instruction-box { transition: all 0.2s ease; }
-        #logPanel { transition: transform 0.3s cubic-bezier(0.4,0,0.2,1); }
-        #logOutput { scroll-behavior: smooth; }
-        .log-error { color: #f87171; }
-        .log-warn  { color: #fbbf24; }
-        .log-ok    { color: #34d399; }
-        .log-info  { color: #71717a; }
-        .nav-btn {
-            width: 2.5rem; height: 2.5rem; border-radius: 0.75rem;
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.15s; color: #3f3f46; font-size: 0.875rem;
-            border: 1px solid transparent;
+        /*
+         * FoxTrack design tokens — "a quiet room with one good lamp".
+         * Two themes, selected by [data-theme] on <html>: Paper (light, the
+         * default) and Ink (dark). Values are verbatim from the FoxTrack web
+         * app's src/styles.css; keep the two in step. Tailwind utilities such
+         * as bg-panel, text-text-2, border-border and bg-brand map onto these
+         * (see web/tailwind.config.js). Never a hex colour in the markup.
+         */
+        :root, [data-theme="paper"] {
+            color-scheme: light;
+            --bg: #f3ede0;
+            --panel: rgb(60 45 30 / 5%);
+            --panel-2: rgb(60 45 30 / 9%);
+            --surface: rgb(251 248 241);
+            --border: rgb(60 45 30 / 14%);
+            --text: #2b2118;
+            --text-2: rgb(43 33 24 / 70%);
+            --accent: #5c6a42;
+            --accent-2: #4a5436;
+            --link: #4a6d8c;
+            --danger: #a8503f;
+            --warning: #a8783f;
+            --radius: 12px;
+            --blur: 0px;
         }
-        .nav-btn:hover { background: rgba(255,255,255,0.05); color: #a1a1aa; }
-        .nav-btn.active { background: rgba(255,255,255,0.08); color: #ffffff; border-color: rgba(255,255,255,0.1); }
-        .nav-btn.log-open { background: rgba(255,255,255,0.08); color: #ffffff; border-color: rgba(255,255,255,0.1); }
-        .pcard-sel { border-color: rgba(255,255,255,0.3) !important; box-shadow: 0 0 0 1px rgba(255,255,255,0.12); }
-        input[type=checkbox].sel-check { accent-color: #ffffff; }
-        .btn-primary { background:#ffffff; color:#09090b; font-weight:600; border-radius:0.75rem; font-size:0.75rem; padding:0.375rem 0.75rem; transition:background 0.15s; border:none; }
-        .btn-primary:hover { background:#e4e4e7; }
-        .btn-outline { border:1px solid #27272a; color:#a1a1aa; border-radius:0.75rem; font-size:0.75rem; padding:0.375rem 0.75rem; transition:all 0.15s; background:transparent; }
-        .btn-outline:hover { border-color:#52525b; color:#e4e4e7; }
-        .btn-danger { border:1px solid rgba(153,27,27,0.5); color:#f87171; border-radius:0.75rem; font-size:0.75rem; padding:0.375rem 0.75rem; transition:all 0.15s; background:transparent; }
-        .btn-danger:hover { border-color:#991b1b; }
-        .btn-danger:disabled { opacity:0.4; cursor:default; }
+        [data-theme="ink"] {
+            color-scheme: dark;
+            --bg: #1a1a1c;
+            --panel: rgb(255 255 255 / 5%);
+            --panel-2: rgb(255 255 255 / 9%);
+            --surface: rgb(38 38 41 / 96%);
+            --border: rgb(255 255 255 / 10%);
+            --text: #f2f2f0;
+            --text-2: rgb(242 242 240 / 60%);
+            --accent: #7b8fa6;
+            --accent-2: #5f7188;
+            --link: #9db3c9;
+            --danger: #c9705f;
+            --warning: #d1a25a;
+            --radius: 12px;
+            --blur: 16px;
+        }
+
+        /* Base. One hairline everywhere; a theme switch crossfades instead of
+           snapping, and every hover gets its fade for free. */
+        * { border-color: var(--border); scrollbar-color: var(--border) transparent; scrollbar-width: thin; }
+        * { transition-property: background-color, color, border-color, fill, stroke; transition-duration: 150ms; transition-timing-function: ease; }
+        html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+        body { background: var(--bg); color: var(--text); }
+        ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+        input::placeholder { color: var(--text-2); }
+        input[type=checkbox] { accent-color: var(--accent); }
+        button:focus-visible, a:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+        select option { background: var(--surface); color: var(--text); }
+        .hidden { display: none !important; }
+        /* Heading serif with lining figures so "10 prints" never reads as small caps. */
+        .font-heading { font-variant-numeric: lining-nums; }
+
+        /* Status dots breathe; opacity is the only thing that animates. */
+        .pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        /* Floating surfaces (dialogs, toasts, the log sheet) are the opaque
+           --surface with the theme's backdrop blur. Nothing in the page plane
+           has a shadow: a shadow means "this floats". */
+        .floating { -webkit-backdrop-filter: blur(var(--blur)); backdrop-filter: blur(var(--blur)); }
+        .overlay-tint { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+
+        /* Theme-dependent bits: the rail logo and the toggle's icon. */
+        .logo-dark, .ti-sun { display: none; }
+        [data-theme="ink"] .logo-light, [data-theme="ink"] .ti-moon { display: none; }
+        [data-theme="ink"] .logo-dark { display: block; }
+        [data-theme="ink"] .ti-sun { display: inline-block; }
+
+        /* Rail: 32px icon buttons, muted; hover is the panel fill; the active
+           view takes the accent (the collapsed-sidebar rule in the web app). */
+        .nav-btn { width: 2rem; height: 2rem; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 1rem; border: 0; background: transparent; cursor: pointer; }
+        .nav-btn:hover { background: var(--panel); color: var(--text); }
+        .nav-btn.active, .nav-btn.log-open { background: var(--panel); color: var(--accent); }
+
+        /* Buttons: 12px radius, 500 weight, hover is a colour change only.
+           Exactly one accent-filled button per view; the rest are outline or
+           ghost. Danger is text, never a red fill. */
+        .btn-primary, .btn-outline, .btn-ghost, .btn-danger, .chip {
+            display: inline-flex; align-items: center; justify-content: center; gap: .375rem; white-space: nowrap;
+            height: 2rem; padding: 0 .75rem; border-radius: var(--radius); border: 1px solid transparent;
+            background: transparent; color: var(--text); font-size: .75rem; font-weight: 500; line-height: 1; cursor: pointer;
+        }
+        .btn-primary { background: var(--accent); color: var(--bg); }
+        .btn-primary:hover { background: var(--accent-2); }
+        .btn-outline { border-color: var(--border); }
+        .btn-outline:hover { background: var(--panel); }
+        .btn-ghost { color: var(--text-2); }
+        .btn-ghost:hover { background: var(--panel); color: var(--text); }
+        .btn-danger { border-color: var(--border); color: var(--danger); }
+        .btn-danger:hover { background: var(--panel); }
+        .btn-lg { height: 2.25rem; padding: 0 1rem; font-size: .875rem; }
+        .btn-xs { height: 1.625rem; padding: 0 .5rem; font-size: .6875rem; border-radius: 6px; }
+        .btn-primary:disabled, .btn-outline:disabled, .btn-ghost:disabled, .btn-danger:disabled, .chip:disabled { opacity: .4; cursor: default; pointer-events: none; }
+        .btn-icon { width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 0; background: transparent; color: var(--text-2); font-size: 1rem; cursor: pointer; }
+        .btn-icon:hover { background: var(--panel); color: var(--text); }
+        /* Selectable chips (fan and speed levels): a border, never a fill. */
+        .chip { height: 1.625rem; padding: 0 .625rem; font-size: .6875rem; border-radius: 9999px; border-color: var(--border); color: var(--text-2); }
+        .chip:hover { background: var(--panel); color: var(--text); }
+        .chip.active { border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent); }
+        .light-btn.is-on { border-color: color-mix(in srgb, var(--warning) 60%, transparent); color: var(--warning); }
+
+        /* Fields: transparent fill, one hairline, 36px tall. Focus turns the
+           border accent; no ring, no glow. */
+        .field { display: block; width: 100%; height: 2.25rem; padding: 0 .75rem; border-radius: var(--radius); border: 1px solid var(--border); background: transparent; color: var(--text); font-size: .875rem; outline: none; }
+        .field:focus { border-color: var(--accent); }
+        .field.field-invalid { border-color: var(--danger); }
+        .field-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8125rem; }
+        .field-label { display: block; margin-bottom: .375rem; font-size: .75rem; font-weight: 500; color: var(--text-2); }
+        select.field { appearance: none; -webkit-appearance: none; padding-right: 2.25rem; cursor: pointer; }
+        .select-wrap { position: relative; }
+        .select-wrap > .fa-chevron-down { position: absolute; right: .75rem; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-2); font-size: .875rem; }
+
+        /* Switch: hairline track, accent when on, page-coloured thumb. Only
+           the thumb's position animates. */
+        .switch { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; height: 1.25rem; width: 2.25rem; padding: 0; border-radius: 9999px; border: 1px solid var(--border); background: var(--panel-2); cursor: pointer; }
+        .switch[aria-checked="true"] { background: var(--accent); border-color: transparent; }
+        .switch:disabled { opacity: .4; cursor: default; }
+        .switch-thumb { display: block; width: 1rem; height: 1rem; border-radius: 9999px; background: var(--bg); transform: translateX(1px); transition: transform 150ms ease; }
+        .switch[aria-checked="true"] .switch-thumb { transform: translateX(17px); }
+
+        /* Status pills: border and text in the status hue, never a fill.
+           Status colour comes from the data; the chrome stays quiet. */
+        .badge-brand { border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent); }
+        .badge-warning { border-color: color-mix(in srgb, var(--warning) 60%, transparent); color: var(--warning); }
+        .badge-link { border-color: color-mix(in srgb, var(--link) 60%, transparent); color: var(--link); }
+        .badge-danger { border-color: color-mix(in srgb, var(--danger) 60%, transparent); color: var(--danger); }
+        .badge-muted { border-color: var(--border); color: var(--text-2); }
+        .border-danger-50 { border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+        .pcard-sel { border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent); }
+
+        #logPanel { transition: transform 250ms cubic-bezier(0.4,0,0.2,1); }
+        #logOutput { scroll-behavior: smooth; }
+        .log-error { color: var(--danger); }
+        .log-warn  { color: var(--warning); }
+        .log-ok    { color: var(--accent); }
+        .log-info  { color: var(--text-2); }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+        }
     </style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen" style="font-family:'Inter',system-ui,sans-serif">
+<body class="bg-bg text-text font-sans min-h-screen">
 
 <!-- Toast -->
 <div id="toast" class="fixed top-4 right-4 hidden" style="z-index:200">
-    <div id="toastMsg" class="toast px-4 py-2.5 rounded-xl text-xs font-medium shadow-2xl border"></div>
+    <div id="toastMsg" class="floating px-4 py-2.5 rounded-lg text-sm border shadow-xl"></div>
 </div>
 
 <!-- Update Modal -->
-<div id="updateModal" class="fixed inset-0 z-50 hidden bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
-        <h3 class="text-sm font-semibold">Update Available</h3>
-        <p class="mt-2 text-xs text-zinc-400">FoxTrack Bridge <span id="updateVersionLabel" class="text-white font-semibold"></span> is available. Your printers and settings are preserved.</p>
-        <p id="updateHowTo" class="mt-3 hidden text-xs text-zinc-400">Auto-update isn't available here. If you're running the Docker image, pull the new image; otherwise <a id="updateDownloadLink" href="#" target="_blank" rel="noopener" class="text-white underline">download the release</a> and replace the binary.</p>
-        <div id="updateNotes" class="mt-3 hidden max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400"></div>
-        <p id="updateProgress" class="mt-3 hidden text-xs text-zinc-400"></p>
+<div id="updateModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="floating w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-xl">
+        <h3 class="font-heading text-xl font-medium leading-tight">Update available</h3>
+        <p class="mt-2 text-sm leading-relaxed text-text-2">FoxTrack Bridge <span id="updateVersionLabel" class="text-text font-medium"></span> is available. Your printers and settings are preserved.</p>
+        <p id="updateHowTo" class="mt-3 hidden text-sm leading-relaxed text-text-2">Auto-update isn't available here. If you're running the Docker image, pull the new image; otherwise <a id="updateDownloadLink" href="#" target="_blank" rel="noopener" class="text-link underline underline-offset-4">download the release</a> and replace the binary.</p>
+        <div id="updateNotes" class="mt-3 hidden max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-panel p-3 text-xs text-text-2"></div>
+        <p id="updateProgress" class="mt-3 hidden text-sm text-text-2"></p>
         <div class="mt-5 flex flex-wrap gap-2">
-            <button id="updateNowBtn" onclick="installUpdate()" class="btn-primary">Update Now</button>
-            <button id="restartNowBtn" onclick="restartForUpdate()" class="btn-primary hidden">Restart Now</button>
-            <button onclick="dismissUpdateModal()" class="btn-outline">Later</button>
-            <button onclick="openReleaseNotes()" class="btn-outline">Release Notes</button>
+            <button id="updateNowBtn" onclick="installUpdate()" class="btn-primary btn-lg">Update now</button>
+            <button id="restartNowBtn" onclick="restartForUpdate()" class="btn-primary btn-lg hidden">Restart now</button>
+            <button onclick="dismissUpdateModal()" class="btn-outline btn-lg">Later</button>
+            <button onclick="openReleaseNotes()" class="btn-outline btn-lg">Release notes</button>
         </div>
     </div>
 </div>
 
 <!-- Stop Confirmation Modal -->
-<div id="stopConfirmModal" class="fixed inset-0 z-50 hidden bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeStopConfirm()">
-    <div class="w-full max-w-xs rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
-        <h3 class="text-sm font-semibold mb-1">Stop Print?</h3>
-        <p class="text-zinc-400 text-xs mb-5">This will cancel the current print. This action cannot be undone.</p>
+<div id="stopConfirmModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeStopConfirm()">
+    <div class="floating w-full max-w-xs rounded-lg border border-border bg-surface p-6 shadow-xl">
+        <h3 class="font-heading text-xl font-medium leading-tight">Stop this print?</h3>
+        <p class="mt-2 mb-5 text-sm leading-relaxed text-text-2">This cancels the current print. It cannot be undone.</p>
         <div class="flex gap-2 justify-end">
-            <button onclick="closeStopConfirm()" class="btn-outline" style="padding:0.5rem 1rem;font-size:0.8125rem">Cancel</button>
-            <button onclick="executeStop()" class="btn-danger" style="padding:0.5rem 1rem;font-size:0.8125rem">Stop Print</button>
+            <button onclick="closeStopConfirm()" class="btn-outline btn-lg">Cancel</button>
+            <button onclick="executeStop()" class="btn-danger btn-lg">Stop print</button>
         </div>
     </div>
 </div>
 
-<!-- AMS Filament Modal -->
-
 <!-- Add Printer Modal -->
-<div id="addPrinterModal" class="fixed inset-0 z-50 hidden bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAddPrinterModal()">
-    <div class="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-semibold">Add Printer</h3>
-            <button onclick="closeAddPrinterModal()" class="text-zinc-400 hover:text-zinc-300 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors text-sm">
+<div id="addPrinterModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAddPrinterModal()">
+    <div class="floating w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-start justify-between gap-3 mb-1">
+            <h3 class="font-heading text-xl font-medium leading-tight">Add printer</h3>
+            <button onclick="closeAddPrinterModal()" class="btn-icon -mr-2 -mt-1" title="Close" aria-label="Close">
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        <p class="text-zinc-400 text-xs mb-4">Connect a local-network printer to FoxTrack Bridge.</p>
+        <p class="text-sm leading-relaxed text-text-2 mb-4">Connect a printer to FoxTrack Bridge.</p>
         <div class="space-y-3">
             <div>
-                <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">Printer Type</label>
-                <select id="pBrand" onchange="onBrandChange()"
-                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-white/20 appearance-none cursor-pointer">
-                    <option value="">Select type...</option>
-                    <option value="bambu">Bambu Lab</option>
-                    <option value="klipper">Klipper / Moonraker</option>
-                </select>
+                <label for="pBrand" class="field-label">Printer type</label>
+                <div class="select-wrap">
+                    <select id="pBrand" onchange="onBrandChange()" class="field">
+                        <option value="">Select type…</option>
+                        <option value="bambu">Bambu Lab (LAN mode)</option>
+                        <option value="bambu_cloud">Bambu Lab (cloud)</option>
+                        <option value="klipper">Klipper / Moonraker</option>
+                    </select>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
             </div>
-            <div id="brandInstructions" class="hidden instruction-box"></div>
+            <div id="brandInstructions" class="hidden"></div>
             <div id="printerFields" class="hidden space-y-3">
+                <div id="fieldCloudDevices" class="hidden">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <span class="field-label mb-0">Printer on your Bambu account</span>
+                        <button type="button" onclick="loadCloudDevices(true)" class="btn-ghost btn-xs">Refresh</button>
+                    </div>
+                    <div id="cloudDeviceList" class="rounded-md border border-border divide-y divide-border overflow-hidden"></div>
+                </div>
                 <div>
-                    <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">Printer Name</label>
-                    <input type="text" id="pName" autocomplete="off"
-                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="e.g. Studio P1S">
+                    <label for="pName" class="field-label">Printer name</label>
+                    <input type="text" id="pName" autocomplete="off" class="field" placeholder="e.g. Studio P1S">
                 </div>
                 <div id="fieldIp">
-                    <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">IP Address</label>
-                    <input type="text" id="pIp" autocomplete="off"
-                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="192.168.1.120">
+                    <label for="pIp" id="labelIp" class="field-label">IP address</label>
+                    <input type="text" id="pIp" autocomplete="off" class="field" placeholder="192.168.1.120">
                 </div>
                 <div id="fieldMoonrakerUrl" class="hidden">
-                    <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">Moonraker URL</label>
-                    <input type="text" id="pMoonrakerUrl" autocomplete="off"
-                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="http://192.168.1.120:7125">
+                    <label for="pMoonrakerUrl" class="field-label">Moonraker URL</label>
+                    <input type="text" id="pMoonrakerUrl" autocomplete="off" class="field" placeholder="http://192.168.1.120:7125">
                 </div>
                 <div id="fieldSerial">
-                    <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">Serial Number</label>
-                    <input type="text" id="pSerial" autocomplete="off"
-                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="01P00A...">
+                    <label for="pSerial" class="field-label">Serial number</label>
+                    <input type="text" id="pSerial" autocomplete="off" class="field field-mono" placeholder="01P00A…">
                 </div>
                 <div id="fieldLanCode">
-                    <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">LAN Access Code</label>
-                    <input type="password" id="pLanCode" autocomplete="off"
-                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="8-character code">
+                    <label for="pLanCode" class="field-label">LAN access code</label>
+                    <input type="password" id="pLanCode" autocomplete="off" class="field field-mono" placeholder="8-character code">
                 </div>
                 <div id="fieldKlipperKey" class="hidden">
-                    <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">Moonraker API Key (Optional)</label>
-                    <input type="password" id="pKlipperKey" autocomplete="off"
-                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="Moonraker API key">
+                    <label for="pKlipperKey" class="field-label">Moonraker API key <span class="font-normal">(optional)</span></label>
+                    <input type="password" id="pKlipperKey" autocomplete="off" class="field field-mono" placeholder="Moonraker API key">
                 </div>
                 <div id="fieldWebcamUrl" class="hidden">
-                    <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">Webcam URL (Optional)</label>
-                    <input type="text" id="pWebcamUrl" autocomplete="off"
-                        class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="http://192.168.1.120/webcam/?action=stream">
-                    <p class="text-zinc-500 text-[11px] mt-1">Leave blank to auto-detect. Set this if the camera button doesn't work.</p>
+                    <label for="pWebcamUrl" class="field-label">Webcam URL <span class="font-normal">(optional)</span></label>
+                    <input type="text" id="pWebcamUrl" autocomplete="off" class="field" placeholder="http://192.168.1.120/webcam/?action=stream">
+                    <p class="text-xs text-text-2 mt-1.5">Leave blank to auto-detect. Set this if the camera button doesn't work.</p>
                 </div>
                 <div class="flex items-center gap-2 pt-1 flex-wrap">
-                    <button onclick="testConnection()" id="testBtn" class="btn-outline">Test Connection</button>
-                    <button onclick="addPrinter()" id="connectBtn" class="btn-primary" style="padding:0.5rem 1rem;font-size:0.875rem">Connect</button>
+                    <button onclick="testConnection()" id="testBtn" class="btn-outline btn-lg">Test connection</button>
+                    <button onclick="addPrinter()" id="connectBtn" class="btn-primary btn-lg">Connect</button>
                     <span id="testResult" class="text-xs hidden"></span>
                 </div>
-                <p id="addPrinterError" class="hidden text-xs text-red-400 mt-2"></p>
+                <p id="addPrinterError" class="hidden text-xs text-danger mt-2"></p>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Sidebar -->
-<aside class="fixed left-0 top-0 h-full w-14 bg-zinc-900 border-r border-zinc-800 flex flex-col items-center pt-3 pb-4 z-30">
-    <a href="/" class="mb-5 flex items-center justify-center w-10 h-10">
-        <img src="/logo.png" alt="FoxTrack" class="w-8 h-8">
+<!-- Sidebar rail -->
+<aside class="fixed left-0 top-0 h-full w-14 bg-bg border-r border-border flex flex-col items-center pt-3 pb-4 z-30">
+    <a href="/" class="mb-4 flex items-center justify-center w-10 h-10" title="FoxTrack Bridge">
+        <img src="/logo-light.png" alt="FoxTrack" class="logo-light w-7 h-7">
+        <img src="/logo-dark.png" alt="" class="logo-dark w-7 h-7">
     </a>
     <div class="flex flex-col items-center gap-1 w-full px-2">
-        <button onclick="showView('printers')" id="nav-printers" class="nav-btn active" title="Printers">
+        <button onclick="showView('printers')" id="nav-printers" class="nav-btn active" title="Printers" aria-label="Printers">
             <i class="fas fa-print"></i>
         </button>
-        <button onclick="showView('history')" id="nav-history" class="nav-btn" title="History">
+        <button onclick="showView('history')" id="nav-history" class="nav-btn" title="History" aria-label="History">
             <i class="fas fa-clock"></i>
         </button>
-        <button onclick="showView('settings')" id="nav-settings" class="nav-btn" title="Settings">
+        <button onclick="showView('settings')" id="nav-settings" class="nav-btn" title="Settings" aria-label="Settings">
             <i class="fas fa-cog"></i>
         </button>
     </div>
     <div class="flex-1"></div>
     <div class="flex flex-col items-center gap-1 w-full px-2">
-        <button onclick="toggleLogPanel()" id="logBtn" class="nav-btn" title="Bridge Log">
+        <button onclick="toggleLogPanel()" id="logBtn" class="nav-btn" title="Bridge log" aria-label="Bridge log">
             <i class="fas fa-terminal"></i>
         </button>
-        <a href="https://github.com/FoxnTrain/FoxTrack-Bridge" target="_blank" class="nav-btn" title="GitHub">
+        <a href="https://github.com/FoxnTrain/FoxTrack-Bridge" target="_blank" rel="noopener" class="nav-btn" title="GitHub" aria-label="GitHub">
             <i class="fab fa-github"></i>
         </a>
     </div>
@@ -186,158 +300,203 @@
 <div class="ml-14 min-h-screen flex flex-col">
 
     <!-- Top bar -->
-    <header class="bg-zinc-900 border-b border-zinc-800 px-5 py-3 flex items-center justify-between shrink-0">
-        <nav class="text-xs text-zinc-400 flex items-center gap-1.5">
+    <header class="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-bg px-4">
+        <nav class="text-sm text-text-2 flex items-center gap-1.5">
             <span>FoxTrack Bridge</span>
-            <span class="text-zinc-400">/</span>
-            <span id="breadcrumb" class="text-zinc-200 font-medium">Printers</span>
+            <span aria-hidden="true">/</span>
+            <span id="breadcrumb" class="text-text">Printers</span>
         </nav>
-        <div class="flex items-center gap-3">
-            <span id="bridgeStatus" class="flex items-center gap-1.5 text-xs text-zinc-400">
-                <span class="w-1.5 h-1.5 rounded-full bg-zinc-600 pulse"></span> Connecting...
+        <div class="ml-auto flex items-center gap-3">
+            <span id="bridgeStatus" class="flex items-center gap-1.5 text-xs text-text-2">
+                <span class="w-1.5 h-1.5 rounded-full bg-text-2 pulse"></span> Connecting…
             </span>
-            <span id="footerVersion" class="text-xs text-zinc-400"></span>
+            <span id="footerVersion" class="text-xs text-text-2 tabular-nums"></span>
+            <button id="themeToggle" onclick="toggleTheme()" class="btn-icon" title="Switch to dark theme" aria-label="Switch theme">
+                <i class="fas fa-moon ti-moon"></i><i class="fas fa-sun ti-sun"></i>
+            </button>
         </div>
     </header>
 
-    <!-- Stat cards (hidden on settings) -->
-    <div id="statCardsRow" class="px-5 pt-4 pb-3 grid grid-cols-3 gap-3 shrink-0">
-        <div class="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3">
-            <div class="w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 shrink-0">
-                <i class="fas fa-print text-sm"></i>
+    <!-- Stat tiles (hidden on settings) -->
+    <div id="statCardsRow" class="px-5 pt-5 pb-2 grid grid-cols-3 gap-3 shrink-0">
+        <div class="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-3">
+            <div class="w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
+                <i class="fas fa-print"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Printers</p>
-                <p id="statPrinters" class="text-xl font-semibold leading-tight">0</p>
+                <p class="text-xs text-text-2">Printers</p>
+                <p id="statPrinters" class="font-heading text-2xl leading-none mt-0.5 tabular-nums">0</p>
             </div>
         </div>
-        <div class="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3">
-            <div class="w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 shrink-0">
-                <i class="fas fa-layer-group text-sm"></i>
+        <div class="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-3">
+            <div class="w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
+                <i class="fas fa-layer-group"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Active Prints</p>
-                <p id="statActive" class="text-xl font-semibold leading-tight">0</p>
+                <p class="text-xs text-text-2">Active prints</p>
+                <p id="statActive" class="font-heading text-2xl leading-none mt-0.5 tabular-nums">0</p>
             </div>
         </div>
-        <div class="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3">
-            <div id="statErrorIcon" class="w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 shrink-0">
-                <i class="fas fa-circle-exclamation text-sm"></i>
+        <div class="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-3">
+            <div id="statErrorIcon" class="w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
+                <i class="fas fa-circle-exclamation"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Errors</p>
-                <p id="statErrors" class="text-xl font-semibold leading-tight">0</p>
+                <p class="text-xs text-text-2">Errors</p>
+                <p id="statErrors" class="font-heading text-2xl leading-none mt-0.5 tabular-nums">0</p>
             </div>
         </div>
     </div>
+    <p id="cloudNotice" class="hidden px-5 pb-3 text-xs text-warning"></p>
 
     <!-- View: Printers -->
-    <div id="view-printers" class="px-5 pb-5">
-
-<div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-            <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between gap-3">
-                <h2 class="text-xs font-semibold flex items-center gap-2 text-zinc-300 uppercase tracking-wide">
-                    Connected Printers
-                    <span id="printerCount" class="bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-md text-[10px] font-medium">0</span>
-                </h2>
-                <div class="flex items-center gap-2">
-                    <div id="normalModeButtons" class="flex items-center gap-2">
-                        <button onclick="openAddPrinterModal()" class="btn-primary flex items-center gap-1.5">
-                            <i class="fas fa-plus text-[10px]"></i> Add Printer
-                        </button>
-                        <button onclick="enterRemoveMode()" class="btn-outline">Remove</button>
-                    </div>
-                    <div id="removeModeButtons" class="hidden flex items-center gap-2">
-                        <button id="confirmRemoveBtn" onclick="confirmBulkRemove()" class="btn-danger" disabled>Remove Selected</button>
-                        <button onclick="exitRemoveMode()" class="btn-outline">Cancel</button>
-                    </div>
+    <div id="view-printers" class="px-5 pt-3 pb-5">
+        <div class="flex items-center justify-between gap-3 mb-3 min-h-[2rem]">
+            <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">
+                Connected printers
+                <span id="printerCount" class="font-sans inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[11px] text-text-2 tabular-nums">0</span>
+            </h2>
+            <div class="flex items-center gap-2">
+                <div id="normalModeButtons" class="flex items-center gap-2">
+                    <button onclick="openAddPrinterModal()" class="btn-primary">
+                        <i class="fas fa-plus"></i> Add printer
+                    </button>
+                    <button onclick="enterRemoveMode()" class="btn-outline">Remove</button>
+                </div>
+                <div id="removeModeButtons" class="hidden flex items-center gap-2">
+                    <button id="confirmRemoveBtn" onclick="confirmBulkRemove()" class="btn-danger" disabled>Remove selected</button>
+                    <button onclick="exitRemoveMode()" class="btn-outline">Cancel</button>
                 </div>
             </div>
-            <div id="printersList" class="p-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
         </div>
+        <div id="printersList" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
     </div>
 
     <!-- View: History -->
-    <div id="view-history" class="hidden px-5 pb-5">
-        <div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-            <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-                <h2 class="text-xs font-semibold text-zinc-300 uppercase tracking-wide">Print History</h2>
-                <div class="flex items-center gap-2">
-                    <button onclick="exportHistoryCsv()" class="btn-outline" id="exportCsvBtn" style="display:none">Export CSV</button>
-                    <button onclick="refreshGlobalHistory()" class="btn-outline">Refresh</button>
-                </div>
+    <div id="view-history" class="hidden px-5 pt-3 pb-5">
+        <div class="flex items-center justify-between gap-3 mb-3 min-h-[2rem]">
+            <h2 class="font-heading text-xl font-medium leading-tight">Print history</h2>
+            <div class="flex items-center gap-2">
+                <button onclick="exportHistoryCsv()" class="btn-outline" id="exportCsvBtn" style="display:none">Export CSV</button>
+                <button onclick="refreshGlobalHistory()" class="btn-outline">Refresh</button>
             </div>
-            <div id="globalHistoryContent" class="p-3">
-                <p class="text-zinc-400 text-xs py-4 text-center">Loading history...</p>
-            </div>
+        </div>
+        <div id="globalHistoryContent">
+            <p class="text-text-2 text-sm py-4 text-center">Loading history…</p>
         </div>
     </div>
 
     <!-- View: Settings -->
     <div id="view-settings" class="hidden px-5 pt-5 pb-5">
         <div class="max-w-2xl space-y-3">
-            <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                <div class="flex items-start justify-between mb-1">
-                    <div>
-                        <h2 class="text-xs font-semibold text-zinc-300 uppercase tracking-wide">FoxTrack Sync <span class="normal-case text-zinc-500 font-normal">(optional)</span></h2>
-                    </div>
-                    <a href="https://foxtrack.studio/settings" target="_blank" rel="noopener" class="text-[11px] text-zinc-400 hover:text-zinc-300 transition-colors flex items-center gap-1">
-                        <i class="fas fa-arrow-up-right-from-square text-[9px]"></i> FoxTrack Settings
+            <section class="rounded-lg border border-border bg-panel p-5">
+                <div class="flex items-start justify-between gap-3 mb-1">
+                    <h2 class="font-heading text-xl font-medium leading-tight">FoxTrack sync <span class="font-sans text-xs text-text-2">optional</span></h2>
+                    <a href="https://foxtrack.studio/settings" target="_blank" rel="noopener" class="text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0 mt-1">
+                        FoxTrack settings <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
                     </a>
                 </div>
-                <p class="text-zinc-400 text-xs mb-4">Paste your API token from FoxTrack Settings &gt; Integrations &gt; 3D Printer to sync with the cloud. Leave blank to use the Bridge locally only.</p>
-                <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">FoxTrack Sync</label>
-                <div class="flex gap-2 items-center mb-4">
-                    <input type="password" id="foxtrack2ApiKey" autocomplete="off"
-                        class="flex-1 bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="Paste API key (optional)">
-                    <button onclick="saveFoxtrack2ApiKey()" class="btn-primary" style="padding:0.625rem 1rem;font-size:0.875rem">Save</button>
+                <p class="text-sm leading-relaxed text-text-2 mb-4">Paste your API token from FoxTrack Settings &gt; Integrations &gt; 3D Printer to sync with the cloud. Leave blank to use the Bridge locally only.</p>
+                <label for="foxtrack2ApiKey" class="field-label">FoxTrack sync</label>
+                <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field mb-4" placeholder="Paste API key (optional)">
+                <label for="apiKey" class="field-label">FoxTrack (legacy)</label>
+                <input type="password" id="apiKey" autocomplete="off" class="field" placeholder="Paste API key (optional)">
+                <div class="mt-4 flex justify-end">
+                    <button onclick="saveApiKeys()" class="btn-primary btn-lg">Save</button>
                 </div>
-                <label class="block text-zinc-400 text-xs font-medium mb-1.5 uppercase tracking-wide">FoxTrack (Legacy)</label>
-                <div class="flex gap-2 items-center">
-                    <input type="password" id="apiKey" autocomplete="off"
-                        class="flex-1 bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-white/20"
-                        placeholder="Paste API key (optional)">
-                    <button onclick="saveLegacyApiKey()" class="btn-primary" style="padding:0.625rem 1rem;font-size:0.875rem">Save</button>
+            </section>
+            <section id="cloudCard" class="rounded-lg border border-border bg-panel p-5">
+                <div class="flex items-start justify-between gap-3 mb-1">
+                    <h2 class="font-heading text-xl font-medium leading-tight">Bambu Cloud <span class="font-sans text-xs text-text-2">optional</span></h2>
+                    <span id="cloudMqtt" class="hidden text-xs text-text-2 flex items-center gap-1.5 mt-1 shrink-0"><span class="cloud-dot w-1.5 h-1.5 rounded-full bg-text-2"></span><span class="cloud-text">Off</span></span>
                 </div>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                    <div class="flex items-center justify-between">
+                <p class="text-sm leading-relaxed text-text-2 mb-4">Link your Bambu account to add printers that are not in LAN mode. Cloud printers report status and can toggle the light; every other control needs LAN mode. The Bridge keeps one connection for the whole account and backs off slowly after errors, so the account stays inside Bambu's limits.</p>
+                <div id="cloudUnlinked">
+                    <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_10rem] gap-3">
                         <div>
-                            <h2 class="text-xs font-semibold text-zinc-300 uppercase tracking-wide">Advanced Mode</h2>
-                            <p class="text-zinc-400 text-xs mt-0.5">Shows the GCode console button on printer cards.</p>
+                            <label for="cloudEmail" class="field-label">Email</label>
+                            <input id="cloudEmail" type="email" class="field" autocomplete="off" placeholder="you@example.com">
                         </div>
-                        <button id="advancedToggle" onclick="toggleAdvancedMode()" class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors bg-zinc-700 shrink-0 ml-3" role="switch" aria-checked="false">
-                            <span id="advancedThumb" class="inline-block h-3.5 w-3.5 transform rounded-full bg-zinc-400 transition-transform translate-x-0.5"></span>
-                        </button>
+                        <div>
+                            <label for="cloudRegion" class="field-label">Region</label>
+                            <div class="select-wrap">
+                                <select id="cloudRegion" class="field">
+                                    <option value="global">Global</option>
+                                    <option value="cn">China</option>
+                                </select>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="cloudPasswordRow" class="mt-3">
+                        <label for="cloudPassword" class="field-label">Password</label>
+                        <input id="cloudPassword" type="password" class="field" autocomplete="off" placeholder="Bambu account password" onkeydown="if(event.key==='Enter')cloudSignIn()">
+                        <p class="text-xs text-text-2 mt-1.5">The password is used once to sign in and is never stored.</p>
+                    </div>
+                    <div id="cloudCodeRow" class="hidden mt-3">
+                        <label for="cloudCode" class="field-label">Code from the email Bambu just sent</label>
+                        <input id="cloudCode" type="text" inputmode="numeric" class="field field-mono" autocomplete="off" placeholder="6-digit code" onkeydown="if(event.key==='Enter')cloudVerify()">
+                    </div>
+                    <p id="cloudError" class="hidden text-xs text-danger mt-3"></p>
+                    <div class="mt-4 flex items-center gap-2 flex-wrap">
+                        <button id="cloudSignInBtn" onclick="cloudSignIn()" class="btn-outline btn-lg">Sign in</button>
+                        <button id="cloudVerifyBtn" onclick="cloudVerify()" class="btn-outline btn-lg hidden">Link account</button>
+                        <button id="cloudBackBtn" onclick="resetCloudForm()" class="btn-ghost btn-lg hidden">Start over</button>
+                        <button onclick="toggleCloudToken()" class="btn-ghost btn-lg">Paste a token instead</button>
+                    </div>
+                    <div id="cloudTokenRow" class="hidden mt-3">
+                        <label for="cloudToken" class="field-label">Access token</label>
+                        <input id="cloudToken" type="password" class="field field-mono" autocomplete="off" placeholder="Paste the token from a signed-in Bambu session">
+                        <p class="text-xs text-text-2 mt-1.5 mb-3">Use this when sign-in is blocked. A token lasts about 90 days and cannot be renewed; sign in again when it expires.</p>
+                        <button onclick="cloudUseToken()" class="btn-outline btn-lg">Use token</button>
                     </div>
                 </div>
-                <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h2 class="text-xs font-semibold text-zinc-300 uppercase tracking-wide">Auto-Update</h2>
-                            <p id="autoUpdateDesc" class="text-zinc-400 text-xs mt-0.5">Automatically download and restart when a new version is available.</p>
-                        </div>
-                        <button id="autoUpdateToggle" onclick="toggleAutoUpdate()" class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors bg-zinc-700 shrink-0 ml-3" role="switch" aria-checked="false">
-                            <span id="autoUpdateThumb" class="inline-block h-3.5 w-3.5 transform rounded-full bg-zinc-400 transition-transform translate-x-0.5"></span>
-                        </button>
+                <div id="cloudLinked" class="hidden">
+                    <p class="text-sm"><span id="cloudLinkedEmail" class="font-medium"></span> <span id="cloudLinkedMeta" class="text-text-2"></span></p>
+                    <p id="cloudDetail" class="hidden text-xs leading-relaxed text-text-2 mt-2"></p>
+                    <div class="mt-4 flex items-center gap-2 flex-wrap">
+                        <button id="cloudRetryBtn" onclick="cloudRetry()" class="btn-outline hidden">Retry now</button>
+                        <button onclick="cloudUnlink()" class="btn-danger">Unlink</button>
                     </div>
                 </div>
+            </section>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <section class="rounded-lg border border-border bg-panel p-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h2 class="font-heading text-xl font-medium leading-tight">Advanced mode</h2>
+                            <p class="text-sm text-text-2 mt-1">Shows the GCode console button on printer cards.</p>
+                        </div>
+                        <button id="advancedToggle" onclick="toggleAdvancedMode()" class="switch" role="switch" aria-checked="false" aria-label="Advanced mode">
+                            <span id="advancedThumb" class="switch-thumb"></span>
+                        </button>
+                    </div>
+                </section>
+                <section class="rounded-lg border border-border bg-panel p-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h2 class="font-heading text-xl font-medium leading-tight">Auto-update</h2>
+                            <p id="autoUpdateDesc" class="text-sm text-text-2 mt-1">Automatically download and restart when a new version is available.</p>
+                        </div>
+                        <button id="autoUpdateToggle" onclick="toggleAutoUpdate()" class="switch" role="switch" aria-checked="false" aria-label="Auto-update">
+                            <span id="autoUpdateThumb" class="switch-thumb"></span>
+                        </button>
+                    </div>
+                </section>
             </div>
         </div>
     </div>
 </div>
 
 <!-- Log Panel -->
-<div id="logPanel" class="fixed bottom-0 z-30 bg-zinc-950 border-t border-zinc-800 flex flex-col translate-y-full" style="height:40vh;left:3.5rem;right:0">
-    <div class="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900 shrink-0">
-        <span class="text-xs font-medium text-zinc-400 flex items-center gap-2">
-            <i class="fas fa-terminal text-zinc-400"></i> Bridge Log
+<div id="logPanel" class="floating fixed bottom-0 z-30 bg-surface border-t border-border flex flex-col translate-y-full" style="height:40vh;left:3.5rem;right:0">
+    <div class="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
+        <span class="text-xs font-medium text-text-2 flex items-center gap-2">
+            <i class="fas fa-terminal"></i> Bridge log
         </span>
         <div class="flex gap-1.5">
-            <button onclick="copyLogToClipboard()" class="btn-outline" style="padding:0.25rem 0.625rem;font-size:0.625rem"><i class="fas fa-copy mr-1"></i>Copy</button>
-            <button onclick="toggleLogPanel()" class="btn-outline" style="padding:0.25rem 0.625rem;font-size:0.625rem">Close</button>
+            <button onclick="copyLogToClipboard()" class="btn-outline btn-xs"><i class="fas fa-copy"></i>Copy</button>
+            <button onclick="toggleLogPanel()" class="btn-outline btn-xs">Close</button>
         </div>
     </div>
     <div id="logOutput" class="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-5 space-y-px"></div>
@@ -362,11 +521,15 @@ let forceFullCardRefresh = false; // set true to force a full content rebuild of
 
 const brands = {
     bambu: {
-        instructions: '<div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400">Enable LAN Only and Developer Mode on the printer, then copy the Serial Number and LAN Access Code from the printer settings.</div>',
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Enable LAN Only and Developer Mode on the printer, then copy the Serial Number and LAN Access Code from the printer settings.</div>',
         fields: { ip: true, serial: true, lanCode: true, moonrakerUrl: false, klipperKey: false, webcamUrl: false }
     },
+    bambu_cloud: {
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Uses the Bambu account linked in Settings. Cloud printers report status and can toggle the light; pause, stop, speed and fan need LAN mode. The camera works when the printer is on this network: its address is learned from the printer, or you can type it below.</div>',
+        fields: { ip: true, serial: false, lanCode: false, moonrakerUrl: false, klipperKey: false, webcamUrl: false, cloudDevices: true }
+    },
     klipper: {
-        instructions: '<div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400">Use your Moonraker endpoint (usually http://printer-ip:7125). API key is only needed if Moonraker auth is enabled.</div>',
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Use your Moonraker endpoint (usually http://printer-ip:7125). API key is only needed if Moonraker auth is enabled.</div>',
         fields: { ip: false, serial: false, lanCode: false, moonrakerUrl: true, klipperKey: true, webcamUrl: true }
     }
 };
@@ -422,7 +585,10 @@ function detectStatusTransitions() {
     }
 }
 
+function isCloudPrinter(p) { return !!(p && p.connection === 'cloud'); }
+
 function printerTypeLabel(p) {
+    if (isCloudPrinter(p)) return 'Bambu cloud';
     return (p && p.serial && (p.lan_code || p.lan_code_set) && !p.moonraker_url) ? 'Bambu' : 'Klipper';
 }
 
@@ -430,11 +596,11 @@ function toast(msg, type = 'success') {
     const el = document.getElementById('toastMsg');
     const wrap = document.getElementById('toast');
     const colors = {
-        success: 'bg-zinc-800 border-zinc-700 text-zinc-100',
-        error: 'bg-zinc-900 border-red-800/60 text-red-300',
-        info: 'bg-zinc-800 border-zinc-700 text-zinc-300',
+        success: 'bg-surface border-border text-text',
+        error: 'bg-surface border-danger-50 text-danger',
+        info: 'bg-surface border-border text-text-2',
     };
-    el.className = 'toast px-4 py-2.5 rounded-xl text-xs font-medium shadow-2xl border ' + (colors[type] || colors.info);
+    el.className = 'floating px-4 py-2.5 rounded-lg text-sm border shadow-xl ' + (colors[type] || colors.info);
     el.textContent = msg;
     wrap.classList.remove('hidden');
     setTimeout(() => wrap.classList.add('hidden'), 3500);
@@ -454,17 +620,43 @@ async function apiFetch(url, options = {}) {
 }
 
 function statusMeta(status) {
+    // Status colour is the one place a hue is allowed: accent for activity,
+    // amber for paused, the link blue for done, danger for errors, muted for
+    // everything quiet. Pills are border + text, never a fill.
     const map = {
-        printing:     { label:'Printing',   dot:'bg-orange-400 pulse', text:'text-orange-300',  badge:'bg-orange-500/10 border-orange-500/30' },
-        paused:       { label:'Paused',     dot:'bg-yellow-400 pulse', text:'text-yellow-300',  badge:'bg-yellow-500/10 border-yellow-500/30' },
-        finished:     { label:'Finished',   dot:'bg-blue-400',         text:'text-blue-300',    badge:'bg-blue-500/10 border-blue-500/30' },
-        error:        { label:'Error',      dot:'bg-red-400 pulse',    text:'text-red-300',     badge:'bg-red-500/10 border-red-500/30' },
-        cancelled:    { label:'Cancelled',  dot:'bg-zinc-500',         text:'text-zinc-400',    badge:'bg-zinc-800/40 border-zinc-700' },
-        disconnected: { label:'Offline',    dot:'bg-zinc-700',         text:'text-zinc-400',    badge:'bg-zinc-800/60 border-zinc-700' },
-        connected:    { label:'Connected',  dot:'bg-zinc-500',         text:'text-zinc-400',    badge:'bg-zinc-800/40 border-zinc-700' },
-        idle:         { label:'Idle',       dot:'bg-emerald-400',      text:'text-emerald-300', badge:'bg-emerald-500/10 border-emerald-500/30' },
+        printing:     { label:'Printing',   dot:'bg-brand pulse',   badge:'badge-brand' },
+        paused:       { label:'Paused',     dot:'bg-warning pulse', badge:'badge-warning' },
+        finished:     { label:'Finished',   dot:'bg-link',          badge:'badge-link' },
+        error:        { label:'Error',      dot:'bg-danger pulse',  badge:'badge-danger' },
+        cancelled:    { label:'Cancelled',  dot:'bg-text-2',        badge:'badge-muted' },
+        disconnected: { label:'Offline',    dot:'bg-text-2',        badge:'badge-muted' },
+        connected:    { label:'Connected',  dot:'bg-text-2',        badge:'badge-muted' },
+        idle:         { label:'Idle',       dot:'bg-brand',         badge:'badge-muted' },
     };
-    return map[status] || { label:'Connecting', dot:'bg-zinc-600 pulse', text:'text-zinc-400', badge:'bg-zinc-800/40 border-zinc-700' };
+    return map[status] || { label:'Connecting', dot:'bg-text-2 pulse', badge:'badge-muted' };
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+// Paper (light) is the default and Ink (dark) the alternative — the two the
+// FoxTrack web app calls "light" and "dark". The <head> script applies the
+// stored choice before first paint; this only drives the toggle button.
+
+const THEME_KEY = 'foxtrack.theme';
+
+function currentTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'ink' ? 'ink' : 'paper';
+}
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const btn = document.getElementById('themeToggle');
+    if (btn) btn.title = theme === 'ink' ? 'Switch to light theme' : 'Switch to dark theme';
+}
+
+function toggleTheme() {
+    const next = currentTheme() === 'ink' ? 'paper' : 'ink';
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
 }
 
 // ── View routing ──────────────────────────────────────────────────────────────
@@ -486,9 +678,7 @@ function showView(view) {
 function toggleAdvancedMode() {
     advancedMode = !advancedMode;
     const toggle = document.getElementById('advancedToggle');
-    const thumb = document.getElementById('advancedThumb');
-    if (toggle) { toggle.style.background = advancedMode ? '#ffffff' : ''; toggle.style.backgroundColor = advancedMode ? '#ffffff' : ''; toggle.setAttribute('aria-checked', advancedMode); toggle.className = toggle.className.replace(/bg-\S+/, advancedMode ? 'bg-white' : 'bg-zinc-700'); }
-    if (thumb) { thumb.className = thumb.className.replace(/translate-x-\S+/, advancedMode ? 'translate-x-5' : 'translate-x-0.5'); thumb.style.background = advancedMode ? '#09090b' : ''; }
+    if (toggle) toggle.setAttribute('aria-checked', advancedMode); // .switch styles follow aria-checked
     // Advanced mode adds/removes the GCode button on Bambu cards — a structural
     // change patchCard's field-level updates can't produce, so force a full rebuild.
     forceFullCardRefresh = true;
@@ -498,9 +688,7 @@ function toggleAdvancedMode() {
 function applyAutoUpdateState(on) {
     autoUpdateEnabled = on;
     const toggle = document.getElementById('autoUpdateToggle');
-    const thumb = document.getElementById('autoUpdateThumb');
-    if (toggle) { toggle.setAttribute('aria-checked', on); toggle.className = toggle.className.replace(/bg-\S+/, on ? 'bg-white' : 'bg-zinc-700'); }
-    if (thumb) { thumb.className = thumb.className.replace(/translate-x-\S+/, on ? 'translate-x-5' : 'translate-x-0.5'); thumb.style.background = on ? '#09090b' : ''; }
+    if (toggle) toggle.setAttribute('aria-checked', on); // .switch styles follow aria-checked
 }
 
 function applyDevBuildState(isDev) {
@@ -546,15 +734,15 @@ function updateStatCards() {
     const errors = Object.values(liveStatus).filter(s => s && s.status === 'error').length;
     const errEl = document.getElementById('statErrors');
     const errIco = document.getElementById('statErrorIcon');
-    if (errEl) { errEl.textContent = errors; errEl.className = 'text-xl font-semibold leading-tight' + (errors > 0 ? ' text-red-400' : ''); }
-    if (errIco) errIco.className = 'w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0 ' + (errors > 0 ? 'text-red-400' : 'text-zinc-400');
+    if (errEl) { errEl.textContent = errors; errEl.className = 'font-heading text-2xl leading-none mt-0.5 tabular-nums' + (errors > 0 ? ' text-danger' : ''); }
+    if (errIco) errIco.className = 'w-9 h-9 rounded-md border border-border flex items-center justify-center shrink-0 ' + (errors > 0 ? 'text-danger' : 'text-text-2');
 }
 
 function setBridgeStatus(online) {
     const el = document.getElementById('bridgeStatus');
     if (!el) return;
-    if (online) el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> <span class="text-emerald-400">Running</span>';
-    else        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-red-500 pulse"></span> <span class="text-red-400">Offline</span>';
+    if (online) el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-brand"></span> <span class="text-brand">Running</span>';
+    else        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-danger pulse"></span> <span class="text-danger">Offline</span>';
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -604,6 +792,160 @@ async function saveLegacyApiKey() { await saveApiKeys(); }
 
 async function saveFoxtrack2ApiKey() { await saveApiKeys(); }
 
+// ── Bambu Cloud account ───────────────────────────────────────────────────────
+// Sign-in, the emailed code, a pasted token, and the account connection state.
+// The server paces every call to Bambu; this only reflects what it reports.
+
+let cloudStatus = null;
+let cloudPendingEmail = '';
+
+function fmtDate(ts) { return ts ? new Date(ts * 1000).toLocaleDateString() : ''; }
+
+async function loadCloudStatus() {
+    try { cloudStatus = await apiFetch('/api/cloud/status'); } catch (_) { cloudStatus = null; }
+    renderCloudStatus();
+}
+
+function renderCloudStatus() {
+    const s = cloudStatus;
+    const unlinked = document.getElementById('cloudUnlinked');
+    const linked = document.getElementById('cloudLinked');
+    const notice = document.getElementById('cloudNotice');
+    const mq = document.getElementById('cloudMqtt');
+    if (!unlinked || !linked) return;
+    const isLinked = !!(s && s.linked);
+    unlinked.classList.toggle('hidden', isLinked);
+    linked.classList.toggle('hidden', !isLinked);
+    let noticeText = '';
+    if (isLinked) {
+        const m = s.mqtt || {};
+        const n = s.cloud_printers || 0;
+        document.getElementById('cloudLinkedEmail').textContent = s.email || 'Linked';
+        document.getElementById('cloudLinkedMeta').textContent = '· ' + (s.region === 'cn' ? 'China' : 'Global')
+            + ' · ' + (s.token_expired ? 'sign-in expired' : 'sign-in valid until ' + fmtDate(s.token_expires_at))
+            + ' · ' + n + ' cloud printer' + (n === 1 ? '' : 's');
+        const labels = { off:'Off', connecting:'Connecting…', connected:'Connected', backoff:'Reconnecting', held:'Paused', auth_failed:'Sign-in rejected' };
+        const dots = { off:'bg-text-2', connecting:'bg-text-2 pulse', connected:'bg-brand', backoff:'bg-warning pulse', held:'bg-warning', auth_failed:'bg-danger' };
+        if (mq) {
+            mq.classList.remove('hidden');
+            mq.querySelector('.cloud-dot').className = 'cloud-dot w-1.5 h-1.5 rounded-full ' + (dots[m.state] || 'bg-text-2');
+            mq.querySelector('.cloud-text').textContent = labels[m.state] || m.state || 'Off';
+        }
+        let detail = m.detail || '';
+        if (s.token_expired) detail = 'The Bambu sign-in has expired. Unlink and sign in again to reconnect cloud printers.';
+        else if (m.state === 'off' && n === 0) detail = 'Add a printer with the type "Bambu Lab (cloud)" to start the connection.';
+        const detailEl = document.getElementById('cloudDetail');
+        if (detailEl) { detailEl.textContent = detail; detailEl.classList.toggle('hidden', !detail); }
+        const retry = document.getElementById('cloudRetryBtn');
+        if (retry) retry.classList.toggle('hidden', !(m.state === 'backoff' || m.state === 'held'));
+        if (m.state === 'held' || m.state === 'auth_failed') noticeText = (m.detail && m.detail.indexOf('Bambu Cloud') === 0) ? m.detail : 'Bambu Cloud: ' + (m.detail || labels[m.state]);
+        else if (s.token_expired) noticeText = 'Bambu Cloud: the sign-in has expired. Link the account again in Settings.';
+        else if (s.token_expires_at && (s.token_expires_at * 1000 - Date.now()) < 7 * 86400000) noticeText = 'Bambu Cloud: the sign-in expires on ' + fmtDate(s.token_expires_at) + '. Sign in again in Settings before then.';
+    } else if (mq) {
+        mq.classList.add('hidden');
+    }
+    if (notice) { notice.textContent = noticeText; notice.classList.toggle('hidden', !noticeText); }
+}
+
+function showCloudError(msg) {
+    const el = document.getElementById('cloudError');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+}
+
+function resetCloudForm() {
+    cloudPendingEmail = '';
+    document.getElementById('cloudPasswordRow').classList.remove('hidden');
+    document.getElementById('cloudCodeRow').classList.add('hidden');
+    document.getElementById('cloudSignInBtn').classList.remove('hidden');
+    document.getElementById('cloudVerifyBtn').classList.add('hidden');
+    document.getElementById('cloudBackBtn').classList.add('hidden');
+    document.getElementById('cloudCode').value = '';
+    document.getElementById('cloudPassword').value = '';
+    showCloudError('');
+}
+
+function toggleCloudToken() { document.getElementById('cloudTokenRow').classList.toggle('hidden'); }
+
+function cloudRegion() { const el = document.getElementById('cloudRegion'); return el ? el.value : 'global'; }
+
+async function cloudSignIn() {
+    const email = document.getElementById('cloudEmail').value.trim();
+    const password = document.getElementById('cloudPassword').value;
+    if (!email || !password) { showCloudError('Enter your Bambu email and password'); return; }
+    const btn = document.getElementById('cloudSignInBtn');
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    showCloudError('');
+    try {
+        const res = await apiFetch('/api/cloud/login', { method:'POST', body:JSON.stringify({ email, password, region: cloudRegion() }) });
+        document.getElementById('cloudPassword').value = '';
+        if (res && res.status === 'code_required') {
+            cloudPendingEmail = email;
+            document.getElementById('cloudPasswordRow').classList.add('hidden');
+            document.getElementById('cloudCodeRow').classList.remove('hidden');
+            btn.classList.add('hidden');
+            document.getElementById('cloudVerifyBtn').classList.remove('hidden');
+            document.getElementById('cloudBackBtn').classList.remove('hidden');
+            document.getElementById('cloudCode').focus();
+            toast('Bambu emailed you a sign-in code', 'info');
+        } else {
+            toast('Bambu account linked');
+            resetCloudForm();
+            await loadCloudStatus();
+        }
+    } catch (e) { showCloudError(e.message); }
+    finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+}
+
+async function cloudVerify() {
+    const email = cloudPendingEmail || document.getElementById('cloudEmail').value.trim();
+    const code = document.getElementById('cloudCode').value.trim();
+    if (!code) { showCloudError('Enter the code from the email'); return; }
+    const btn = document.getElementById('cloudVerifyBtn');
+    btn.disabled = true; btn.textContent = 'Linking…';
+    showCloudError('');
+    try {
+        await apiFetch('/api/cloud/verify', { method:'POST', body:JSON.stringify({ email, code, region: cloudRegion() }) });
+        toast('Bambu account linked');
+        resetCloudForm();
+        await loadCloudStatus();
+    } catch (e) { showCloudError(e.message); }
+    finally { btn.disabled = false; btn.textContent = 'Link account'; }
+}
+
+async function cloudUseToken() {
+    const email = document.getElementById('cloudEmail').value.trim();
+    const token = document.getElementById('cloudToken').value.trim();
+    if (!token) { showCloudError('Paste an access token first'); return; }
+    showCloudError('');
+    try {
+        await apiFetch('/api/cloud/token', { method:'POST', body:JSON.stringify({ email, access_token: token, region: cloudRegion() }) });
+        document.getElementById('cloudToken').value = '';
+        toast('Bambu account linked');
+        resetCloudForm();
+        await loadCloudStatus();
+    } catch (e) { showCloudError(e.message); }
+}
+
+async function cloudUnlink() {
+    if (!confirm('Unlink the Bambu account? Cloud printers stay in the list but stop updating until you sign in again.')) return;
+    try {
+        await apiFetch('/api/cloud/unlink', { method:'POST', body:'{}' });
+        toast('Bambu account unlinked', 'info');
+        await loadCloudStatus();
+        pollStatus();
+    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function cloudRetry() {
+    try {
+        await apiFetch('/api/cloud/retry', { method:'POST', body:'{}' });
+        toast('Retrying the Bambu Cloud connection', 'info');
+        setTimeout(loadCloudStatus, 1500);
+    } catch (e) { toast(e.message, 'error'); }
+}
+
 // ── Add Printer Modal ─────────────────────────────────────────────────────────
 
 function openAddPrinterModal() {
@@ -621,6 +963,12 @@ function closeAddPrinterModal() {
     if (errEl) { errEl.textContent=''; errEl.classList.add('hidden'); }
     const btn = document.getElementById('connectBtn');
     if (btn) { btn.textContent='Connect'; btn.disabled=false; }
+    const cd = document.getElementById('fieldCloudDevices');
+    if (cd) cd.classList.add('hidden');
+    const cl = document.getElementById('cloudDeviceList');
+    if (cl) cl.innerHTML = '';
+    const tb = document.getElementById('testBtn');
+    if (tb) tb.style.display = '';
 }
 
 function onBrandChange() {
@@ -643,6 +991,44 @@ function onBrandChange() {
     cfg.fields.webcamUrl ? (wc.classList.remove('hidden'), wc.style.display='') : (wc.classList.add('hidden'), wc.style.display='none');
     const pn = document.getElementById('pName');
     if (pn) pn.placeholder = cfg.fields.moonrakerUrl ? 'e.g. Creality K1' : 'e.g. Studio P1S';
+    const isCloud = !!cfg.fields.cloudDevices;
+    const cd = document.getElementById('fieldCloudDevices');
+    if (cd) cd.classList.toggle('hidden', !isCloud);
+    const tb = document.getElementById('testBtn');
+    if (tb) tb.style.display = isCloud ? 'none' : '';
+    const li = document.getElementById('labelIp');
+    if (li) li.textContent = isCloud ? 'Printer IP (optional, for the camera)' : 'IP address';
+    if (isCloud) loadCloudDevices(false);
+}
+
+// Cloud printers come from the linked account's device list (cached server-side,
+// never polled). Picking one fills the name; the serial rides along on the radio.
+async function loadCloudDevices(refresh) {
+    const list = document.getElementById('cloudDeviceList');
+    if (!list) return;
+    list.innerHTML = '<p class="px-3 py-2.5 text-xs text-text-2">Loading printers from your Bambu account…</p>';
+    try {
+        const data = await apiFetch('/api/cloud/devices' + (refresh ? '?refresh=1' : ''));
+        const devs = (data && data.devices) || [];
+        if (!devs.length) { list.innerHTML = '<p class="px-3 py-2.5 text-xs text-text-2">No printers are bound to this Bambu account.</p>'; return; }
+        list.innerHTML = devs.map(d => {
+            const enc = escHtml(d.serial || '');
+            const sub = (d.model ? d.model + ' · ' : '') + (d.serial || '');
+            return '<label class="flex items-center gap-3 px-3 py-2.5 text-sm' + (d.added ? ' opacity-50' : ' cursor-pointer hover:bg-panel') + '">'
+                + '<input type="radio" name="cloudDevice" value="' + enc + '" data-name="' + escHtml(d.name || '') + '"' + (d.added ? ' disabled' : '') + ' onchange="onCloudDeviceChange(this)">'
+                + '<span class="w-1.5 h-1.5 rounded-full shrink-0 ' + (d.online ? 'bg-brand' : 'bg-text-2') + '" title="' + (d.online ? 'Online' : 'Offline') + '"></span>'
+                + '<span class="flex-1 min-w-0"><span class="block truncate">' + escHtml(d.name || d.serial || 'Printer') + '</span><span class="block text-[11px] text-text-2 font-mono truncate">' + escHtml(sub) + '</span></span>'
+                + (d.added ? '<span class="text-[10px] text-text-2 rounded-full border border-border px-2 py-0.5 shrink-0">Added' + (d.added_as ? ' as ' + escHtml(d.added_as) : '') + '</span>' : '')
+                + '</label>';
+        }).join('');
+    } catch (e) {
+        list.innerHTML = '<p class="px-3 py-2.5 text-xs text-danger">' + escHtml(e.message) + '</p>';
+    }
+}
+
+function onCloudDeviceChange(el) {
+    const pn = document.getElementById('pName');
+    if (pn && !pn.value.trim()) pn.value = el.dataset.name || '';
 }
 
 async function testConnection() {
@@ -653,20 +1039,20 @@ async function testConnection() {
     const btn = document.getElementById('testBtn');
     const target = brand === 'klipper' ? moonrakerUrl : ip;
     if (!target) { showAddPrinterError(brand==='klipper' ? 'Enter a Moonraker URL first' : 'Enter an IP address first'); return; }
-    if (btn) { btn.disabled=true; btn.textContent='Testing...'; }
-    result.className = 'text-xs text-zinc-400'; result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing...'; result.classList.remove('hidden');
+    if (btn) { btn.disabled=true; btn.textContent='Testing…'; }
+    result.className = 'text-xs text-text-2'; result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing...'; result.classList.remove('hidden');
     try {
         const data = await apiFetch('/api/test', { method:'POST', body:JSON.stringify({ ip, moonraker_url:moonrakerUrl }) });
         if (data && data.reachable) {
-            result.className='text-xs text-emerald-400'; result.innerHTML='<i class="fas fa-check-circle mr-1"></i> Reachable';
+            result.className='text-xs text-brand'; result.innerHTML='<i class="fas fa-check-circle mr-1"></i> Reachable';
         } else {
             const hint = data && data.detail ? ' — ' + data.detail : '';
-            result.className='text-xs text-red-400'; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> Unreachable' + escHtml(hint);
+            result.className='text-xs text-danger'; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> Unreachable' + escHtml(hint);
         }
     } catch (e) {
-        result.className='text-xs text-red-400'; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> ' + escHtml(e.message);
+        result.className='text-xs text-danger'; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> ' + escHtml(e.message);
     } finally {
-        if (btn) { btn.disabled=false; btn.textContent='Test Connection'; }
+        if (btn) { btn.disabled=false; btn.textContent='Test connection'; }
     }
 }
 
@@ -677,7 +1063,7 @@ function showAddPrinterError(msg) {
     el.classList.remove('hidden');
 }
 
-const FIELD_ERROR_CLASS = 'border-red-600/70';
+const FIELD_ERROR_CLASS = 'field-invalid';
 
 function markField(id, invalid) {
     const el = document.getElementById(id);
@@ -711,11 +1097,17 @@ async function addPrinter() {
     if (brand === 'klipper') {
         markField('pMoonrakerUrl', !moonrakerUrl); if (!moonrakerUrl) invalid = true;
     }
+    let payload = { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl };
+    if (brand === 'bambu_cloud') {
+        const picked = document.querySelector('input[name="cloudDevice"]:checked');
+        if (!picked) { showAddPrinterError('Pick a printer from your Bambu account'); return; }
+        payload = { name, serial: picked.value, connection: 'cloud', ip };
+    }
     if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return; }
     const btn = document.getElementById('connectBtn');
-    if (btn) { btn.textContent='Connecting...'; btn.disabled=true; }
+    if (btn) { btn.textContent='Connecting…'; btn.disabled=true; }
     try {
-        await apiFetch('/api/printers', { method:'POST', body:JSON.stringify({ name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl }) });
+        await apiFetch('/api/printers', { method:'POST', body:JSON.stringify(payload) });
         closeAddPrinterModal();
         toast('Connecting to ' + name + '...', 'info');
         await loadConfig();
@@ -767,7 +1159,7 @@ function togglePrinterSelectionEncoded(enc) {
 function updateRemoveCount() {
     const n = selectedForRemoval.size;
     const btn = document.getElementById('confirmRemoveBtn');
-    if (btn) { btn.textContent = n > 0 ? 'Remove ' + n + ' Printer' + (n!==1?'s':'') : 'Remove Selected'; btn.disabled = n === 0; }
+    if (btn) { btn.textContent = n > 0 ? 'Remove ' + n + ' Printer' + (n!==1?'s':'') : 'Remove selected'; btn.disabled = n === 0; }
 }
 
 async function confirmBulkRemove() {
@@ -843,9 +1235,9 @@ function renderPrinters() {
 
     if (configuredPrinters.length === 0) {
         printerCardEls.clear();
-        list.innerHTML = '<div class="col-span-full rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-center">'
-            + '<p class="text-zinc-400 text-sm">No printers connected.</p>'
-            + '<button onclick="openAddPrinterModal()" class="mt-3 btn-primary inline-block">Add Printer</button>'
+        list.innerHTML = '<div class="col-span-full rounded-lg border border-dashed border-border p-8 text-center">'
+            + '<p class="text-text-2 text-sm">No printers connected.</p>'
+            + '<button onclick="openAddPrinterModal()" class="mt-3 btn-outline">Add printer</button>'
             + '</div>';
         return;
     }
@@ -883,7 +1275,7 @@ function renderPrinters() {
 
 function cardOuterClass(printer) {
     const sel = removeMode && selectedForRemoval.has(printer.id);
-    return 'bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden' + (sel ? ' pcard-sel' : '');
+    return 'rounded-lg border border-border bg-panel overflow-hidden' + (sel ? ' pcard-sel' : '');
 }
 
 // Full structural (re)build of a card's content — used on create and whenever
@@ -970,11 +1362,12 @@ function patchCard(entry, printer) {
     const live = liveStatus[printer.id] || null;
     const status = live && live.status ? live.status : 'connecting';
     const meta = statusMeta(status);
-    const isBambu = !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
+    const isCloud = isCloudPrinter(printer);
+    const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
     const dis = (status === 'disconnected' || status === 'connecting');
 
     if (hooks.printerName) hooks.printerName.textContent = printer.name;
-    if (hooks.typeBadge) hooks.typeBadge.textContent = isBambu ? 'Bambu' : 'Klipper';
+    if (hooks.typeBadge) hooks.typeBadge.textContent = printerTypeLabel(printer);
     if (hooks.printerModel) {
         const modelText = isBambu && live && live.printer_model ? live.printer_model : '';
         hooks.printerModel.textContent = modelText;
@@ -983,7 +1376,7 @@ function patchCard(entry, printer) {
 
     if (hooks.statusDot) hooks.statusDot.className = 'status-dot w-1.5 h-1.5 rounded-full ' + meta.dot;
     if (hooks.statusLabel) hooks.statusLabel.textContent = meta.label;
-    if (hooks.statusBadge) hooks.statusBadge.className = 'status-badge inline-flex items-center gap-1 border rounded-md px-1.5 py-0.5 text-[10px] ' + meta.badge + ' ' + meta.text;
+    if (hooks.statusBadge) hooks.statusBadge.className = 'status-badge inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] ' + meta.badge;
 
     const file = live && live.file_name ? live.file_name : '';
     if (hooks.fileName) {
@@ -1001,7 +1394,7 @@ function patchCard(entry, printer) {
     const nozzleTgt = live && typeof live.nozzle_target === 'number' ? live.nozzle_target : null;
     const bed = live && typeof live.bed_temp === 'number' ? live.bed_temp : null;
     const bedTgt = live && typeof live.bed_target === 'number' ? live.bed_target : null;
-    if (hooks.nozzleLabel) hooks.nozzleLabel.textContent = (live && live.active_extruder) ? 'Active Toolhead' : 'Nozzle';
+    if (hooks.nozzleLabel) hooks.nozzleLabel.textContent = (live && live.active_extruder) ? 'Active toolhead' : 'Nozzle';
     applyTempValue(hooks.nozzleValue, 'nozzle-value', nozzle, nozzleTgt);
     applyTempValue(hooks.bedValue, 'bed-value', bed, bedTgt);
 
@@ -1033,7 +1426,7 @@ function patchCard(entry, printer) {
     const lightPending = printer.id in pendingLightTarget;
     if (hooks.lightBtn) {
         hooks.lightBtn.disabled = dis || lightPending;
-        hooks.lightBtn.className = 'light-btn btn-outline' + (lightOn ? ' border-yellow-700/60 text-yellow-400' : '');
+        hooks.lightBtn.className = 'light-btn btn-outline' + (lightOn ? ' is-on' : '');
         hooks.lightBtn.innerHTML = lightPending
             ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>Light'
             : '<i class="fas fa-lightbulb mr-1"></i>' + (lightOn ? 'On' : 'Off');
@@ -1050,7 +1443,7 @@ function patchCard(entry, printer) {
             const active = !fanPending && (pct === 0
                 ? coolingFanPct === null || coolingFanPct === 0
                 : coolingFanPct !== null && Math.abs(coolingFanPct - pct) <= 12);
-            btn.className = 'fan-btn ' + ((active || isTarget) ? 'btn-primary' : 'btn-outline');
+            btn.className = 'fan-btn chip' + ((active || isTarget) ? ' active' : '');
             btn.disabled = dis || (fanPending && !isTarget);
             btn.style.opacity = (fanPending && !isTarget) ? '0.4' : '';
             const icon = isTarget ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '';
@@ -1062,7 +1455,7 @@ function patchCard(entry, printer) {
     if (hooks.speedButtons.length) {
         hooks.speedButtons.forEach((btn, i) => {
             const lvl = i + 1;
-            btn.className = 'speed-btn ' + (speedLevel === lvl ? 'btn-primary' : 'btn-outline');
+            btn.className = 'speed-btn chip' + (speedLevel === lvl ? ' active' : '');
             btn.disabled = dis;
         });
     }
@@ -1076,26 +1469,27 @@ function patchCard(entry, printer) {
 
 function applyTempValue(el, cls, now, tgt) {
     if (!el) return;
-    el.className = cls + ' text-xs mt-0.5 ' + (now === null ? 'text-zinc-400' : 'text-zinc-200');
-    el.innerHTML = now === null ? '--' : (Math.round(now) + '° <span class="text-zinc-400">/ ' + (tgt !== null ? Math.round(tgt) : '--') + '°</span>');
+    el.className = cls + ' text-sm mt-0.5 tabular-nums ' + (now === null ? 'text-text-2' : 'text-text');
+    el.innerHTML = now === null ? '—' : (Math.round(now) + '° <span class="text-text-2">/ ' + (tgt !== null ? Math.round(tgt) : '—') + '°</span>');
 }
 
 function tempValueP(cls, now, tgt) {
     return now === null
-        ? '<p class="' + cls + ' text-xs text-zinc-400 mt-0.5">--</p>'
-        : '<p class="' + cls + ' text-xs text-zinc-200 mt-0.5">' + Math.round(now) + '° <span class="text-zinc-400">/ ' + (tgt !== null ? Math.round(tgt) : '--') + '°</span></p>';
+        ? '<p class="' + cls + ' text-sm mt-0.5 tabular-nums text-text-2">—</p>'
+        : '<p class="' + cls + ' text-sm mt-0.5 tabular-nums text-text">' + Math.round(now) + '° <span class="text-text-2">/ ' + (tgt !== null ? Math.round(tgt) : '—') + '°</span></p>';
 }
 
 function amsSlotsInnerHTML(amsSlots) {
-    return '<span class="text-[10px] text-zinc-400 uppercase tracking-wide font-medium self-center">AMS</span>'
+    return '<span class="text-[11px] text-text-2 self-center">AMS</span>'
         + '<div class="flex items-center gap-2">'
         + amsSlots.map(s => {
-            const color = s.color ? '#' + s.color : '#3f3f46';
+            // Filament colour is data, so it is the one inline colour on a card.
+            const color = s.color ? '#' + s.color : 'var(--panel-2)';
             const label = s.material || ('S' + (s.slot + 1));
-            const ring = s.active ? ' ring-2 ring-white/60 ring-offset-1 ring-offset-zinc-950' : '';
+            const ring = s.active ? ' ring-2 ring-brand ring-offset-2 ring-offset-bg' : '';
             return '<div class="flex flex-col items-center gap-1" title="Slot ' + (s.slot + 1) + (s.active ? ' — loaded' : '') + (label ? ' · ' + escHtml(label) : '') + '">'
-                + '<div class="w-6 h-6 rounded-full' + ring + '" style="background:' + escHtml(color) + '"></div>'
-                + '<span class="text-[9px] text-zinc-400 font-mono">' + escHtml(label.slice(0, 5)) + '</span>'
+                + '<div class="w-6 h-6 rounded-full border border-border' + ring + '" style="background:' + escHtml(color) + '"></div>'
+                + '<span class="text-[9px] text-text-2 font-mono">' + escHtml(label.slice(0, 5)) + '</span>'
                 + '</div>';
         }).join('')
         + '</div>';
@@ -1119,8 +1513,9 @@ function cardInnerHTML(printer, live) {
     const coolingFanPct = live && live.cooling_fan_pct > 0 ? live.cooling_fan_pct : null;
     const filamentUsedMM = live && live.filament_used_mm > 0 ? live.filament_used_mm : null;
     const enc = encodeURIComponent(printer.id);
-    const isBambu = !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
-    const typeLabel = isBambu ? 'Bambu' : 'Klipper';
+    const isCloud = isCloudPrinter(printer);
+    const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
+    const typeLabel = printerTypeLabel(printer);
 
     const sel = removeMode && selectedForRemoval.has(printer.id);
     const checkbox = removeMode
@@ -1130,7 +1525,7 @@ function cardInnerHTML(printer, live) {
 
     const dis = (status==='disconnected'||status==='connecting') ? 'disabled ' : '';
     const lightPending = printer.id in pendingLightTarget;
-    const lightCls = 'light-btn btn-outline' + (lightOn ? ' border-yellow-700/60 text-yellow-400' : '');
+    const lightCls = 'light-btn btn-outline' + (lightOn ? ' is-on' : '');
     const lightHtml = lightPending
         ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>Light'
         : '<i class="fas fa-lightbulb mr-1"></i>' + (lightOn ? 'On' : 'Off');
@@ -1147,14 +1542,14 @@ function cardInnerHTML(printer, live) {
 
     // Speed panel (BambuLab only) — collapsible, toggled by the Speed button
     const speedNames = ['', 'Silent', 'Standard', 'Sport', 'Ludicrous'];
-    const speedPanel = isBambu ?
-        '<div id="speed-' + enc + '" class="speed-panel hidden border-t border-zinc-800 px-4 py-3">'
+    const speedPanel = (isBambu && !isCloud) ?
+        '<div id="speed-' + enc + '" class="speed-panel hidden border-t border-border px-4 py-3">'
         + '<div class="flex items-center gap-1.5">'
-        + '<span class="text-[10px] text-zinc-400 uppercase tracking-wide font-medium mr-0.5">Speed</span>'
+        + '<span class="text-[11px] text-text-2 mr-1">Speed</span>'
         + [1,2,3,4].map(lvl => {
             const active = speedLevel === lvl;
-            const cls = active ? 'btn-primary' : 'btn-outline';
-            return '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'print_speed\',{level:\'' + lvl + '\'})" class="speed-btn ' + cls + '" style="padding:0.2rem 0.5rem;font-size:0.65rem">' + speedNames[lvl] + '</button>';
+            const cls = active ? 'chip active' : 'chip';
+            return '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'print_speed\',{level:\'' + lvl + '\'})" class="speed-btn ' + cls + '">' + speedNames[lvl] + '</button>';
         }).join('')
         + '</div></div>'
         : '';
@@ -1162,21 +1557,21 @@ function cardInnerHTML(printer, live) {
     // Fan speed panel — collapsible, works for both Bambu and Klipper
     const fanPending = printer.id in pendingFanTarget;
     const fanTargetPct = pendingFanTarget[printer.id];
-    const fanPanel = !removeMode ?
-        '<div id="fan-' + enc + '" class="fan-panel hidden border-t border-zinc-800 px-4 py-3">'
+    const fanPanel = (!removeMode && !isCloud) ?
+        '<div id="fan-' + enc + '" class="fan-panel hidden border-t border-border px-4 py-3">'
         + '<div class="flex items-center gap-1.5">'
-        + '<span class="text-[10px] text-zinc-400 uppercase tracking-wide font-medium mr-0.5">Part Fan</span>'
+        + '<span class="text-[11px] text-text-2 mr-1">Part fan</span>'
         + [0, 25, 50, 75, 100].map(pct => {
             const label = pct === 0 ? 'Off' : pct + '%';
             const isTarget = fanPending && fanTargetPct === pct;
             const active = !fanPending && (pct === 0
                 ? coolingFanPct === null || coolingFanPct === 0
                 : coolingFanPct !== null && Math.abs(coolingFanPct - pct) <= 12);
-            const cls = (active || isTarget) ? 'btn-primary' : 'btn-outline';
+            const cls = (active || isTarget) ? 'chip active' : 'chip';
             const btnDis = (dis || (fanPending && !isTarget)) ? 'disabled ' : '';
             const opacity = fanPending && !isTarget ? '0.4' : '';
             const icon = isTarget ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '';
-            return '<button ' + btnDis + 'onclick="setFanSpeedEncoded(\'' + enc + '\',' + pct + ')" class="fan-btn ' + cls + '" style="padding:0.2rem 0.5rem;font-size:0.65rem;opacity:' + opacity + '">' + icon + label + '</button>';
+            return '<button ' + btnDis + 'onclick="setFanSpeedEncoded(\'' + enc + '\',' + pct + ')" class="fan-btn ' + cls + '" style="opacity:' + opacity + '">' + icon + label + '</button>';
         }).join('')
         + '</div></div>'
         : '';
@@ -1184,32 +1579,36 @@ function cardInnerHTML(printer, live) {
     const controls = removeMode ? '' :
         '<div class="flex items-end justify-between gap-3 mt-3">'
         + '<div class="flex flex-wrap gap-1.5">'
-        + '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline">Pause</button>'
-        + '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
-        + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger">Stop</button>'
+        // Cloud printers: current Bambu firmware only honours the light over the
+        // cloud, so pause/stop/fan/speed/GCode are LAN-only buttons.
+        + (isCloud ? '' :
+            '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline">Pause</button>'
+            + '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
+            + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger">Stop</button>')
         + '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '">' + lightHtml + '</button>'
         + '<button onclick="toggleCamera(\'' + enc + '\')" class="btn-outline cam-btn">' + (cameraLoading.has(enc) ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '<i class="fas fa-camera mr-1"></i>') + 'Camera</button>'
-        + '<button onclick="toggleFan(\'' + enc + '\')" class="btn-outline"><i class="fas fa-fan mr-1"></i>Fan</button>'
-        + (isBambu
-            ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'
-              + (advancedMode ? '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>GCode</button>' : '')
-            : '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline">Start Print</button>')
+        + (isCloud ? '' :
+            '<button onclick="toggleFan(\'' + enc + '\')" class="btn-outline"><i class="fas fa-fan mr-1"></i>Fan</button>'
+            + (isBambu
+                ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'
+                  + (advancedMode ? '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>GCode</button>' : '')
+                : '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline">Start print</button>'))
         + '</div>'
         + amsPanel
         + '</div>';
 
     const camPanel = removeMode ? '' :
-        '<div id="cam-' + enc + '" class="cam-panel hidden border-t border-zinc-800 bg-black">'
+        '<div id="cam-' + enc + '" class="cam-panel hidden border-t border-border bg-panel-2">'
         + '<img class="cam-img" src="" alt="Camera" style="display:block;width:100%;max-height:300px;object-fit:contain;">'
-        + '<div class="cam-unavailable hidden p-4 text-center text-xs text-zinc-400"><i class="fas fa-video-slash mr-1"></i>Camera unavailable — check webcam service or URL</div>'
+        + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>Camera unavailable — check webcam service or URL</div>'
         + '</div>';
 
-    const gcodePanel = (isBambu && !removeMode) ?
-        '<div id="gcode-' + enc + '" class="gcode-panel hidden border-t border-zinc-800 px-4 py-3 flex gap-2">'
+    const gcodePanel = (isBambu && !removeMode && !isCloud) ?
+        '<div id="gcode-' + enc + '" class="gcode-panel hidden border-t border-border px-4 py-3 flex gap-2">'
         + '<input id="gcodeInput-' + enc + '" type="text" placeholder="e.g. M106 P1 S128" autocomplete="off"'
-        + '  class="gcode-input flex-1 bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-white/20 font-mono"'
+        + '  class="gcode-input field field-mono flex-1"'
         + '  onkeydown="if(event.key===\'Enter\')sendGcodeEncoded(\'' + enc + '\')">'
-        + '<button onclick="sendGcodeEncoded(\'' + enc + '\')" class="btn-primary" style="padding:0.35rem 0.75rem;font-size:0.75rem">Send</button>'
+        + '<button onclick="sendGcodeEncoded(\'' + enc + '\')" class="btn-outline btn-lg">Send</button>'
         + '</div>'
         : '';
 
@@ -1218,35 +1617,35 @@ function cardInnerHTML(printer, live) {
     return '<div class="px-4 py-3.5">'
         + '<div class="flex items-start justify-between gap-2 mb-3">'
         + '<div class="min-w-0">'
-        + '<p class="printer-name text-sm font-semibold leading-tight truncate">' + escHtml(printer.name) + '</p>'
-        + '<p class="printer-model text-[11px] text-zinc-400 mt-0.5' + (modelText ? '' : ' hidden') + '">' + escHtml(modelText) + '</p>'
+        + '<p class="printer-name font-heading text-lg font-medium leading-tight truncate">' + escHtml(printer.name) + '</p>'
+        + '<p class="printer-model text-[11px] text-text-2 mt-0.5' + (modelText ? '' : ' hidden') + '">' + escHtml(modelText) + '</p>'
         + '</div>'
         + '<div class="flex items-center gap-1.5 shrink-0">'
         + checkbox
-        + '<span class="type-badge text-[10px] border border-zinc-800 text-zinc-400 rounded-md px-1.5 py-0.5 font-medium">' + typeLabel + '</span>'
-        + '<span class="status-badge inline-flex items-center gap-1 border rounded-md px-1.5 py-0.5 text-[10px] ' + meta.badge + ' ' + meta.text + '"><span class="status-dot w-1.5 h-1.5 rounded-full ' + meta.dot + '"></span><span class="status-label">' + meta.label + '</span></span>'
+        + '<span class="type-badge inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] text-text-2">' + typeLabel + '</span>'
+        + '<span class="status-badge inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] ' + meta.badge + '"><span class="status-dot w-1.5 h-1.5 rounded-full ' + meta.dot + '"></span><span class="status-label">' + meta.label + '</span></span>'
         + '</div>'
         + '</div>'
-        + '<p class="file-name text-[11px] text-zinc-400 truncate mb-1' + (file ? '' : ' hidden') + '" title="' + escHtml(file) + '">' + escHtml(file) + '</p>'
-        + '<div class="progress-wrap w-full bg-zinc-800 rounded-full h-px mt-3' + ((status==='printing'||status==='paused') ? '' : ' hidden') + '"><div class="progress-fill h-px rounded-full bg-zinc-300 transition-all duration-500" style="width:' + progress + '%"></div></div>'
+        + '<p class="file-name text-[11px] text-text-2 truncate mb-1' + (file ? '' : ' hidden') + '" title="' + escHtml(file) + '">' + escHtml(file) + '</p>'
+        + '<div class="progress-wrap w-full bg-border rounded-full h-1.5 mt-3 overflow-hidden' + ((status==='printing'||status==='paused') ? '' : ' hidden') + '"><div class="progress-fill h-1.5 rounded-full bg-brand transition-all duration-500" style="width:' + progress + '%"></div></div>'
         + '<div class="grid grid-cols-3 gap-2 mt-3">'
-        + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2">'
-        + '<p class="nozzle-label text-[10px] text-zinc-400 font-medium uppercase tracking-wide">' + (live && live.active_extruder ? 'Active Toolhead' : 'Nozzle') + '</p>'
+        + '<div class="rounded-md border border-border px-3 py-2">'
+        + '<p class="nozzle-label text-[11px] text-text-2">' + (live && live.active_extruder ? 'Active toolhead' : 'Nozzle') + '</p>'
         + tempValueP('nozzle-value', nozzle, nozzleTgt)
         + '</div>'
-        + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2">'
-        + '<p class="text-[10px] text-zinc-400 font-medium uppercase tracking-wide">Bed</p>'
+        + '<div class="rounded-md border border-border px-3 py-2">'
+        + '<p class="text-[11px] text-text-2">Bed</p>'
         + tempValueP('bed-value', bed, bedTgt)
         + '</div>'
-        + '<div class="rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2"><p class="text-[10px] text-zinc-400 font-medium uppercase tracking-wide">ETA</p>'
-        + '<p class="eta-text text-xs text-zinc-300 mt-0.5' + ((status==='printing'||status==='paused') ? '' : ' hidden') + '">' + escHtml(formatRemaining(tr)) + '</p>'
-        + '<p class="eta-elapsed text-[10px] text-zinc-400 mt-0.5' + (((status==='printing'||status==='paused') && printStartTimes[printer.id]) ? '' : ' hidden') + '">' + (printStartTimes[printer.id] ? formatElapsed(printStartTimes[printer.id]) : '') + '</p>'
-        + '<p class="eta-dash text-xs text-zinc-400 mt-0.5' + ((status==='printing'||status==='paused') ? ' hidden' : '') + '">—</p>'
+        + '<div class="rounded-md border border-border px-3 py-2"><p class="text-[11px] text-text-2">ETA</p>'
+        + '<p class="eta-text text-sm text-text mt-0.5 tabular-nums' + ((status==='printing'||status==='paused') ? '' : ' hidden') + '">' + escHtml(formatRemaining(tr)) + '</p>'
+        + '<p class="eta-elapsed text-[11px] text-text-2 mt-0.5' + (((status==='printing'||status==='paused') && printStartTimes[printer.id]) ? '' : ' hidden') + '">' + (printStartTimes[printer.id] ? formatElapsed(printStartTimes[printer.id]) : '') + '</p>'
+        + '<p class="eta-dash text-sm text-text-2 mt-0.5' + ((status==='printing'||status==='paused') ? ' hidden' : '') + '">—</p>'
         + '</div>'
         + '</div>'
-        + '<p class="error-text mt-2 text-[11px] text-red-400' + (error ? '' : ' hidden') + '">' + (error ? 'Error: ' + escHtml(error) : '') + '</p>'
+        + '<p class="error-text mt-2 text-[11px] text-danger' + (error ? '' : ' hidden') + '">' + (error ? 'Error: ' + escHtml(error) : '') + '</p>'
         + '<div class="filament-wrap flex items-center gap-3 mt-2' + ((status==='printing' && filamentUsedMM !== null) ? '' : ' hidden') + '">'
-        + '<span class="text-[11px] text-zinc-400"><i class="fas fa-ruler-horizontal mr-1"></i><span class="filament-value">' + (filamentUsedMM !== null ? (filamentUsedMM >= 1000 ? (filamentUsedMM/1000).toFixed(1)+'m' : Math.round(filamentUsedMM)+'mm') : '') + '</span></span>'
+        + '<span class="text-[11px] text-text-2"><i class="fas fa-ruler-horizontal mr-1"></i><span class="filament-value">' + (filamentUsedMM !== null ? (filamentUsedMM >= 1000 ? (filamentUsedMM/1000).toFixed(1)+'m' : Math.round(filamentUsedMM)+'mm') : '') + '</span></span>'
         + '</div>'
         + controls
         + '</div>'
@@ -1410,7 +1809,7 @@ function buildTempChartSVG(samples, totalSec) {
     const nozzleVals = samples.map(s => s.nozzle_temp);
     const bedVals    = samples.map(s => s.bed_temp);
     const allVals    = [...nozzleVals, ...bedVals].filter(v => v > 0);
-    if (!allVals.length) return '<p class="text-xs text-zinc-500">No data</p>';
+    if (!allVals.length) return '<p class="text-xs text-text-2">No data</p>';
 
     const yMin = Math.floor(Math.min(...allVals) / 10) * 10;
     const yMax = Math.ceil(Math.max(...allVals) / 10) * 10 + 5;
@@ -1425,20 +1824,20 @@ function buildTempChartSVG(samples, totalSec) {
 
     // Axis labels
     const yLabels = [yMin, Math.round((yMin + yMax) / 2), yMax].map(v =>
-        '<text x="' + (padL - 4) + '" y="' + py(v).toFixed(1) + '" text-anchor="end" dominant-baseline="middle" fill="#52525b" font-size="8">' + v + '</text>'
+        '<text x="' + (padL - 4) + '" y="' + py(v).toFixed(1) + '" text-anchor="end" dominant-baseline="middle" style="fill:var(--text-2)" font-size="8">' + v + '</text>'
     ).join('');
 
     const durFmt = s => s >= 3600 ? Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m' : Math.floor(s/60)+'m';
-    const xLabels = '<text x="' + padL + '" y="' + (H - 4) + '" fill="#52525b" font-size="8">0</text>'
-        + '<text x="' + (padL + innerW) + '" y="' + (H - 4) + '" text-anchor="end" fill="#52525b" font-size="8">' + durFmt(xMax) + '</text>';
+    const xLabels = '<text x="' + padL + '" y="' + (H - 4) + '" style="fill:var(--text-2)" font-size="8">0</text>'
+        + '<text x="' + (padL + innerW) + '" y="' + (H - 4) + '" text-anchor="end" style="fill:var(--text-2)" font-size="8">' + durFmt(xMax) + '</text>';
 
     // Legend
-    const legend = '<text x="' + (padL + 4) + '" y="' + (padT + 9) + '" fill="#fb923c" font-size="8">Nozzle</text>'
-        + '<text x="' + (padL + 44) + '" y="' + (padT + 9) + '" fill="#60a5fa" font-size="8">Bed</text>';
+    const legend = '<text x="' + (padL + 4) + '" y="' + (padT + 9) + '" style="fill:var(--accent)" font-size="8">Nozzle</text>'
+        + '<text x="' + (padL + 44) + '" y="' + (padT + 9) + '" style="fill:var(--link)" font-size="8">Bed</text>';
 
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:80px" xmlns="http://www.w3.org/2000/svg">'
-        + '<polyline points="' + toPoints(nozzleVals) + '" fill="none" stroke="#fb923c" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
-        + '<polyline points="' + toPoints(bedVals) + '" fill="none" stroke="#60a5fa" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+        + '<polyline points="' + toPoints(nozzleVals) + '" fill="none" style="stroke:var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+        + '<polyline points="' + toPoints(bedVals) + '" fill="none" style="stroke:var(--link)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
         + yLabels + xLabels + legend
         + '</svg>';
 }
@@ -1462,7 +1861,7 @@ function exportHistoryCsv() {
 async function refreshGlobalHistory() {
     const content = document.getElementById('globalHistoryContent');
     if (!content) return;
-    content.innerHTML = '<p class="text-zinc-400 text-xs py-4 text-center">Loading...</p>';
+    content.innerHTML = '<p class="text-text-2 text-sm py-4 text-center">Loading...</p>';
     try {
         const data = await apiFetch('/api/history');
         const records = (data && data.records) ? data.records : [];
@@ -1470,7 +1869,7 @@ async function refreshGlobalHistory() {
         const csvBtn = document.getElementById('exportCsvBtn');
         if (records.length === 0) {
             if (csvBtn) csvBtn.style.display = 'none';
-            content.innerHTML = '<p class="text-zinc-400 text-xs py-8 text-center">No print history yet.</p>';
+            content.innerHTML = '<p class="text-text-2 text-sm py-8 text-center">No print history yet.</p>';
             return;
         }
         if (csvBtn) csvBtn.style.display = '';
@@ -1503,10 +1902,10 @@ async function refreshGlobalHistory() {
                 ? printerTotalHours.toFixed(1) + 'h'
                 : (pSecs / 3600).toFixed(1) + 'h';
             const hoursTitle = printerTotalHours !== null ? 'Lifetime total from printer' : 'Tracked by Bridge';
-            const statsStrip = '<div class="grid grid-cols-3 gap-px bg-zinc-800 border-b border-zinc-800">'
-                + '<div class="bg-zinc-950 px-3 py-2 text-center"><p class="text-[9px] text-zinc-500 uppercase tracking-wide">Prints</p><p class="text-xs font-semibold mt-0.5">' + recs.length + '</p></div>'
-                + '<div class="bg-zinc-950 px-3 py-2 text-center"><p class="text-[9px] text-zinc-500 uppercase tracking-wide">Success</p><p class="text-xs font-semibold mt-0.5">' + pRate + '</p></div>'
-                + '<div class="bg-zinc-950 px-3 py-2 text-center"><p class="text-[9px] text-zinc-500 uppercase tracking-wide">Hours</p><p class="text-xs font-semibold mt-0.5" title="' + hoursTitle + '">' + pHours + (printerTotalHours !== null ? ' <span class="text-zinc-600 text-[8px]" title="' + hoursTitle + '">★</span>' : '') + '</p></div>'
+            const statsStrip = '<div class="grid grid-cols-3 divide-x divide-border border-b border-border">'
+                + '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">Prints</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5">' + recs.length + '</p></div>'
+                + '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">Success</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5">' + pRate + '</p></div>'
+                + '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">Hours</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5" title="' + hoursTitle + '">' + pHours + (printerTotalHours !== null ? ' <span class="text-text-2 text-[10px]" title="' + hoursTitle + '">★</span>' : '') + '</p></div>'
                 + '</div>';
 
             const rows = recs.map((r, i) => {
@@ -1514,20 +1913,20 @@ async function refreshGlobalHistory() {
                 const date = new Date((r.start_time||0)*1000).toLocaleDateString();
                 const sec = r.duration||0;
                 const dur = sec>=3600 ? Math.floor(sec/3600)+'h '+Math.floor((sec%3600)/60)+'m' : Math.floor(sec/60)+'m';
-                const rc = r.result==='finished' ? 'text-emerald-400' : r.result==='error' ? 'text-red-400' : 'text-yellow-400';
+                const rc = r.result==='finished' ? 'text-brand' : r.result==='error' ? 'text-danger' : 'text-warning';
                 const hasSamples = r.temp_samples && r.temp_samples.length > 1;
                 const isExtra = i >= 5;
                 const tempsBtn = hasSamples
-                    ? '<button onclick="toggleTempChart(\'' + uid + '\')" class="inline-flex items-center gap-1 border border-zinc-700 hover:border-zinc-500 text-zinc-400 hover:text-zinc-200 rounded-md px-1.5 py-0.5 transition-colors" style="font-size:0.65rem" title="Temperature chart"><i class="fas fa-chart-line"></i> Temps</button>'
+                    ? '<button onclick="toggleTempChart(\'' + uid + '\')" class="inline-flex items-center gap-1 rounded-full border border-border text-text-2 hover:text-text hover:bg-panel px-2 py-0.5 text-[10px]" title="Temperature chart"><i class="fas fa-chart-line"></i> Temps</button>'
                     : '';
-                const dataRowClass = 'border-t border-zinc-800 hover:bg-zinc-900/40' + (isExtra ? ' hist-data-extra hidden' : '');
-                const chartRowClass = 'hidden border-t border-zinc-800 bg-zinc-900/30' + (isExtra ? ' hist-chart-extra' : '');
+                const dataRowClass = 'border-t border-border hover:bg-panel' + (isExtra ? ' hist-data-extra hidden' : '');
+                const chartRowClass = 'hidden border-t border-border bg-panel' + (isExtra ? ' hist-chart-extra' : '');
                 const extraAttr = isExtra ? ' data-extra-for="' + enc + '"' : '';
                 const dataRow = '<tr id="hr-' + uid + '" class="' + dataRowClass + '"' + extraAttr + '>'
-                    + '<td class="py-2 pl-4 pr-3 text-zinc-300 max-w-[160px]"><span class="block truncate" title="' + escHtml(r.file_name) + '">' + escHtml(r.file_name||'—') + '</span></td>'
+                    + '<td class="py-2 pl-4 pr-3 text-text max-w-[160px]"><span class="block truncate" title="' + escHtml(r.file_name) + '">' + escHtml(r.file_name||'—') + '</span></td>'
                     + '<td class="py-2 pr-3 ' + rc + '">' + escHtml(r.result) + '</td>'
-                    + '<td class="py-2 pr-3 text-zinc-400">' + escHtml(dur) + '</td>'
-                    + '<td class="py-2 pr-3 text-zinc-400">' + escHtml(date) + '</td>'
+                    + '<td class="py-2 pr-3 text-text-2">' + escHtml(dur) + '</td>'
+                    + '<td class="py-2 pr-3 text-text-2">' + escHtml(date) + '</td>'
                     + '<td class="py-2 pr-4 text-right">' + tempsBtn + '</td>'
                     + '</tr>';
                 const chartRow = '<tr id="hc-' + uid + '" class="' + chartRowClass + '"' + extraAttr + '>'
@@ -1537,20 +1936,20 @@ async function refreshGlobalHistory() {
             }).join('');
 
             const moreRow = recs.length > 5
-                ? '<tr><td colspan="5" class="px-4 py-2.5 border-t border-zinc-800 text-center">'
-                  + '<button onclick="toggleHistoryExpand(\'' + enc + '\', this)" class="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors py-0.5">'
+                ? '<tr><td colspan="5" class="px-4 py-2.5 border-t border-border text-center">'
+                  + '<button onclick="toggleHistoryExpand(\'' + enc + '\', this)" class="text-[11px] text-text-2 hover:text-text transition-colors py-0.5">'
                   + '<i class="fas fa-chevron-down mr-1 text-[10px]"></i>Show ' + (recs.length - 5) + ' more'
                   + '</button></td></tr>'
                 : '';
 
-            return '<div class="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden">'
-                + '<div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">'
-                + '<p class="text-sm font-semibold">' + escHtml(name) + '</p>'
-                + '<span class="text-[10px] text-zinc-400 border border-zinc-800 rounded-md px-1.5 py-0.5">' + recs.length + ' print' + (recs.length!==1?'s':'') + '</span>'
+            return '<div class="rounded-lg border border-border bg-panel overflow-hidden">'
+                + '<div class="px-4 py-3 border-b border-border flex items-center justify-between">'
+                + '<p class="font-heading text-lg font-medium leading-tight">' + escHtml(name) + '</p>'
+                + '<span class="text-[10px] text-text-2 rounded-full border border-border px-2 py-0.5">' + recs.length + ' print' + (recs.length!==1?'s':'') + '</span>'
                 + '</div>'
                 + statsStrip
                 + '<div class="max-h-96 overflow-y-auto"><table class="w-full text-xs">'
-                + '<thead><tr class="text-zinc-400 text-[10px] uppercase tracking-wide">'
+                + '<thead><tr class="text-text-2 text-[10px]">'
                 + '<th class="pl-4 pr-3 py-2 font-medium text-left">File</th>'
                 + '<th class="pr-3 py-2 font-medium text-left">Result</th>'
                 + '<th class="pr-3 py-2 font-medium text-left">Duration</th>'
@@ -1561,7 +1960,7 @@ async function refreshGlobalHistory() {
         }).join('');
 
         content.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">' + cards + '</div>';
-    } catch (_) { content.innerHTML = '<p class="text-red-400 text-xs py-4 text-center">Failed to load history.</p>'; }
+    } catch (_) { content.innerHTML = '<p class="text-danger text-sm py-4 text-center">Failed to load history.</p>'; }
 }
 
 // ── Update system ─────────────────────────────────────────────────────────────
@@ -1604,7 +2003,7 @@ function setUpdateProgress(text, isError=false) {
     const el = document.getElementById('updateProgress');
     if (!el) return;
     el.classList.remove('hidden');
-    el.className = 'mt-3 text-xs ' + (isError?'text-red-400':'text-zinc-400');
+    el.className = 'mt-3 text-xs ' + (isError?'text-danger':'text-text-2');
     el.textContent = text;
 }
 
@@ -1704,11 +2103,14 @@ async function restartForUpdate() {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 (async () => {
+    applyTheme(currentTheme());
     await loadConfig();
     await checkForUpdate();
     renderPrinters();
     await pollStatus();
     setInterval(pollStatus, 5000);
+    await loadCloudStatus();
+    setInterval(loadCloudStatus, 30000);
 
     // Request notification permission after a short delay so it doesn't fire
     // the browser prompt immediately on page load.

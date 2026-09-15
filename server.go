@@ -97,12 +97,15 @@ func StartServer(port int) {
 	configStore = cfg
 	configMutex.Unlock()
 
+	mqttpkg.OnCloudAuthFailed = expireCloudToken
 	syncPrinterConnections(nil, cfg)
 	go autoUpdateLoop()
 	go pollBridgeCommands()
 
 	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/logo.png", handleLogo)
+	http.HandleFunc("/logo-light.png", pngHandler(logoLightPNG))
+	http.HandleFunc("/logo-dark.png", pngHandler(logoDarkPNG))
 	http.HandleFunc("/tailwind.css", cssHandler(tailwindCSS))
 	http.HandleFunc("/icons.css", cssHandler(iconsCSS))
 	http.HandleFunc("/fonts.css", cssHandler(fontsCSS))
@@ -121,6 +124,7 @@ func StartServer(port int) {
 	http.HandleFunc("/api/logs", handleLogs)                 // GET — SSE log stream
 	http.HandleFunc("/api/history", handleHistory)           // GET all history records
 	http.HandleFunc("/api/history/", handleHistoryByPrinter) // GET /api/history/{name}
+	http.HandleFunc("/api/cloud/", handleCloud)              // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
 
 	printStartupBanner(port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
@@ -246,6 +250,16 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 func handleLogo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Write(logoPNG)
+}
+
+// pngHandler returns an http.HandlerFunc that serves the given bytes as a PNG.
+// Used for the embedded theme-specific logos.
+func pngHandler(body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(body)
+	}
 }
 
 // cssHandler returns an http.HandlerFunc that serves the given bytes as CSS.
@@ -485,7 +499,19 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bambuCameraStream(w, found.IP, found.LANCode, printerName)
+	ip := found.IP
+	if found.IsCloud() && ip == "" {
+		ip = mqttpkg.CloudIP(found.Serial)
+	}
+	if found.IsCloud() && ip == "" {
+		http.Error(w, "camera needs the printer's LAN address: it is learned from the printer's first cloud report, or set it when adding the printer", http.StatusServiceUnavailable)
+		return
+	}
+	if found.IsCloud() && found.LANCode == "" {
+		http.Error(w, "camera needs the printer's LAN access code, which the Bambu account did not report", http.StatusServiceUnavailable)
+		return
+	}
+	bambuCameraStream(w, ip, found.LANCode, printerName)
 }
 
 // bambuCameraStream proxies a BambuLab printer camera using the proprietary binary
@@ -635,6 +661,7 @@ type redactedPrinter struct {
 	APIKeySet    bool   `json:"api_key_set"`
 	WebcamURL    string `json:"webcam_url,omitempty"`
 	CameraHidden bool   `json:"camera_hidden"`
+	Connection   string `json:"connection,omitempty"`
 }
 
 // redactedConfig mirrors config.Config with the FoxTrack cloud tokens blanked
@@ -646,6 +673,15 @@ type redactedConfig struct {
 	FoxTrack2APIKeySet bool              `json:"foxtrack2_api_key_set"`
 	Printers           []redactedPrinter `json:"printers"`
 	AutoUpdate         bool              `json:"auto_update,omitempty"`
+	BambuCloud         *redactedCloud    `json:"bambu_cloud,omitempty"`
+}
+
+// redactedCloud mirrors config.BambuCloud without the access token.
+type redactedCloud struct {
+	Linked         bool   `json:"linked"`
+	Email          string `json:"email,omitempty"`
+	Region         string `json:"region,omitempty"`
+	TokenExpiresAt int64  `json:"token_expires_at,omitempty"`
 }
 
 func redactPrinter(p config.Printer) redactedPrinter {
@@ -659,6 +695,7 @@ func redactPrinter(p config.Printer) redactedPrinter {
 		APIKeySet:    p.APIKey != "",
 		WebcamURL:    p.WebcamURL,
 		CameraHidden: p.CameraHidden,
+		Connection:   p.Connection,
 	}
 }
 
@@ -748,6 +785,9 @@ func redactConfig(cfg *config.Config) redactedConfig {
 	for i, p := range cfg.Printers {
 		out.Printers[i] = redactPrinter(p)
 	}
+	if bc := cfg.BambuCloud; bc.Linked() {
+		out.BambuCloud = &redactedCloud{Linked: true, Email: bc.Email, Region: bc.Region, TokenExpiresAt: bc.ExpiresAt}
+	}
 	return out
 }
 
@@ -768,6 +808,11 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 	}
 	if newCfg.FoxTrack2APIKey == "" {
 		newCfg.FoxTrack2APIKey = old.FoxTrack2APIKey
+	}
+	// The dashboard never sends the Bambu account (it only ever sees a
+	// redacted view), so an absent or token-less block means "keep it".
+	if newCfg.BambuCloud == nil || newCfg.BambuCloud.AccessToken == "" {
+		newCfg.BambuCloud = old.BambuCloud
 	}
 	oldByID := make(map[string]config.Printer, len(old.Printers))
 	oldByName := make(map[string]config.Printer, len(old.Printers))
@@ -912,6 +957,19 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if p.IsCloud() {
+			// Network lookup (cached, paced) happens before the lock is taken.
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			err := resolveCloudPrinter(ctx, &p)
+			cancel()
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+		} else {
+			p.Connection = "" // LAN is the zero value; never store an unknown mode
+		}
 
 		configMutex.Lock()
 		if hasDuplicateName(configStore.Printers, p) {
@@ -930,7 +988,9 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		if err := config.SaveConfig(cfg); err != nil {
 			log.Printf("Warning: failed to save config: %v", err)
 		}
-		if isBambuPrinterConfig(p) {
+		if p.IsCloud() {
+			syncCloud(cfg)
+		} else if isBambuPrinterConfig(p) {
 			mqttpkg.ConnectPrinter(mqttPrinter(p, cfg))
 		} else {
 			lanCtrl.AddOrUpdatePrinter(p, cfg.APIKey, cfg.FoxTrack2APIKey)
@@ -1051,6 +1111,9 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		mqttpkg.RemovePrinterState(name)
 		lanCtrl.RemovePrinter(name)
 	}
+	if len(removedNames) > 0 {
+		syncCloud(cfg) // unsubscribes a removed cloud printer without reconnecting
+	}
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
@@ -1063,15 +1126,15 @@ func syncPrinterConnections(oldCfg, cfg *config.Config) {
 	oldBambu := map[string]mqttpkg.Printer{}
 	if oldCfg != nil {
 		for _, p := range oldCfg.Printers {
-			if isBambuPrinterConfig(p) {
+			if isBambuPrinterConfig(p) && !p.IsCloud() {
 				oldBambu[p.Name] = mqttPrinter(p, oldCfg)
 			}
 		}
 	}
 
 	for _, p := range cfg.Printers {
-		if !isBambuPrinterConfig(p) {
-			continue
+		if !isBambuPrinterConfig(p) || p.IsCloud() {
+			continue // cloud printers share one account connection (syncCloud below)
 		}
 		newP := mqttPrinter(p, cfg)
 		if old, ok := oldBambu[p.Name]; ok {
@@ -1093,6 +1156,7 @@ func syncPrinterConnections(oldCfg, cfg *config.Config) {
 	}
 
 	lanCtrl.SyncPrinters(cfg.Printers, cfg.APIKey, cfg.FoxTrack2APIKey)
+	syncCloud(cfg)
 }
 
 func printerIsBambu(name string) bool {
@@ -1158,13 +1222,13 @@ func isBambuPrinterConfig(p config.Printer) bool {
 	if strings.TrimSpace(p.Serial) == "" {
 		return false
 	}
-	if strings.TrimSpace(p.LANCode) == "" {
-		return false
-	}
 	if strings.TrimSpace(p.MoonrakerURL) != "" {
-		return false
+		return false // a Moonraker address always means Klipper
 	}
-	return true
+	if p.IsCloud() {
+		return true // the cloud reports the LAN code; its absence only disables the camera
+	}
+	return strings.TrimSpace(p.LANCode) != ""
 }
 
 // autoUpdateLoop runs in the background and applies updates automatically when

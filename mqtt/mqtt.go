@@ -251,6 +251,13 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 	}
 	_ = state
 
+	// Over Bambu Cloud, current firmware rejects every command except the
+	// light as unverified. Refuse early so the printer never sees them.
+	cloud := IsCloudSerial(serial)
+	if cloud && !cloudCommandAllowed(command) {
+		return fmt.Errorf("%q is not available over Bambu Cloud — only the light can be controlled; switch the printer to LAN mode for full control", command)
+	}
+
 	topic := fmt.Sprintf("device/%s/request", serial)
 	var payload string
 
@@ -287,7 +294,11 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 			s.LightOn = wantOn
 		}
 		stateMutex.Unlock()
-		go sendPushall(client, printerName, topic)
+		if cloud {
+			go cloudRequestPushall(serial) // rate-limited: at most one per minute per printer
+		} else {
+			go sendPushall(client, printerName, topic)
+		}
 	}
 
 	switch command {
