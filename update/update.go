@@ -277,6 +277,16 @@ func downloadAndStage(ctx context.Context, asset Asset, checksumAsset Asset, has
 	if err != nil {
 		return err
 	}
+	// The apply script and the downloaded payload both live in tmpDir and must
+	// outlive this process on the success path, so the directory is only removed
+	// when staging fails. Without this every failed attempt (a checksum
+	// mismatch, a truncated download) left the whole payload on disk forever.
+	staged := false
+	defer func() {
+		if !staged {
+			os.RemoveAll(tmpDir)
+		}
+	}()
 
 	tmpFile := filepath.Join(tmpDir, asset.Name)
 	f, err := os.Create(tmpFile)
@@ -329,6 +339,8 @@ func downloadAndStage(ctx context.Context, asset Asset, checksumAsset Asset, has
 		return err
 	}
 
+	staged = true
+
 	pendingMu.Lock()
 	pendingUpdate = &stagedUpdate{scriptPath: scriptPath, version: latestVersion, stagedAt: time.Now()}
 	pendingMu.Unlock()
@@ -342,9 +354,17 @@ func downloadAndStage(ctx context.Context, asset Asset, checksumAsset Asset, has
 
 func stageWindowsUpdate(tmpDir, downloadPath, exePath string) (string, error) {
 	scriptPath := filepath.Join(tmpDir, "apply-update.bat")
+	// Mirror the Linux path: land the payload next to the target, then rename it
+	// over the old binary. A plain copy onto a running exe can fail halfway and
+	// leave a truncated binary, and the old script ignored the failure and
+	// relaunched the stale build as if the update had worked.
+	stagedPath := exePath + ".update"
 	script := "@echo off\r\n" +
 		"ping 127.0.0.1 -n 3 > nul\r\n" +
-		fmt.Sprintf("copy /Y \"%s\" \"%s\" > nul\r\n", downloadPath, exePath) +
+		fmt.Sprintf("copy /Y \"%s\" \"%s\" > nul\r\n", downloadPath, stagedPath) +
+		"if errorlevel 1 exit /b 1\r\n" +
+		fmt.Sprintf("move /Y \"%s\" \"%s\" > nul\r\n", stagedPath, exePath) +
+		"if errorlevel 1 exit /b 1\r\n" +
 		fmt.Sprintf("start \"\" \"%s\"\r\n", exePath)
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return "", err
@@ -395,10 +415,16 @@ func stageDarwinUpdate(tmpDir, downloadPath, exePath string) (string, error) {
 	}
 
 	scriptPath := filepath.Join(tmpDir, "apply-update.sh")
+	// Copy the new bundle in beside the old one first, and only remove the
+	// installed app once that copy has succeeded. Deleting first meant a failed
+	// copy (no disk space, a bad archive) left the user with no app at all.
+	incoming := appPath + ".incoming"
 	script := "#!/bin/sh\nset -e\n" +
 		"sleep 1\n" +
+		fmt.Sprintf("rm -rf \"%s\"\n", incoming) +
+		fmt.Sprintf("cp -R \"%s\" \"%s\"\n", newApp, incoming) +
 		fmt.Sprintf("rm -rf \"%s\"\n", appPath) +
-		fmt.Sprintf("cp -R \"%s\" \"%s\"\n", newApp, appPath) +
+		fmt.Sprintf("mv \"%s\" \"%s\"\n", incoming, appPath) +
 		fmt.Sprintf("open \"%s\"\n", appPath)
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		return "", err
