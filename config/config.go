@@ -59,7 +59,7 @@ type Printer struct {
 	PreviousNames []string `json:"previous_names,omitempty"`
 	// CameraHidden hides this printer's camera on the dashboard only. It does not
 	// affect snapshot sends. Zero value is false, so existing configs stay visible.
-	CameraHidden  bool     `json:"camera_hidden,omitempty"`
+	CameraHidden bool `json:"camera_hidden,omitempty"`
 	// Connection selects how a Bambu printer is reached: "" or "lan" is the
 	// printer's own MQTT broker (LAN mode), "cloud" is Bambu Cloud. The zero
 	// value keeps every existing config on LAN. Klipper printers ignore it.
@@ -86,6 +86,33 @@ func NewPrinterID() string {
 		return "fallback-" + hex.EncodeToString([]byte(time.Now().String()))[:32]
 	}
 	return hex.EncodeToString(b)
+}
+
+// Clone returns a deep copy of c. The printer slice, each printer's
+// PreviousNames, and the Bambu account block are all copied, so the result
+// shares no memory with c. Callers snapshot the live config under the mutex and
+// then read or save the snapshot with the lock released — marshalling the live
+// config unlocked races with any handler that is adding or removing a printer,
+// and a torn marshal would write a partial printer list to disk.
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	if c.Printers != nil {
+		out.Printers = make([]Printer, len(c.Printers))
+		copy(out.Printers, c.Printers)
+		for i := range out.Printers {
+			if names := c.Printers[i].PreviousNames; names != nil {
+				out.Printers[i].PreviousNames = append([]string(nil), names...)
+			}
+		}
+	}
+	if c.BambuCloud != nil {
+		bc := *c.BambuCloud
+		out.BambuCloud = &bc
+	}
+	return &out
 }
 
 // legacyConfigPath is the old location used by previous builds.
