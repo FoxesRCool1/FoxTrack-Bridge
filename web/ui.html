@@ -703,7 +703,10 @@ function applyDevBuildState(isDev) {
 async function toggleAutoUpdate() {
     applyAutoUpdateState(!autoUpdateEnabled);
     try {
-        await apiFetch('/api/config', { method:'POST', body:JSON.stringify(buildSettingsPayload()) });
+        // Flipping the switch is an explicit statement about auto_update, so it
+        // is always sent — unlike a Settings save, which leaves it alone when
+        // the dashboard has not managed to read the stored value yet.
+        await apiFetch('/api/config', { method:'POST', body:JSON.stringify(buildSettingsPayload({ includeAutoUpdate: true })) });
     } catch (e) { toast('Failed to save: ' + e.message, 'error'); }
 }
 
@@ -754,13 +757,21 @@ function updateSecretPlaceholder(id, isSet) {
     if (el) el.placeholder = isSet ? '••••••••  saved — leave blank to keep' : 'Paste API key (optional)';
 }
 
+// True once /api/config has been read successfully at least once. Until then the
+// local settings state is a default, not the user's — see buildSettingsPayload.
+let configEverLoaded = false;
+
 async function loadConfig() {
     try {
         const cfg = await apiFetch('/api/config');
         updateSecretPlaceholder('apiKey', !!(cfg && cfg.api_key_set));
         updateSecretPlaceholder('foxtrack2ApiKey', !!(cfg && cfg.foxtrack2_api_key_set));
         configuredPrinters = (cfg && cfg.printers) ? cfg.printers : [];
-        if (cfg && cfg.auto_update) applyAutoUpdateState(true);
+        // Reflect the stored value in both directions. Only ever setting it to
+        // true left the toggle stuck on after auto-update was switched off
+        // elsewhere. auto_update is omitted from the response when false.
+        applyAutoUpdateState(!!(cfg && cfg.auto_update));
+        configEverLoaded = true;
         setBridgeStatus(true);
     } catch (_) { setBridgeStatus(false); }
 }
@@ -768,12 +779,18 @@ async function loadConfig() {
 // Settings saves must never send the printer array: an empty local state
 // (e.g. a failed /api/config load) would otherwise wipe the saved printers.
 // The server treats an absent "printers" key as "leave printers untouched".
-function buildSettingsPayload() {
-    return {
+//
+// auto_update follows the same rule. It is a bool, so a default-false local
+// state is indistinguishable from a real "off" — sending it before the config
+// has ever loaded would silently turn the user's auto-update off. Omitting the
+// key tells the server to keep whatever is stored.
+function buildSettingsPayload({ includeAutoUpdate = configEverLoaded } = {}) {
+    const payload = {
         api_key: document.getElementById('apiKey').value.trim(),
         foxtrack2_api_key: document.getElementById('foxtrack2ApiKey').value.trim(),
-        auto_update: autoUpdateEnabled,
     };
+    if (includeAutoUpdate) payload.auto_update = autoUpdateEnabled;
+    return payload;
 }
 
 async function saveApiKeys() {
@@ -1165,13 +1182,26 @@ function updateRemoveCount() {
 async function confirmBulkRemove() {
     const ids = Array.from(selectedForRemoval);
     if (!ids.length || !confirm('Remove ' + ids.length + ' printer' + (ids.length!==1?'s':'') + '?')) return;
-    try {
-        for (const id of ids) await apiFetch('/api/printers/' + encodeURIComponent(id), { method:'DELETE' });
-        toast(ids.length + ' printer' + (ids.length!==1?'s':'') + ' removed', 'info');
-        exitRemoveMode();
-        await loadConfig();
-        await pollStatus();
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+    // One printer that cannot be removed must not abandon the rest of the batch,
+    // so each delete is awaited on its own and failures are counted, not thrown.
+    let removed = 0;
+    let lastError = '';
+    for (const id of ids) {
+        try {
+            await apiFetch('/api/printers/' + encodeURIComponent(id), { method:'DELETE' });
+            removed++;
+        } catch (e) { lastError = e.message; }
+    }
+    exitRemoveMode();
+    await loadConfig();
+    await pollStatus();
+    if (removed === ids.length) {
+        toast(removed + ' printer' + (removed!==1?'s':'') + ' removed', 'info');
+    } else if (removed > 0) {
+        toast(removed + ' of ' + ids.length + ' removed — ' + lastError, 'error');
+    } else {
+        toast('Failed: ' + lastError, 'error');
+    }
 }
 
 // ── Printer rendering ─────────────────────────────────────────────────────────
@@ -1317,6 +1347,7 @@ function collectHooks(el) {
         startBtn: el.querySelector('.start-btn'), // Klipper only — null on Bambu cards
         lightBtn: el.querySelector('.light-btn'),
         camBtn: el.querySelector('.cam-btn'),
+        camHideBtn: el.querySelector('.cam-hide-btn'),
         camPanel: el.querySelector('.cam-panel'),
         camImg: el.querySelector('.cam-img'),
         camUnavailable: el.querySelector('.cam-unavailable'),
@@ -1532,6 +1563,28 @@ function cardInnerHTML(printer, live) {
     const speedLevel = live && live.speed_level ? live.speed_level : 0;
     const amsSlots = live && live.ams ? live.ams : [];
 
+    // Camera visibility is a stored per-printer preference (camera_hidden), not a
+    // live state: it only hides the camera on this dashboard and never affects the
+    // snapshots sent to FoxTrack. Hidden cards drop the Camera button and its panel
+    // entirely and offer a single button to bring them back, so the preference is
+    // always reversible from the card it applies to.
+    const camHidden = !!printer.camera_hidden;
+    const camControls = camHidden
+        ? '<button onclick="toggleCameraHiddenEncoded(\'' + enc + '\')" class="btn-outline cam-hide-btn"'
+          + ' title="Show this camera on the dashboard again" aria-label="Show camera on the dashboard">'
+          + '<i class="fas fa-video-slash mr-1"></i>Camera hidden</button>'
+        // Wrapped as one flex item so the icon-only hide toggle always wraps with
+        // the Camera button it belongs to, instead of stranding itself on the
+        // next row next to an unrelated control.
+        : '<span class="inline-flex gap-1.5">'
+          + '<button onclick="toggleCamera(\'' + enc + '\')" class="btn-outline cam-btn">'
+          + (cameraLoading.has(enc) ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '<i class="fas fa-camera mr-1"></i>')
+          + 'Camera</button>'
+          + '<button onclick="toggleCameraHiddenEncoded(\'' + enc + '\')" class="btn-ghost cam-hide-btn"'
+          + ' title="Hide this camera on the dashboard" aria-label="Hide camera on the dashboard">'
+          + '<i class="fas fa-video-slash"></i></button>'
+          + '</span>';
+
     // AMS container always exists for Bambu cards (visibility toggled by slot
     // count) so its hook is stable; Klipper cards never render it at all.
     const amsPanel = isBambu ?
@@ -1586,7 +1639,7 @@ function cardInnerHTML(printer, live) {
             + '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
             + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger">Stop</button>')
         + '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '">' + lightHtml + '</button>'
-        + '<button onclick="toggleCamera(\'' + enc + '\')" class="btn-outline cam-btn">' + (cameraLoading.has(enc) ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '<i class="fas fa-camera mr-1"></i>') + 'Camera</button>'
+        + camControls
         + (isCloud ? '' :
             '<button onclick="toggleFan(\'' + enc + '\')" class="btn-outline"><i class="fas fa-fan mr-1"></i>Fan</button>'
             + (isBambu
@@ -1597,7 +1650,7 @@ function cardInnerHTML(printer, live) {
         + amsPanel
         + '</div>';
 
-    const camPanel = removeMode ? '' :
+    const camPanel = (removeMode || camHidden) ? '' :
         '<div id="cam-' + enc + '" class="cam-panel hidden border-t border-border bg-panel-2">'
         + '<img class="cam-img" src="" alt="Camera" style="display:block;width:100%;max-height:300px;object-fit:contain;">'
         + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>Camera unavailable — check webcam service or URL</div>'
@@ -1706,6 +1759,38 @@ function toggleCamera(enc) {
         cameraLoading.delete(enc);
         camPanel.classList.add('hidden');
         teardownCamera(entry);
+    }
+}
+
+// Hide or show one printer's camera on this dashboard. The preference is stored
+// server-side (PATCH /api/printers/{id}) so it survives a reload and applies to
+// every browser, and it never affects the snapshots sent to FoxTrack.
+//
+// Hiding changes the card's button row, which patchCard cannot produce, so the
+// one affected card is rebuilt. refreshCardContent tears the live stream down
+// first — required, because clearing src is the only way to close the backend
+// camera connection. Other cards keep their open streams.
+async function toggleCameraHiddenEncoded(enc) {
+    const id = decodePrinterId(enc);
+    const printer = configuredPrinters.find(p => p.id === id);
+    if (!printer) return;
+    const entry = printerCardEls.get(id);
+    const hideBtn = entry && entry.hooks.camHideBtn;
+    if (hideBtn) hideBtn.disabled = true;
+    const next = !printer.camera_hidden;
+    try {
+        const updated = await apiFetch('/api/printers/' + encodeURIComponent(id), {
+            method: 'PATCH',
+            body: JSON.stringify({ camera_hidden: next }),
+        });
+        // Trust the server's echo of the stored printer over the local guess.
+        printer.camera_hidden = !!(updated && updated.camera_hidden);
+        cameraLoading.delete(enc);
+        if (entry) refreshCardContent(entry, printer);
+        toast(printer.camera_hidden ? 'Camera hidden for ' + printer.name : 'Camera shown for ' + printer.name, 'info');
+    } catch (e) {
+        if (hideBtn) hideBtn.disabled = false;
+        toast('Failed: ' + e.message, 'error');
     }
 }
 
