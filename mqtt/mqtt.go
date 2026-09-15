@@ -725,6 +725,10 @@ func ConnectPrinter(p Printer) {
 func connectAndListen(p Printer, stop <-chan struct{}) error {
 	broker := fmt.Sprintf("ssl://%s:8883", p.IP)
 	done := make(chan struct{})
+	// The connection-lost handler runs on a paho goroutine with no recover, so a
+	// second invocation closing done again would panic and take the whole bridge
+	// down. The cloud session already guards its close this way (cloud.go).
+	var once sync.Once
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(broker)
@@ -740,7 +744,7 @@ func connectAndListen(p Printer, stop <-chan struct{}) error {
 
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 		log.Printf("[%s] connection lost: %v", p.Name, err)
-		close(done)
+		once.Do(func() { close(done) })
 	})
 
 	client := mqtt.NewClient(opts)
