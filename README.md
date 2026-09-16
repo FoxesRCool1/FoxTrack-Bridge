@@ -22,6 +22,10 @@ Among many other tools, AI was used to develop this program. If you have a probl
 - Live camera feed and light toggle
 - AMS filament slot display with colors and material types (Bambu Lab only)
 - Print speed selector: Silent, Standard, Sport, Ludicrous (Bambu Lab only)
+- Fan speed control (Bambu Lab and Klipper)
+- GCode console for sending single commands (Bambu Lab, Advanced mode only)
+- Per-printer camera hiding, saved on the Bridge so it applies in every browser
+- Bambu Cloud sign-in for printers that are not in LAN mode (experimental)
 - Browser push notifications when prints finish, fail, or pause
 - Print history stored locally, shown in the History view
 - Automatic updates with staged installation
@@ -145,12 +149,18 @@ The startup output lists the local addresses where the dashboard is available. T
 
 ### Scripted install (linux/install.sh)
 
-The repository includes `linux/install.sh`, a per-user installer that installs the binary, an icon, a desktop launcher, and a systemd user unit under `$HOME`, with no sudo required. It must be run from a checkout of this repository: it reads its icon, desktop entry, and unit file from the repository itself, and only downloads the release binary and `checksums.txt` from GitHub.
+The repository includes `linux/install.sh`, a per-user installer that installs the binary, an icon, a desktop launcher, and a systemd user unit under `$HOME`, with no sudo required. The release binary and `checksums.txt` always come from the GitHub release. Run it from a checkout of this repository and it reads the icon, desktop entry, and unit file from that checkout, which is useful for testing unreleased changes:
 
 ```bash
 git clone https://github.com/FoxesRCool1/FoxTrack-Bridge.git
 cd FoxTrack-Bridge
 ./linux/install.sh
+```
+
+Run it without a checkout and it downloads those same three files from the matching release's source tarball instead, so they always match the binary being installed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/linux/install.sh | sh
 ```
 
 This installs the service but does not enable it; it prints the `systemctl --user enable --now` and `loginctl enable-linger` commands to run afterward (also covered below). It also installs a desktop launcher entry named "FoxTrack Bridge" that opens the dashboard in your browser; the launcher assumes the default port 8080. See [Uninstalling](#uninstalling) for `linux/install.sh --uninstall`.
@@ -280,7 +290,7 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags headless -ldflags="-s -w -X
 Docker:
 
 ```bash
-docker build --build-arg APP_VERSION=v2.2.0 -t foxtrack-bridge .
+docker build --build-arg APP_VERSION=v2.3.0 -t foxtrack-bridge .
 docker run -d --name foxtrack-bridge -p 8080:8080 -v foxtrack-bridge-data:/data --restart unless-stopped foxtrack-bridge
 ```
 
@@ -298,7 +308,9 @@ The `headless` tag runs the suite without the system tray dependency and include
 
 ## Bambu Cloud (printers not in LAN mode)
 
-Bambu printers can also be added through your Bambu account instead of LAN mode. Open **Settings > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer with the type **Bambu Lab (cloud)** and pick it from the list.
+This feature is experimental. It is labelled that way in the dashboard too.
+
+Bambu printers can also be added through your Bambu account instead of LAN mode. Open **Settings > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer with the type **Bambu Lab (cloud, experimental)** and pick it from the list.
 
 What cloud printers can do:
 
@@ -324,7 +336,7 @@ Config: the account is stored under `bambu_cloud` in `config.json` (the file is 
 
 The dashboard loads no external resources. Tailwind CSS, the fonts, and the icons are committed under `web/` and embedded in the binary. Attribution is in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-Design: the dashboard follows the FoxTrack web app's design system. Colours are tokens (`--bg`, `--panel`, `--surface`, `--border`, `--text`, `--text-2`, `--accent`, `--link`, `--danger`, `--warning`) defined in the `<style>` block of `web/ui.html` for two themes, Paper (light, the default) and Ink (dark). The theme button in the top bar switches them; the choice is stored in the browser under `foxtrack.theme`. Tailwind utilities such as `bg-panel`, `text-text-2`, `border-border` and `bg-brand` map onto the tokens through `web/tailwind.config.js`. Never put a Tailwind palette colour or a hex value in the markup; `go test -tags headless ./...` fails if one appears.
+Design: the dashboard follows the FoxTrack web app's design system. Colours are tokens (`--bg`, `--panel`, `--panel-2`, `--surface`, `--border`, `--text`, `--text-2`, `--accent`, `--accent-2`, `--link`, `--danger`, `--warning`) defined in the `<style>` block of `web/ui.html` for two themes, Paper (light, the default) and Ink (dark). The theme button in the top bar switches them; the choice is stored in the browser under `foxtrack.theme`. Tailwind utilities such as `bg-panel`, `text-text-2`, `border-border` and `bg-brand` map onto the tokens through `web/tailwind.config.js`. Never put a Tailwind palette colour or a hex value in the markup; `go test -tags headless ./...` fails if one appears.
 
 Tailwind: after changing classes in `web/ui.html`, regenerate `web/tailwind.css` with the standalone CLI (no Node required):
 
