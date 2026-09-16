@@ -178,7 +178,7 @@ is the line Bambu enforces.
 
 ## Recommended design for the Bridge
 
-All config changes are additive and `omitempty`, per CLAUDE.md. Existing
+All config changes are additive and `omitempty`. Existing
 printers keep working with no migration.
 
 Config:
@@ -214,9 +214,7 @@ MQTT:
   speed, fan and GCode in the UI for `connection: "cloud"` cards.
 
 Files: `mqtt/mqtt.go`, `config/config.go`, a new `cloud/` package for the REST
-login, plus the server and UI endpoints for the link flow. The MQTT protocol
-handling and the credential redaction path are hard boundaries in
-`.llm/recipe.md`, so that work is done by hand, not delegated.
+login, plus the server and UI endpoints for the link flow.
 
 ## Projects worth reading
 

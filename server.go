@@ -1044,7 +1044,6 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 // non-empty printer list with an empty one and does not carry
 // "confirm_clear_printers": true. Its message is sent as the 409 response body, so
 // it is written to be understandable by an end user surfacing it in any client.
-// See CLAUDE.md (config-compatibility invariants).
 var errRefuseClearPrinters = errors.New("This save would remove all of your saved printers, so it was blocked to prevent accidental data loss. Your existing printers were kept. To intentionally remove every printer, delete them individually, or resend this request with \"confirm_clear_printers\": true.")
 
 // resolveConfigUpdate applies a POST /api/config request body to the previous
