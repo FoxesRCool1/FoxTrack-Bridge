@@ -1,27 +1,34 @@
 # Changelog
 
-## Unreleased
+## v2.3.1
 
 **Updates (Linux)**
 - Fixed the update restart on Linux. Pressing "restart to apply" — or letting
   auto-update restart the bridge — could leave the bridge stopped and still on
-  the old version. The bridge handed the install off to a helper script that it
+  the old version. The bridge handed the install to a helper script that it
   started as a child process. Under systemd that script lived in the service
   cgroup, so systemd killed it along with the service before it could put the
   new binary in place. The bridge now swaps the binary itself, before it exits.
-- The shipped systemd units now use `Restart=always`. The update path exits
-  cleanly on purpose so the new binary takes over; `Restart=on-failure` read
-  that as a deliberate stop and left the bridge down until it was started by
-  hand. **Existing installs keep their old unit file — see below.**
+- The bridge repairs its own systemd unit on startup. Units shipped before
+  v2.3.1 used `Restart=on-failure`; the update path exits cleanly on purpose, so
+  systemd read that as a deliberate stop and left the bridge down. The bridge
+  now writes a drop-in beside the unit setting `Restart=always`. Your own unit
+  file is not modified, and you can delete the drop-in at any time.
+- The shipped systemd units now use `Restart=always` for new installs.
 - Under systemd the bridge no longer relaunches itself after an update, so a
   second unsupervised copy can no longer race the one systemd starts.
 
-If you installed before this release, update your unit once:
+**If your bridge is stuck on an older version**
+
+A bridge running a build from before v2.3.1 cannot update itself — the broken
+updater is the part that would have to do it. Install once by hand and every
+update after this one works normally:
 
 ```
-sed -i 's/^Restart=on-failure$/Restart=always/' ~/.config/systemd/user/foxtrack-bridge.service
-systemctl --user daemon-reload
+curl -fsSL https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/linux/install.sh | sh
 ```
+
+Your printers, settings and print history are not touched.
 
 ## v2.3.0
 

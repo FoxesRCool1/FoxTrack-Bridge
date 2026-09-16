@@ -100,6 +100,16 @@ func StartServer(port int) {
 
 	mqttpkg.OnCloudAuthFailed = expireCloudToken
 	syncPrinterConnections(nil, cfg)
+
+	// Units shipped before v2.3.1 used Restart=on-failure, so the clean exit an
+	// update makes on purpose left the bridge stopped instead of coming back on
+	// the new binary. Repair that here so no one has to edit systemd by hand.
+	if msg, err := update.EnsureRestartAlways(); err != nil {
+		log.Printf("[startup] could not make the service restart after an update: %v", err)
+	} else if msg != "" {
+		log.Printf("[startup] %s", msg)
+	}
+
 	go autoUpdateLoop()
 	go pollBridgeCommands()
 
