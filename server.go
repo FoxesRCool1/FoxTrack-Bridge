@@ -98,6 +98,9 @@ func StartServer(port int) {
 	configStore = cfg
 	configMutex.Unlock()
 
+	// Recorded so the assistant's get_bridge_info tool can report it.
+	serverPort = port
+
 	mqttpkg.OnCloudAuthFailed = expireCloudToken
 	syncPrinterConnections(nil, cfg)
 
@@ -137,6 +140,9 @@ func StartServer(port int) {
 	http.HandleFunc("/api/history", handleHistory)           // GET all history records
 	http.HandleFunc("/api/history/", handleHistoryByPrinter) // GET /api/history/{name}
 	http.HandleFunc("/api/cloud/", handleCloud)              // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
+	http.HandleFunc("/api/ai/settings", handleAISettings)    // GET/POST — assistant provider settings
+	http.HandleFunc("/api/ai/models", handleAIModels)        // POST — list a provider's models
+	http.HandleFunc("/api/ai/chat", handleAIChat)            // POST — answer one message
 
 	printStartupBanner(port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
@@ -755,6 +761,36 @@ type redactedConfig struct {
 	Printers           []redactedPrinter `json:"printers"`
 	AutoUpdate         bool              `json:"auto_update,omitempty"`
 	BambuCloud         *redactedCloud    `json:"bambu_cloud,omitempty"`
+	AI                 *redactedAI       `json:"ai,omitempty"`
+}
+
+// redactedAI mirrors config.AI without the provider key, the same way
+// redactedCloud drops the Bambu access token. APIKeySet is what lets the
+// dashboard show "a key is saved" without ever holding one.
+type redactedAI struct {
+	Enabled     bool   `json:"enabled"`
+	Preset      string `json:"preset,omitempty"`
+	BaseURL     string `json:"base_url,omitempty"`
+	Model       string `json:"model,omitempty"`
+	APIKeySet   bool   `json:"api_key_set"`
+	AllowCamera bool   `json:"allow_camera"`
+	Configured  bool   `json:"configured"`
+}
+
+// redactAI converts the stored AI settings into the view the dashboard gets.
+func redactAI(a *config.AI) *redactedAI {
+	if a == nil {
+		return nil
+	}
+	return &redactedAI{
+		Enabled:     a.Enabled,
+		Preset:      a.Preset,
+		BaseURL:     a.BaseURL,
+		Model:       a.Model,
+		APIKeySet:   a.APIKey != "",
+		AllowCamera: a.AllowCamera,
+		Configured:  a.Configured(),
+	}
 }
 
 // redactedCloud mirrors config.BambuCloud without the access token.
@@ -898,6 +934,7 @@ func redactConfig(cfg *config.Config) redactedConfig {
 	if bc := cfg.BambuCloud; bc.Linked() {
 		out.BambuCloud = &redactedCloud{Linked: true, Email: bc.Email, Region: bc.Region, TokenExpiresAt: bc.ExpiresAt}
 	}
+	out.AI = redactAI(cfg.AI)
 	return out
 }
 
@@ -923,6 +960,15 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 	// redacted view), so an absent or token-less block means "keep it".
 	if newCfg.BambuCloud == nil || newCfg.BambuCloud.AccessToken == "" {
 		newCfg.BambuCloud = old.BambuCloud
+	}
+	// Same rule for the assistant settings, and for the same reason: they are
+	// only ever written through /api/ai/settings, and /api/config only ever
+	// shows a redacted view of them. An absent block from this path means
+	// "keep it", so a Settings save can never wipe the provider key.
+	if newCfg.AI == nil {
+		newCfg.AI = old.AI
+	} else if newCfg.AI.APIKey == "" && old.AI != nil {
+		newCfg.AI.APIKey = old.AI.APIKey
 	}
 	oldByID := make(map[string]config.Printer, len(old.Printers))
 	oldByName := make(map[string]config.Printer, len(old.Printers))

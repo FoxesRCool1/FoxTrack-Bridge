@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+**Assistant (new, experimental)**
+- Added an assistant to the dashboard. It answers questions about your printers,
+  walks you through connecting one, diagnoses a printer that will not come
+  online, and can look at a printer's camera to tell you how a print actually
+  looks. Open it with the sparkle button in the top bar.
+- You supply the AI provider and pay for it; the Bridge ships with none and the
+  assistant stays off until you set one up in **Settings > Assistant**. Anything
+  that speaks the OpenAI chat-completions API works: OpenAI, Google Gemini and
+  Anthropic through their OpenAI-compatible endpoints, any custom endpoint, or a
+  local model on your own machine (Ollama, llama.cpp, LM Studio). Requests go
+  from the machine running the Bridge straight to the provider and never through
+  FoxTrack.
+- The assistant is read-only. It cannot add, edit or remove a printer, cannot
+  start, pause or stop a print, and cannot change a setting. It can only tell you
+  what to press.
+- It answers from tools and from a help library built into the binary, never from
+  memory: it will say it does not know rather than invent a printer, a
+  temperature or a log line, and it will not guess what a printer error code
+  means.
+- Letting it look at printer cameras is a separate switch and is **off** by
+  default. With a cloud provider, switching it on sends a photograph of your
+  printer to that provider; with a local model it stays on your machine. Every
+  frame sent is written to the Bridge log.
+- Stored secrets (printer access codes, API keys, the Bambu token) are stripped
+  out of log lines before the assistant ever sees them.
+- Note: the dashboard has no login, so anyone who can reach it on your network
+  can use the assistant and spend credit on the key you save.
+
 ## v2.3.1
 
 **Updates (Linux)**

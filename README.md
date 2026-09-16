@@ -26,6 +26,9 @@ Among many other tools, AI was used to develop this program. If you have a probl
 - GCode console for sending single commands (Bambu Lab, Advanced mode only)
 - Per-printer camera hiding, saved on the Bridge so it applies in every browser
 - Bambu Cloud sign-in for printers that are not in LAN mode (experimental)
+- An assistant that diagnoses printer connections, helps you add a printer, and
+  can look at the camera to judge a print (experimental; you supply the AI
+  provider)
 - Browser push notifications when prints finish, fail, or pause
 - Print history stored locally, shown in the History view
 - Automatic updates with staged installation
@@ -329,6 +332,59 @@ How the Bridge stays inside Bambu's limits (Bambu bans accounts for 24 hours to 
 Tokens last about 90 days and cannot be renewed. The dashboard warns a week before the token expires. If sign-in is blocked by Cloudflare, "Paste a token instead" accepts a token from a signed-in Bambu session.
 
 Config: the account is stored under `bambu_cloud` in `config.json` (the file is mode 0600) and each cloud printer carries `"connection": "cloud"`. Both are additive; existing configs and LAN printers are untouched. Design notes and sources: [docs/bambu-cloud.md](docs/bambu-cloud.md).
+
+---
+
+## Assistant (experimental)
+
+The dashboard has a built-in assistant. Open it with the sparkle button in the
+top bar. It can:
+
+- Answer questions about your printers from live telemetry, print history and the
+  Bridge's own logs.
+- Walk you through adding a Bambu Lab printer in LAN mode or through the cloud,
+  or a Klipper printer through Moonraker.
+- Diagnose a printer that will not come online, and tell "not reachable on the
+  network" apart from "reachable but refusing the credentials".
+- Look at a printer's camera and tell you how a print actually looks — whether it
+  has warped, lifted or come loose.
+
+**You supply the AI provider and pay for it.** The Bridge ships with none, and
+the assistant is off until you set one up in **Settings > Assistant**. Anything
+that speaks the OpenAI chat-completions API works:
+
+| Provider | What to enter |
+|---|---|
+| OpenAI | Your API key and a model, e.g. `gpt-4o-mini` |
+| Google Gemini | Your API key and a model, e.g. `gemini-2.5-flash` |
+| Anthropic | Your API key and a model |
+| Custom | The OpenAI-compatible base URL, a key if it needs one, and a model |
+| Local | The base URL of a model server on your machine, e.g. `http://localhost:11434/v1` for Ollama |
+
+Requests go from the machine running the Bridge straight to the provider. Nothing
+about the assistant passes through FoxTrack, and no conversation is written to
+disk — a browser refresh starts a new one.
+
+**What it will not do.** The assistant is read-only: it cannot add, edit or
+remove a printer, cannot start, pause or stop a print, and cannot change a
+setting. It answers only from a tool result or from a help library compiled into
+the binary, so it will say it does not know rather than invent a printer, a
+temperature or a log line, and it will not guess what a printer error code means.
+
+**Cameras.** Letting the assistant look at a printer camera is a separate switch
+and is off by default, because it is the one thing that sends a picture of your
+workshop somewhere. With a cloud provider, switching it on sends a photograph of
+your printer to that provider; with a local model it stays on your machine. The
+provider's model has to support image input. Every frame sent is written to the
+Bridge log.
+
+**Secrets.** Printer access codes, API keys and the Bambu token are stripped out
+of log lines before the assistant sees them, and the provider key you save is
+never sent back to the browser.
+
+**One caveat worth reading.** The Bridge dashboard has no login. Anyone who can
+reach it on your network can use the assistant and spend credit on the key you
+save.
 
 ---
 

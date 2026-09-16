@@ -132,6 +132,20 @@
 
         /* Switch: hairline track, accent when on, page-coloured thumb. Only
            the thumb's position animates. */
+        /* Inline code, in settings prose and in assistant replies. */
+        .code-inline { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .875em; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 .25rem; }
+        /* Assistant chat. The panel slides in from the right. */
+        .chat-msg { font-size: .875rem; line-height: 1.6; }
+        .chat-user { background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: .5rem .75rem; margin-left: 1.5rem; }
+        .chat-assistant { color: var(--text); }
+        .chat-assistant p { margin: 0 0 .6rem; }
+        .chat-assistant p:last-child { margin-bottom: 0; }
+        .chat-assistant ul, .chat-assistant ol { margin: 0 0 .6rem; padding-left: 1.25rem; }
+        .chat-assistant ul { list-style: disc; }
+        .chat-assistant ol { list-style: decimal; }
+        .chat-assistant li { margin: .15rem 0; }
+        .chat-assistant strong { font-weight: 600; }
+        .chat-error { color: var(--danger); font-size: .8125rem; line-height: 1.5; }
         .switch { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; height: 1.25rem; width: 2.25rem; padding: 0; border-radius: 9999px; border: 1px solid var(--border); background: var(--panel-2); cursor: pointer; }
         .switch[aria-checked="true"] { background: var(--accent); border-color: transparent; }
         .switch:disabled { opacity: .4; cursor: default; }
@@ -149,6 +163,7 @@
         .pcard-sel { border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent); }
 
         #logPanel { transition: transform 250ms cubic-bezier(0.4,0,0.2,1); }
+        #assistantPanel { transition: transform 250ms cubic-bezier(0.4,0,0.2,1); }
         #logOutput { scroll-behavior: smooth; }
         .log-error { color: var(--danger); }
         .log-warn  { color: var(--warning); }
@@ -311,6 +326,9 @@
                 <span class="w-1.5 h-1.5 rounded-full bg-text-2 pulse"></span> Connecting…
             </span>
             <span id="footerVersion" class="text-xs text-text-2 tabular-nums"></span>
+            <button id="assistantToggle" onclick="toggleAssistant()" class="btn-icon" title="Assistant" aria-label="Open the assistant">
+                <i class="fas fa-sparkles"></i>
+            </button>
             <button id="themeToggle" onclick="toggleTheme()" class="btn-icon" title="Switch to dark theme" aria-label="Switch theme">
                 <i class="fas fa-moon ti-moon"></i><i class="fas fa-sun ti-sun"></i>
             </button>
@@ -473,6 +491,70 @@
                     </div>
                 </div>
             </section>
+            <section id="assistantCard" class="rounded-lg border border-border bg-panel p-5">
+                <div class="flex items-start justify-between gap-3 mb-1">
+                    <h2 class="font-heading text-xl font-medium leading-tight">Assistant <span class="font-sans align-middle inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Experimental</span></h2>
+                    <button id="aiEnabledToggle" onclick="toggleAIEnabled()" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Enable the assistant">
+                        <span class="switch-thumb"></span>
+                    </button>
+                </div>
+                <p class="text-sm leading-relaxed text-text-2 mb-4">Ask questions about your printers, get help connecting one, and work out why a print went wrong. You supply the AI provider and pay for it; the Bridge ships with none. Requests go from this machine straight to the provider and never through FoxTrack. The assistant can only read &mdash; it cannot change a setting or control a print.</p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label for="aiPreset" class="field-label">Provider</label>
+                        <div class="select-wrap">
+                            <select id="aiPreset" class="field" onchange="onAIPresetChange()">
+                                <option value="openai">OpenAI</option>
+                                <option value="gemini">Google Gemini</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="custom">Custom (OpenAI-compatible)</option>
+                                <option value="local">Local model on this machine</option>
+                            </select>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="aiModel" class="field-label">Model</label>
+                        <div class="flex gap-2">
+                            <input id="aiModel" type="text" class="field field-mono" autocomplete="off" placeholder="e.g. gpt-4o-mini" list="aiModelList">
+                            <datalist id="aiModelList"></datalist>
+                            <button type="button" onclick="loadAIModels()" class="btn-outline btn-lg shrink-0">Fetch</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="aiBaseUrlRow" class="hidden mt-3">
+                    <label for="aiBaseUrl" class="field-label">Base URL</label>
+                    <input id="aiBaseUrl" type="text" class="field field-mono" autocomplete="off" placeholder="http://localhost:11434/v1">
+                    <p class="text-xs text-text-2 mt-1.5">The OpenAI-compatible endpoint root, ending in <code class="code-inline">/v1</code>. For Ollama that is usually <code class="code-inline">http://localhost:11434/v1</code>.</p>
+                </div>
+
+                <div class="mt-3">
+                    <label for="aiApiKey" class="field-label">API key</label>
+                    <input id="aiApiKey" type="password" class="field" autocomplete="off" placeholder="Paste your provider API key">
+                    <p id="aiKeyHint" class="text-xs text-text-2 mt-1.5">Stored on this machine in <code class="code-inline">config.json</code>, which is readable only by your user. Leave blank to keep the saved key.</p>
+                </div>
+
+                <div class="mt-4 rounded-md border border-border bg-panel-2 p-3 flex items-start justify-between gap-3">
+                    <div>
+                        <p class="text-sm font-medium">Let the assistant look at printer cameras</p>
+                        <p id="aiCameraWarning" class="text-xs leading-relaxed text-text-2 mt-1">Needed to diagnose how a print actually looks. With a cloud provider this sends a photograph of your printer to that provider. With a local model it stays on this machine.</p>
+                    </div>
+                    <button id="aiCameraToggle" onclick="toggleAICamera()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Allow camera access">
+                        <span class="switch-thumb"></span>
+                    </button>
+                </div>
+
+                <p class="text-xs leading-relaxed text-text-2 mt-3">The dashboard has no login. Anyone who can reach it on your network can use the assistant and spend credit on this key.</p>
+
+                <p id="aiSettingsError" class="hidden text-xs text-danger mt-3"></p>
+                <div class="mt-4 flex items-center gap-2">
+                    <button onclick="saveAISettings()" class="btn-primary btn-lg">Save</button>
+                    <span id="aiSettingsStatus" class="text-xs text-text-2"></span>
+                </div>
+            </section>
+
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <section class="rounded-lg border border-border bg-panel p-5">
                     <div class="flex items-center justify-between gap-3">
@@ -513,6 +595,29 @@
         </div>
     </div>
     <div id="logOutput" class="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-5 space-y-px"></div>
+</div>
+
+<!-- Assistant panel -->
+<div id="assistantPanel" class="floating fixed top-0 bottom-0 right-0 z-40 w-full sm:w-[26rem] bg-surface border-l border-border flex flex-col translate-x-full">
+    <div class="flex items-center justify-between px-4 h-14 border-b border-border shrink-0">
+        <span class="text-sm font-medium flex items-center gap-2">
+            <i class="fas fa-sparkles text-text-2"></i> Assistant
+        </span>
+        <div class="flex gap-1.5">
+            <button onclick="newAssistantChat()" class="btn-outline btn-xs" title="Start a new conversation">New</button>
+            <button onclick="toggleAssistant()" class="btn-outline btn-xs">Close</button>
+        </div>
+    </div>
+    <div id="assistantMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4"></div>
+    <div class="border-t border-border p-3 shrink-0">
+        <div class="flex items-end gap-2">
+            <textarea id="assistantInput" rows="1" class="field resize-none max-h-32" placeholder="Ask about a printer or a print…" onkeydown="assistantKeydown(event)" oninput="autoGrowAssistantInput()"></textarea>
+            <button id="assistantSend" onclick="sendAssistantMessage()" class="btn-primary btn-lg shrink-0" aria-label="Send">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+        <p class="text-[11px] text-text-2 mt-2 leading-snug">The assistant can only read. It can be wrong &mdash; check anything that matters before you act on it.</p>
+    </div>
 </div>
 
 <script>
@@ -2240,6 +2345,7 @@ async function restartForUpdate() {
     setInterval(pollRelayHealth, 20000);
     await loadCloudStatus();
     setInterval(loadCloudStatus, 30000);
+    await loadAISettings();
 
     // Request notification permission after a short delay so it doesn't fire
     // the browser prompt immediately on page load.
@@ -2247,6 +2353,323 @@ async function restartForUpdate() {
         setTimeout(() => Notification.requestPermission(), 3000);
     }
 })();
+
+// ---------------------------------------------------------------------------
+// Assistant
+// ---------------------------------------------------------------------------
+// The conversation lives only in this tab. Nothing is written to disk and the
+// server keeps no session: every send posts the whole visible transcript, so a
+// refresh starts clean. That is deliberate — printer chat is throwaway, and a
+// transcript on disk is one more file holding details about someone's home.
+
+let aiSettings = null;          // the redacted view from /api/ai/settings
+let assistantOpen = false;
+let assistantBusy = false;
+let assistantTurns = [];        // [{role:'user'|'assistant', content:string}]
+
+async function loadAISettings() {
+    try {
+        const res = await fetch('/api/ai/settings');
+        if (!res.ok) return;
+        aiSettings = await res.json();
+    } catch (e) {
+        return;
+    }
+    const preset = document.getElementById('aiPreset');
+    const model = document.getElementById('aiModel');
+    const baseUrl = document.getElementById('aiBaseUrl');
+    const keyHint = document.getElementById('aiKeyHint');
+    if (preset) preset.value = aiSettings.preset || 'openai';
+    if (model) model.value = aiSettings.model || '';
+    if (baseUrl) baseUrl.value = aiSettings.base_url || '';
+    setSwitch('aiEnabledToggle', !!aiSettings.enabled);
+    setSwitch('aiCameraToggle', !!aiSettings.allow_camera);
+    if (keyHint && aiSettings.api_key_set) {
+        keyHint.textContent = 'A key is saved. Leave this blank to keep it, or paste a new one to replace it.';
+    }
+    onAIPresetChange();
+    updateAssistantAvailability();
+}
+
+// The switches are the same aria-checked pattern the rest of Settings uses.
+function setSwitch(id, on) {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+function getSwitch(id) {
+    const el = document.getElementById(id);
+    return !!el && el.getAttribute('aria-checked') === 'true';
+}
+function toggleAIEnabled() { setSwitch('aiEnabledToggle', !getSwitch('aiEnabledToggle')); }
+function toggleAICamera() { setSwitch('aiCameraToggle', !getSwitch('aiCameraToggle')); }
+
+// A base URL only means anything for the two presets where the user supplies
+// the endpoint. The camera warning changes wording with the provider, because
+// "this leaves your network" is true for a cloud provider and false for a
+// local one, and a warning that cries wolf gets ignored.
+function onAIPresetChange() {
+    const preset = (document.getElementById('aiPreset') || {}).value || 'openai';
+    const row = document.getElementById('aiBaseUrlRow');
+    if (row) row.classList.toggle('hidden', preset !== 'custom' && preset !== 'local');
+
+    const warn = document.getElementById('aiCameraWarning');
+    if (warn) {
+        warn.textContent = preset === 'local'
+            ? 'Needed to diagnose how a print actually looks. Your provider is a local model, so the picture stays on this machine. The model has to support image input.'
+            : 'Needed to diagnose how a print actually looks. This sends a photograph of your printer to your AI provider, over the internet. The model has to support image input.';
+    }
+    const keyHint = document.getElementById('aiKeyHint');
+    if (keyHint && preset === 'local' && !(aiSettings && aiSettings.api_key_set)) {
+        keyHint.textContent = 'Most local model servers need no key. Leave this blank unless yours asks for one.';
+    }
+}
+
+function aiSettingsFromForm() {
+    return {
+        enabled: getSwitch('aiEnabledToggle'),
+        preset: (document.getElementById('aiPreset') || {}).value || '',
+        base_url: (document.getElementById('aiBaseUrl') || {}).value.trim(),
+        model: (document.getElementById('aiModel') || {}).value.trim(),
+        allow_camera: getSwitch('aiCameraToggle')
+    };
+}
+
+async function loadAIModels() {
+    const form = aiSettingsFromForm();
+    const key = (document.getElementById('aiApiKey') || {}).value.trim();
+    const err = document.getElementById('aiSettingsError');
+    const status = document.getElementById('aiSettingsStatus');
+    if (status) status.textContent = 'Asking the provider…';
+    if (err) err.classList.add('hidden');
+    try {
+        const res = await fetch('/api/ai/models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preset: form.preset, base_url: form.base_url, api_key: key })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'The provider would not list its models.');
+        const list = document.getElementById('aiModelList');
+        if (list) list.innerHTML = (data.models || []).map(m => '<option value="' + escHtml(m) + '"></option>').join('');
+        if (status) status.textContent = (data.models || []).length + ' models available in the box above.';
+    } catch (e) {
+        if (status) status.textContent = '';
+        if (err) { err.textContent = e.message; err.classList.remove('hidden'); }
+    }
+}
+
+async function saveAISettings() {
+    const body = aiSettingsFromForm();
+    const keyField = document.getElementById('aiApiKey');
+    const typed = keyField ? keyField.value.trim() : '';
+    // Only send api_key when the user actually typed one. Omitting it keeps the
+    // stored key, which is what makes "save" safe to press on a form that has
+    // never shown the key it is about to keep.
+    if (typed !== '') body.api_key = typed;
+
+    const err = document.getElementById('aiSettingsError');
+    const status = document.getElementById('aiSettingsStatus');
+    if (err) err.classList.add('hidden');
+    if (status) status.textContent = 'Saving…';
+    try {
+        const res = await fetch('/api/ai/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error((await res.text()) || 'Save failed.');
+        aiSettings = await res.json();
+        if (keyField) keyField.value = '';
+        const keyHint = document.getElementById('aiKeyHint');
+        if (keyHint && aiSettings.api_key_set) keyHint.textContent = 'A key is saved. Leave this blank to keep it, or paste a new one to replace it.';
+        if (status) status.textContent = aiSettings.configured ? 'Saved. The assistant is ready.' : 'Saved. Fill in a provider and a model to switch it on.';
+        updateAssistantAvailability();
+    } catch (e) {
+        if (status) status.textContent = '';
+        if (err) { err.textContent = e.message; err.classList.remove('hidden'); }
+    }
+}
+
+// The top-bar button stays visible whatever the settings say: hiding it would
+// leave someone who has not set the assistant up with no way to find out that
+// it exists. It explains itself instead.
+function updateAssistantAvailability() {
+    const btn = document.getElementById('assistantToggle');
+    if (!btn) return;
+    const ready = !!(aiSettings && aiSettings.configured);
+    btn.title = ready ? 'Assistant' : 'Assistant — not set up yet';
+}
+
+function toggleAssistant() {
+    assistantOpen = !assistantOpen;
+    const panel = document.getElementById('assistantPanel');
+    if (!panel) return;
+    panel.classList.toggle('translate-x-full', !assistantOpen);
+    if (assistantOpen) {
+        if (assistantTurns.length === 0) renderAssistantWelcome();
+        const input = document.getElementById('assistantInput');
+        if (input) input.focus();
+    }
+}
+
+function newAssistantChat() {
+    assistantTurns = [];
+    renderAssistantWelcome();
+}
+
+function renderAssistantWelcome() {
+    const box = document.getElementById('assistantMessages');
+    if (!box) return;
+    if (aiSettings && aiSettings.configured) {
+        box.innerHTML = '<div class="chat-msg text-text-2">'
+            + '<p class="mb-2">Ask me about your printers. For example:</p>'
+            + '<ul class="list-disc pl-5 space-y-1">'
+            + '<li>Why is my printer offline?</li>'
+            + '<li>Help me add a Bambu printer in LAN mode.</li>'
+            + '<li>What is my printer doing right now?</li>'
+            + '<li>My last three prints failed &mdash; what do the records show?</li>'
+            + '</ul></div>';
+    } else {
+        box.innerHTML = '<div class="chat-msg text-text-2">'
+            + '<p class="mb-2">The assistant is not set up yet.</p>'
+            + '<p>Open <strong>Settings</strong>, find <strong>Assistant</strong>, choose an AI provider, enter a model and switch it on. You supply the provider and pay for it.</p>'
+            + '</div>';
+    }
+}
+
+function assistantKeydown(e) {
+    // Enter sends, Shift+Enter makes a new line. A printer question is one line
+    // far more often than it is a paragraph.
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendAssistantMessage();
+    }
+}
+
+function autoGrowAssistantInput() {
+    const input = document.getElementById('assistantInput');
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 128) + 'px';
+}
+
+async function sendAssistantMessage() {
+    if (assistantBusy) return;
+    const input = document.getElementById('assistantInput');
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    autoGrowAssistantInput();
+    assistantTurns.push({ role: 'user', content: text });
+    renderAssistantTurns();
+    setAssistantBusy(true);
+
+    try {
+        const res = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: assistantTurns })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'The assistant could not answer.');
+        assistantTurns.push({ role: 'assistant', content: data.reply || '' });
+        renderAssistantTurns();
+    } catch (e) {
+        // The failed question stays in the transcript so it can be retried by
+        // asking again, but the error is not a turn: sending it back to the
+        // model as history would have it apologise for our bug.
+        renderAssistantTurns(e.message);
+    } finally {
+        setAssistantBusy(false);
+    }
+}
+
+function setAssistantBusy(busy) {
+    assistantBusy = busy;
+    const btn = document.getElementById('assistantSend');
+    const input = document.getElementById('assistantInput');
+    if (btn) btn.disabled = busy;
+    if (input) input.disabled = busy;
+    if (busy) {
+        const box = document.getElementById('assistantMessages');
+        if (box) {
+            const d = document.createElement('div');
+            d.id = 'assistantThinking';
+            d.className = 'chat-msg text-text-2 flex items-center gap-2';
+            d.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Looking&hellip;';
+            box.appendChild(d);
+            box.scrollTop = box.scrollHeight;
+        }
+    } else {
+        const t = document.getElementById('assistantThinking');
+        if (t) t.remove();
+    }
+}
+
+function renderAssistantTurns(errorText) {
+    const box = document.getElementById('assistantMessages');
+    if (!box) return;
+    let html = '';
+    for (const turn of assistantTurns) {
+        if (turn.role === 'user') {
+            html += '<div class="chat-msg chat-user whitespace-pre-wrap">' + escHtml(turn.content) + '</div>';
+        } else {
+            html += '<div class="chat-msg chat-assistant">' + renderChatMarkdown(turn.content) + '</div>';
+        }
+    }
+    if (errorText) {
+        html += '<div class="chat-error">' + escHtml(errorText) + '</div>';
+    }
+    box.innerHTML = html;
+    box.scrollTop = box.scrollHeight;
+}
+
+// A deliberately small markdown renderer. The system prompt restricts replies
+// to bold, inline code, and short bullet or numbered lists — no headings, no
+// tables, no links — so this handles exactly that and nothing else. Everything
+// is escaped BEFORE any markup is added, so a reply can never inject HTML: the
+// text comes from a model, which in turn has seen log lines and file names the
+// user did not write.
+function renderChatMarkdown(text) {
+    const inline = (raw) => escHtml(raw)
+        .replace(/`([^`]+)`/g, '<code class="code-inline">$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+    const lines = String(text || '').split('\n');
+    let html = '';
+    let list = null;       // 'ul' | 'ol' | null
+    let para = [];
+
+    const flushPara = () => {
+        if (para.length) { html += '<p>' + para.join('<br>') + '</p>'; para = []; }
+    };
+    const flushList = () => {
+        if (list) { html += '</' + list + '>'; list = null; }
+    };
+
+    for (const raw of lines) {
+        const line = raw.trim();
+        if (line === '') { flushPara(); flushList(); continue; }
+
+        const bullet = line.match(/^[-*]\s+(.*)$/);
+        const numbered = line.match(/^\d+[.)]\s+(.*)$/);
+        if (bullet || numbered) {
+            flushPara();
+            const want = bullet ? 'ul' : 'ol';
+            if (list !== want) { flushList(); html += '<' + want + '>'; list = want; }
+            html += '<li>' + inline((bullet || numbered)[1]) + '</li>';
+            continue;
+        }
+
+        flushList();
+        para.push(inline(line));
+    }
+    flushPara();
+    flushList();
+    return html;
+}
 </script>
 </body>
 </html>

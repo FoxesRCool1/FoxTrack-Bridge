@@ -19,6 +19,43 @@ type Config struct {
 	// BambuCloud is the linked Bambu Lab account, if any. Optional and
 	// additive: a config without it keeps loading unchanged.
 	BambuCloud *BambuCloud `json:"bambu_cloud,omitempty"`
+	// AI is the assistant's provider settings, if the user has configured one.
+	// Optional and additive: a config without it keeps loading unchanged, and
+	// the assistant simply stays off.
+	AI *AI `json:"ai,omitempty"`
+}
+
+// AI holds the settings for the built-in assistant. The Bridge ships with none
+// of this: until a user fills it in, Enabled is false and the assistant is off.
+//
+// APIKey is a secret and must never leave the server (see redactConfig in
+// server.go). It is the user's own provider key, billed to them, and the
+// request goes out from this machine straight to the provider — nothing about
+// the assistant passes through FoxTrack.
+type AI struct {
+	Enabled bool   `json:"enabled,omitempty"`
+	Preset  string `json:"preset,omitempty"`   // openai | gemini | anthropic | custom | local
+	BaseURL string `json:"base_url,omitempty"` // required for custom and local; ignored otherwise
+	Model   string `json:"model,omitempty"`
+	APIKey  string `json:"api_key,omitempty"` // secret
+	// AllowCamera lets the assistant fetch a still frame from a printer camera
+	// and send it to the provider. Off by default and deliberately separate
+	// from Enabled: with a cloud provider this puts a picture of the user's
+	// printer on someone else's server, which is a decision they have to make
+	// on purpose rather than inherit from turning the assistant on.
+	AllowCamera bool `json:"allow_camera,omitempty"`
+}
+
+// Configured reports whether there is enough here to call a provider at all.
+// A local server needs no key, so the key is only required off-loopback.
+func (a *AI) Configured() bool {
+	if a == nil || !a.Enabled || a.Model == "" {
+		return false
+	}
+	if a.Preset == "custom" || a.Preset == "local" {
+		return a.BaseURL != ""
+	}
+	return a.Preset != "" && a.APIKey != ""
 }
 
 // BambuCloud holds one signed-in Bambu Lab account. AccessToken is a secret
@@ -111,6 +148,10 @@ func (c *Config) Clone() *Config {
 	if c.BambuCloud != nil {
 		bc := *c.BambuCloud
 		out.BambuCloud = &bc
+	}
+	if c.AI != nil {
+		ai := *c.AI
+		out.AI = &ai
 	}
 	return &out
 }
