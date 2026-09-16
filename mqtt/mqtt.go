@@ -136,15 +136,35 @@ var (
 	managedPrintersMu sync.Mutex
 
 	// snapshot throttle: last capture time and in-flight guard per printer.
+	// snapFailures counts capture failures in a row and snapRetryAfter holds
+	// the unix time before which no capture is tried; both use snapLastTMu.
 	snapLastT      = make(map[string]int64)
+	snapFailures   = make(map[string]int)
+	snapRetryAfter = make(map[string]int64)
 	snapLastTMu    sync.Mutex
 	snapInFlight   = make(map[string]bool)
 	snapInFlightMu sync.Mutex
 
 	// relay webhook dedup: unix time of the last relay send per printer,
 	// used for the 60s heartbeat when telemetry is otherwise unchanged.
-	webhookLastSent   = make(map[string]int64)
-	webhookLastSentMu sync.Mutex
+	// webhookNoKeyLogged marks printers already told they have no API key,
+	// so that line is logged once and not on every send.
+	webhookLastSent    = make(map[string]int64)
+	webhookNoKeyLogged = make(map[string]bool)
+	webhookLastSentMu  sync.Mutex
+
+	// sendRelay posts a relay payload. A variable so tests can capture payloads.
+	sendRelay = webhook.SendRelay
+)
+
+// A Bambu camera snapshot is taken at most every snapInterval seconds while
+// printing. After snapFailLimit failures in a row the printer is left alone for
+// snapFailBackoff seconds: the X1 and H2 series do not serve the port 6000
+// stream, so without a pause they log an error every 25 seconds all print long.
+const (
+	snapInterval    = 25
+	snapFailLimit   = 3
+	snapFailBackoff = 10 * 60
 )
 
 // managedConn is the cancellation handle for one printer's management goroutine,
@@ -642,6 +662,8 @@ func RemovePrinterState(name string) {
 
 	snapLastTMu.Lock()
 	delete(snapLastT, name)
+	delete(snapFailures, name)
+	delete(snapRetryAfter, name)
 	snapLastTMu.Unlock()
 
 	snapInFlightMu.Lock()
@@ -650,6 +672,7 @@ func RemovePrinterState(name string) {
 
 	webhookLastSentMu.Lock()
 	delete(webhookLastSent, name)
+	delete(webhookNoKeyLogged, name)
 	webhookLastSentMu.Unlock()
 }
 
@@ -853,7 +876,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		// msg:1 is a wifi signal heartbeat — silent skip, expected every few seconds.
 		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0
 		if !hasData {
-			if pr.Msg != 1 {
+			if pr.Msg != 1 && hasPrintObject(msg.Payload()) {
 				log.Printf("[%s] MQTT skip (no usable data) | gcode=%q nozzle=%.1f bed=%.1f | payload: %.120s", p.Name, pr.GcodeState, pr.NozzleTemper, pr.BedTemper, msg.Payload())
 			}
 			return
@@ -1113,7 +1136,11 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				}
 				relayPayload := webhook.RelayPayload{
 					Print: webhook.RelayPrint{
-						GcodeState:         pr.GcodeState,
+						// Not pr.GcodeState: most Bambu messages are partial and
+						// leave it out. FoxTrack replaces the stored status with each
+						// payload, so a blank state showed the printer as Unknown
+						// until the next full report.
+						GcodeState:         relayGcodeState(status),
 						SubTaskName:        fileName,
 						McPercent:          progress,
 						NozzleTemper:       nozzleTemp,
@@ -1125,15 +1152,23 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						Ams:                relayAms,
 					},
 				}
+				if p.APIKey == "" && p.FoxTrack2APIKey == "" {
+					webhookLastSentMu.Lock()
+					logged := webhookNoKeyLogged[p.Name]
+					webhookNoKeyLogged[p.Name] = true
+					webhookLastSentMu.Unlock()
+					if !logged {
+						log.Printf("[%s] not sending to FoxTrack — no API key configured", p.Name)
+					}
+					return
+				}
 				if p.APIKey != "" {
-					if err := webhook.SendRelay(p.APIKey, webhook.URL, p.Serial, p.Name, relayPayload); err != nil {
+					if err := sendRelay(p.APIKey, webhook.URL, p.Serial, p.Name, relayPayload); err != nil {
 						log.Printf("[%s] webhook error (legacy): %v", p.Name, err)
 					}
-				} else {
-					log.Printf("[%s] skipping webhook — API key not configured", p.Name)
 				}
 				if p.FoxTrack2APIKey != "" {
-					if err := webhook.SendRelay(p.FoxTrack2APIKey, webhook.RelayURLV2, p.Serial, p.Name, relayPayload); err != nil {
+					if err := sendRelay(p.FoxTrack2APIKey, webhook.RelayURLV2, p.Serial, p.Name, relayPayload); err != nil {
 						log.Printf("[%s] webhook error (v2): %v", p.Name, err)
 					}
 				}
@@ -1141,15 +1176,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		}
 
 		if (t.Status == "printing" || t.Status == "paused") && p.FoxTrack2APIKey != "" {
-			now := time.Now().Unix()
-			snapLastTMu.Lock()
-			eligible := now-snapLastT[p.Name] >= 25
-			if eligible {
-				snapLastT[p.Name] = now
-			}
-			snapLastTMu.Unlock()
-
-			if eligible {
+			if snapshotDue(p.Name, time.Now().Unix()) {
 				snapInFlightMu.Lock()
 				busy := snapInFlight[p.Name]
 				if !busy {
@@ -1168,9 +1195,14 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						}()
 						frame, err := capture.BambuFrame(ip, lanCode, name)
 						if err != nil {
-							log.Printf("[%s] snapshot capture: %v", name, err)
+							if noteSnapshotFailure(name, time.Now().Unix()) {
+								log.Printf("[%s] snapshot capture: %v — no picture after %d tries, next try in %d minutes. The X1 and H2 series stream their camera over RTSP, which the Bridge cannot read yet", name, err, snapFailLimit, snapFailBackoff/60)
+							} else {
+								log.Printf("[%s] snapshot capture: %v", name, err)
+							}
 							return
 						}
+						noteSnapshotSuccess(name)
 						if err := webhook.SendSnapshot(apiKey, webhook.SnapshotURLV2, serial, name, frame); err != nil {
 							log.Printf("[%s] snapshot send: %v", name, err)
 						}
@@ -1221,4 +1253,73 @@ func mapGcodeState(s string) string {
 	default:
 		return s
 	}
+}
+
+// relayGcodeState turns a Bridge status back into the Bambu gcode_state the
+// FoxTrack relay expects. Raw Bambu states that mapGcodeState passes through
+// (PREPARE, SLICING) go out unchanged. The Bridge's own connection states are
+// not printer states, so they go out blank.
+func relayGcodeState(status string) string {
+	switch status {
+	case "idle":
+		return "IDLE"
+	case "printing":
+		return "RUNNING"
+	case "paused":
+		return "PAUSE"
+	case "finished":
+		return "FINISH"
+	case "error":
+		return "FAILED"
+	case "connected", "disconnected":
+		return ""
+	default:
+		return status
+	}
+}
+
+// hasPrintObject reports whether an MQTT payload carries a "print" object.
+// Some firmware also publishes messages without one, such as a bare {}. Those
+// are not status reports, so they are not worth a log line.
+func hasPrintObject(payload []byte) bool {
+	var probe struct {
+		Print json.RawMessage `json:"print"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return false
+	}
+	return len(probe.Print) > 0 && string(probe.Print) != "null"
+}
+
+// snapshotDue reports whether a camera snapshot should be taken for name at
+// unix time now. When it returns true it also starts the next interval.
+func snapshotDue(name string, now int64) bool {
+	snapLastTMu.Lock()
+	defer snapLastTMu.Unlock()
+	if now-snapLastT[name] < snapInterval || now < snapRetryAfter[name] {
+		return false
+	}
+	snapLastT[name] = now
+	return true
+}
+
+// noteSnapshotFailure records a failed capture. It reports true when this
+// failure starts a pause of snapFailBackoff seconds before the next try.
+func noteSnapshotFailure(name string, now int64) bool {
+	snapLastTMu.Lock()
+	defer snapLastTMu.Unlock()
+	snapFailures[name]++
+	if snapFailures[name] < snapFailLimit {
+		return false
+	}
+	snapRetryAfter[name] = now + snapFailBackoff
+	return true
+}
+
+// noteSnapshotSuccess clears the failure count after a capture works.
+func noteSnapshotSuccess(name string) {
+	snapLastTMu.Lock()
+	defer snapLastTMu.Unlock()
+	delete(snapFailures, name)
+	delete(snapRetryAfter, name)
 }

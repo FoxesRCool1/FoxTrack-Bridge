@@ -42,12 +42,27 @@
 - Print history for a renamed printer still includes the prints from before the
   rename.
 
+**FoxTrack Connection**
+- Fixed Bambu Lab printers showing as "Unknown" in FoxTrack. Most updates from a
+  Bambu printer leave out its state, and the Bridge sent that blank state on to
+  FoxTrack. A printer showed the right state for a moment after each full
+  report, then went back to "Unknown". The Bridge now always sends the printer's
+  last known state.
+- The log no longer says "skipping webhook — API key not configured" for
+  printers that use a FoxTrack Bridge token. A printer with no key at all logs
+  that once.
+- The log no longer shows "MQTT skip (no usable data)" for empty `{}` messages,
+  which some Bambu firmware sends.
+
 **Camera**
 - A Bambu Lab camera that sends no picture now fails after 15 seconds with
   "Camera unavailable", instead of loading forever. The Bridge log says why.
   A stream that stops sending pictures for 30 seconds is closed.
 - The "Camera unavailable" message on Bambu Lab cards says which models work
   (A1 and P1 series) and what to check.
+- FoxTrack camera snapshots stop after 3 failed tries in a row and try again
+  every 10 minutes. X1 and H2 series printers no longer log
+  "snapshot capture: header read: EOF" every 25 seconds during a print.
 
 **Docs**
 - Added [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md): setup, linking
