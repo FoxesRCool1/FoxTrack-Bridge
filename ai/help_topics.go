@@ -111,6 +111,22 @@ The URL must include the scheme (http:// or https://) and the port. The Bridge c
 A common clash: the Bridge listens on port 8080 by default, and 8080 is also the default webcam port for mjpg-streamer on Mainsail and Fluidd. Running both on the same machine collides unless one is moved. Change the Bridge with --port 9000 or the FOXTRACK_BRIDGE_PORT environment variable; if both are set, --port wins.`,
 	},
 	{
+		ID:       "edit-printer",
+		Title:    "Changing a saved printer (new IP address, rename, new access code)",
+		Keywords: []string{"edit", "change", "rename", "new ip", "ip changed", "update", "pencil", "modify", "access code changed", "wrong serial", "moved"},
+		Body: `A saved printer can be changed without removing it. Click the pencil icon on the printer's card, change the details, and click Save.
+
+What can be changed depends on the type. Bambu LAN mode: name, IP address, serial number and LAN access code. Bambu Cloud: name, and the IP address used for the camera. Klipper: name, Moonraker URL, Moonraker API key and webcam URL. The printer type itself cannot be changed; remove the printer and add it again for that.
+
+The access code and API key fields start blank because the dashboard never receives saved secrets. Leaving them blank keeps the saved value.
+
+Saving reconnects only that printer, and only if a connection detail changed. Other printers keep running.
+
+A printer cannot be renamed during a print, because the running print is tracked under its name and its history record would be lost. The IP address can be changed during a print. Local print history from before a rename stays with the printer.
+
+In FoxTrack, a renamed Bambu printer keeps its link because FoxTrack follows the serial number. A renamed Klipper printer shows up in FoxTrack as a new device, because FoxTrack knows Klipper printers by name. Changing a Bambu serial number has the same effect. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays in the list and shows as offline.`,
+	},
+	{
 		ID:       "connection-problems",
 		Title:    "A printer will not connect or shows as offline",
 		Keywords: []string{"offline", "disconnected", "not connecting", "unreachable", "timeout", "refused", "cannot reach", "no status", "stuck", "unknown", "connection", "firewall", "network"},
@@ -118,7 +134,7 @@ A common clash: the Bridge listens on port 8080 by default, and 8080 is also the
 
 1. Is the Bridge on the same network as the printer? The Bridge reaches printers directly over the LAN. A printer on a guest network, a separate VLAN, or a different WiFi band that the router isolates cannot be reached. WiFi AP isolation blocks this too.
 
-2. Is the address right and still current? Most printers get their IP from DHCP, so it changes after a reboot or a lease expiry. A printer that worked yesterday and is offline today usually has a new IP. Check the address on the printer and correct it in the dashboard. A DHCP reservation on the router stops it happening again.
+2. Is the address right and still current? Most printers get their IP from DHCP, so it changes after a reboot or a lease expiry. A printer that worked yesterday and is offline today usually has a new IP. Check the address on the printer, then click the pencil icon on the printer's card in the dashboard, change the IP address and click Save. There is no need to remove the printer and add it again. A DHCP reservation on the router stops it happening again.
 
 3. Are the credentials right? For Bambu LAN mode the serial number and LAN access code are case sensitive. The access code changes every time LAN Only Mode is toggled off and on. A wrong code looks identical to an unreachable printer: the printer simply never comes online.
 
@@ -135,10 +151,12 @@ The Bridge writes a line to its log for each connection attempt and failure, pre
 	{
 		ID:       "cameras",
 		Title:    "Camera feeds and the live printer view",
-		Keywords: []string{"camera", "webcam", "video", "feed", "stream", "snapshot", "picture", "live view", "black", "blank", "hidden", "hide"},
+		Keywords: []string{"camera", "webcam", "video", "feed", "stream", "snapshot", "picture", "live view", "black", "blank", "hidden", "hide", "loading", "spinning", "unavailable", "rtsp"},
 		Body: `Each printer tile can show a live camera feed.
 
-Bambu LAN mode: the Bridge pulls frames from the printer directly using its IP and LAN access code. Nothing needs configuring beyond what the printer already needed to connect.
+Bambu LAN mode: the Bridge pulls frames from the printer directly using its IP and LAN access code, on TCP port 6000. Nothing needs configuring beyond what the printer already needed to connect. Only the A1, A1 mini, P1P and P1S serve that stream. Other models, such as the X1 and H2 series, send their camera as an RTSP stream on port 322, which the Bridge cannot read yet; their status and controls still work.
+
+If a Bambu printer accepts the camera connection but sends no picture within 15 seconds, the dashboard shows "Camera unavailable" and the Bridge log has a line starting with [camera/ that says why. The usual causes are a model that does not serve the port 6000 stream, or a LAN access code that changed when LAN Only Mode was toggled. A new access code can be entered with the pencil icon on the printer's card.
 
 Bambu Cloud: the camera works only when the printer is on the same network as the Bridge, because the frame still comes from the printer over the LAN, not from Bambu's servers.
 
@@ -146,7 +164,9 @@ Klipper: the Bridge proxies the webcam URL configured for that printer.
 
 A camera can be hidden per printer. That setting is saved on the Bridge, so it applies in every browser, and it only affects the dashboard; snapshot sending to FoxTrack is unaffected.
 
-If a feed is black or blank: confirm the printer's own interface shows the camera, check the printer is reachable at all (an offline printer has no camera either), and for Klipper confirm the webcam URL is right and reachable from the Bridge's machine rather than only from your laptop.`,
+If a feed is black or blank: confirm the printer's own interface shows the camera, check the printer is reachable at all (an offline printer has no camera either), and for Klipper confirm the webcam URL is right and reachable from the Bridge's machine rather than only from your laptop.
+
+In FoxTrack, the live picture only loads when the browser runs on the same computer as the Bridge. Everywhere else FoxTrack shows the latest snapshot. The Bridge sends a snapshot about every 25 seconds, and only while a print is running or paused, so an idle printer's snapshot does not update. Klipper printers send snapshots only when a webcam URL is set on the printer.`,
 	},
 	{
 		ID:       "print-problems",
@@ -187,9 +207,11 @@ AMS slot display, the speed selector and the GCode console are Bambu-only. Fan c
 		Keywords: []string{"foxtrack", "api key", "token", "sync", "cloud", "remote", "relay", "rejected", "revoked", "plan", "integrations"},
 		Body: `Linking to FoxTrack is optional. The dashboard works fully offline without it.
 
-To link: open Settings, paste the FoxTrack API key, and click Save. The key comes from FoxTrack Settings > Integrations.
+To link: in FoxTrack, open Settings > Integrations > FoxTrack Bridge and create a Bridge token (it starts with ftb_ and is shown once). In the Bridge, open Settings, paste it into the FoxTrack sync field, and click Save. The Bridge integration is a FoxTrack Pro feature, and creating a token needs the owner or admin role.
 
-Once linked, the Bridge relays telemetry, print history and camera snapshots to FoxTrack so printers can be monitored remotely.
+Once linked, the Bridge relays telemetry, print history and camera snapshots to FoxTrack so printers can be monitored remotely. Each printer then appears on the FoxTrack Printers page: in the Live view, and in the Fleet view under "Detected on your network, not linked". Pick a FoxTrack printer in its "Link to printer" menu to link them.
+
+Printers that already exist in FoxTrack should be linked, not deleted. Deleting a printer in FoxTrack also deletes its maintenance schedules, maintenance log and installed hardware. FoxTrack recognizes a Bambu printer by its serial number and a Klipper printer by its name in the Bridge, so the names do not have to match.
 
 If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the key was revoked, the key was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.`,
 	},

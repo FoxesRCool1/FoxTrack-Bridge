@@ -30,6 +30,32 @@
 - Note: the dashboard has no login, so anyone who can reach it on your network
   can use the assistant and spend credit on the key you save.
 
+**Printers**
+- You can edit a saved printer. Click the pencil icon on its card to change the
+  name, IP address, serial number, access code, Moonraker URL or webcam URL. You
+  no longer have to remove a printer and add it again when its IP address
+  changes. Leave the access code or API key blank to keep the saved one.
+- Saving reconnects only the printer you edited, and only when a connection
+  detail changed. Other printers keep running.
+- A printer cannot be renamed during a print, because that print's history
+  record would be lost. Changing the IP address during a print is allowed.
+- Print history for a renamed printer still includes the prints from before the
+  rename.
+
+**Camera**
+- A Bambu Lab camera that sends no picture now fails after 15 seconds with
+  "Camera unavailable", instead of loading forever. The Bridge log says why.
+  A stream that stops sending pictures for 30 seconds is closed.
+- The "Camera unavailable" message on Bambu Lab cards says which models work
+  (A1 and P1 series) and what to check.
+
+**Docs**
+- Added [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md): setup, linking
+  printers you already have in FoxTrack, editing printers, cameras and
+  troubleshooting.
+- The Settings page now names the right place to create a Bridge token and
+  links to the guide.
+
 ## v2.3.1
 
 **Updates (Linux)**

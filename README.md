@@ -19,7 +19,8 @@ Among many other tools, AI was used to develop this program. If you have a probl
 
 - Live status for Bambu Lab and Klipper/Moonraker printers
 - Print progress, temperatures, elapsed time, and ETA
-- Live camera feed and light toggle
+- Live camera feed (Bambu Lab A1 and P1 series, and Klipper webcams) and light toggle
+- Edit a saved printer, for example after its IP address changes
 - AMS filament slot display with colors and material types (Bambu Lab only)
 - Print speed selector: Silent, Standard, Sport, Ludicrous (Bambu Lab only)
 - Fan speed control (Bambu Lab and Klipper)
@@ -78,7 +79,7 @@ Replace `<asset-name>` with the file you downloaded, for example `FoxTrack-Bridg
 
 1. Run the Bridge. Download the binary for your platform (see [Supported platforms](#supported-platforms)) and launch it. On Windows and macOS, a system tray icon appears with an "Open Dashboard" menu. Linux builds are headless: run the binary from a terminal, or see [Running on Linux](#running-on-linux) for a desktop launcher and background-service setup. The startup output lists the local addresses where the dashboard is available.
 2. Open the dashboard at [http://localhost:8080](http://localhost:8080). From other devices on the same network, use the IP address shown in the startup output (for example `http://192.168.x.x:8080`). You may need to disable WiFi AP isolation on your router.
-3. Connect to FoxTrack (optional). In Settings, paste your FoxTrack API key and click Save. Get your key from [FoxTrack Settings > Integrations](https://foxtrack.studio/settings).
+3. Connect to FoxTrack (optional). Create a Bridge token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/settings), paste it into **FoxTrack sync** in the Bridge Settings, and click Save. See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
 4. Add a printer. In Printers, click "Add Printer", select the printer type, fill in the required fields, and click Connect.
 
 ---
@@ -90,13 +91,17 @@ Replace `<asset-name>` with the file you downloaded, for example `FoxTrack-Bridg
 1. On the printer touchscreen, enable **LAN Only Mode** under Network settings.
 2. Enable **Developer Mode** under About.
 3. Note the **IP address**, **Serial Number**, and **LAN Access Code** (shown on the screen after enabling LAN Only Mode).
-4. In the dashboard under Settings, select **Bambu Lab**, enter those values, and click Connect.
+4. In the dashboard, open Printers, click **Add printer**, select **Bambu Lab (LAN mode)**, enter those values, and click Connect.
 
 ### Klipper / Moonraker
 
 1. Find your Moonraker URL, usually `http://192.168.x.x:7125`.
-2. In the dashboard under Settings, select **Klipper / Moonraker**, enter the URL, and click Connect.
+2. In the dashboard, open Printers, click **Add printer**, select **Klipper / Moonraker**, enter the URL, and click Connect.
 3. If Moonraker has authentication enabled, also provide the Moonraker API key.
+
+### Changing a printer later
+
+To change a saved printer, for example after its IP address changes, click the pencil icon on its card, edit the details, and click Save. Leave the access code or API key blank to keep the saved one. See [Change a printer later](docs/foxtrack.md#change-a-printer-later).
 
 ---
 

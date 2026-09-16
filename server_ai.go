@@ -564,7 +564,7 @@ func toolPrintHistory(printerName string, limit int) ai.ToolResult {
 		if _, ok := findPrinter(printerName); !ok {
 			return notFound(printerName)
 		}
-		records, err = history.ForPrinter(printerName)
+		records, err = printerHistory(printerName)
 	} else {
 		records, err = history.Load()
 	}

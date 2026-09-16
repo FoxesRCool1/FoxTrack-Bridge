@@ -126,7 +126,7 @@ func StartServer(port int) {
 	http.HandleFunc("/fonts/", fontHandler)
 	http.HandleFunc("/api/config", handleConfig)
 	http.HandleFunc("/api/printers", handlePrinters)
-	http.HandleFunc("/api/printers/", handlePrinterByName) // DELETE /api/printers/{name}
+	http.HandleFunc("/api/printers/", handlePrinterByName) // PUT (edit), PATCH, DELETE /api/printers/{id}
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/relay-health", handleRelayHealth)
 	http.HandleFunc("/api/version", handleVersion)
@@ -614,11 +614,30 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 //
 // Each frame: 16-byte header where bytes [0:4] are the LE u32 JPEG payload size,
 // followed by that many bytes of JPEG data.
+//
+// Only the A1 and P1 series serve this protocol. The X1 and H2 series stream
+// RTSP on port 322 instead, which the Bridge does not read.
 func bambuCameraStream(w http.ResponseWriter, ip, lanCode, printerName string) {
+	proxyBambuCamera(w, net.JoinHostPort(ip, "6000"), lanCode, printerName)
+}
+
+// bambuFirstFrameTimeout bounds the wait for the first picture. A printer can
+// accept the connection and then send nothing (wrong access code, a model that
+// does not serve this stream), and without a limit the dashboard spins forever.
+// bambuFrameStallTimeout ends a stream that stops sending frames. Both are
+// variables so tests can shorten them.
+var (
+	bambuFirstFrameTimeout = 15 * time.Second
+	bambuFrameStallTimeout = 30 * time.Second
+)
+
+const bambuCameraNoFrames = "the printer accepted the camera connection but sent no picture. Check the LAN access code. The Bridge camera works with A1 and P1 series printers"
+
+func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) {
 	conn, err := tls.DialWithDialer(
 		&net.Dialer{Timeout: 5 * time.Second},
 		"tcp",
-		net.JoinHostPort(ip, "6000"),
+		addr,
 		&tls.Config{InsecureSkipVerify: true},
 	)
 	if err != nil {
@@ -642,7 +661,39 @@ func bambuCameraStream(w http.ResponseWriter, ip, lanCode, printerName string) {
 		http.Error(w, "camera unavailable", http.StatusBadGateway)
 		return
 	}
-	conn.SetDeadline(time.Time{})
+	reader := bufio.NewReader(conn)
+	hdr := make([]byte, 16)
+	// readJPEG returns the next JPEG frame, skipping non-JPEG payloads (some
+	// frames are metadata, not images).
+	readJPEG := func() ([]byte, error) {
+		for {
+			// 16-byte frame header: bytes [0:4] = LE u32 JPEG payload size.
+			if _, err := io.ReadFull(reader, hdr); err != nil {
+				return nil, fmt.Errorf("header read: %w", err)
+			}
+			frameSize := binary.LittleEndian.Uint32(hdr[0:4])
+			if frameSize == 0 || frameSize > 10<<20 {
+				return nil, fmt.Errorf("invalid frame size %d", frameSize)
+			}
+			frame := make([]byte, frameSize)
+			if _, err := io.ReadFull(reader, frame); err != nil {
+				return nil, fmt.Errorf("frame read: %w", err)
+			}
+			if frameSize >= 2 && frame[0] == 0xFF && frame[1] == 0xD8 {
+				return frame, nil
+			}
+		}
+	}
+
+	// Wait for the first picture before answering, so a printer that sends
+	// nothing produces an error the dashboard can show instead of a spinner.
+	conn.SetReadDeadline(time.Now().Add(bambuFirstFrameTimeout))
+	frame, err := readJPEG()
+	if err != nil {
+		log.Printf("[camera/%s] no picture from the printer: %v", printerName, err)
+		http.Error(w, bambuCameraNoFrames, http.StatusBadGateway)
+		return
+	}
 
 	// Start MJPEG response
 	const boundary = "bambu"
@@ -651,35 +702,19 @@ func bambuCameraStream(w http.ResponseWriter, ip, lanCode, printerName string) {
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 
-	reader := bufio.NewReader(conn)
-	hdr := make([]byte, 16)
 	for {
-		// 16-byte frame header: bytes [0:4] = LE u32 JPEG payload size.
-		if _, err := io.ReadFull(reader, hdr); err != nil {
-			log.Printf("[camera/%s] header read: %v", printerName, err)
-			return
-		}
-		frameSize := binary.LittleEndian.Uint32(hdr[0:4])
-		if frameSize == 0 || frameSize > 10<<20 {
-			log.Printf("[camera/%s] invalid frame size %d", printerName, frameSize)
-			return
-		}
-		frame := make([]byte, frameSize)
-		if _, err := io.ReadFull(reader, frame); err != nil {
-			log.Printf("[camera/%s] frame read: %v", printerName, err)
-			return
-		}
-		// Skip non-JPEG payloads (some frames are metadata, not images).
-		if frameSize < 2 || frame[0] != 0xFF || frame[1] != 0xD8 {
-			continue
-		}
-		fmt.Fprintf(w, "--%s\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", boundary, frameSize)
+		fmt.Fprintf(w, "--%s\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", boundary, len(frame))
 		if _, err := w.Write(frame); err != nil {
 			return // client disconnected
 		}
 		fmt.Fprint(w, "\r\n")
 		if flusher != nil {
 			flusher.Flush()
+		}
+		conn.SetReadDeadline(time.Now().Add(bambuFrameStallTimeout))
+		if frame, err = readJPEG(); err != nil {
+			log.Printf("[camera/%s] %v", printerName, err)
+			return
 		}
 	}
 }
@@ -1197,6 +1232,10 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "OPTIONS" {
 		return
 	}
+	if r.Method == "PUT" {
+		handleEditPrinter(w, r, strings.TrimPrefix(r.URL.Path, "/api/printers/"))
+		return
+	}
 	if r.Method == "PATCH" {
 		type patchBody struct {
 			CameraHidden *bool `json:"camera_hidden"`
@@ -1310,6 +1349,262 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// printerEdit is the body of PUT /api/printers/{id}. A field that is left out
+// keeps its stored value. A blank lan_code or api_key also keeps the stored
+// secret, because the dashboard never receives secrets and cannot echo them.
+type printerEdit struct {
+	Name         *string `json:"name"`
+	IP           *string `json:"ip"`
+	Serial       *string `json:"serial"`
+	LANCode      *string `json:"lan_code"`
+	MoonrakerURL *string `json:"moonraker_url"`
+	APIKey       *string `json:"api_key"`
+	WebcamURL    *string `json:"webcam_url"`
+}
+
+var errPrinterNotFound = errors.New("printer not found")
+
+// errRenameWhilePrinting blocks a rename during a print. A running print is
+// tracked under the printer's name, so renaming mid-print would lose the
+// print's history record.
+var errRenameWhilePrinting = errors.New("finish or stop the current print before renaming this printer")
+
+// errInvalidPrinterEdit marks an edit that leaves a required field blank.
+var errInvalidPrinterEdit = errors.New("printer details are incomplete")
+
+// applyPrinterEdit returns a copy of old with one printer edited, and that
+// printer's index. token is matched against printer IDs first, then names, as
+// DELETE does. busy reports whether a printer name has a print running. The
+// printer keeps its ID and its type (Bambu LAN, Bambu cloud or Klipper): only
+// the fields that type uses are applied. old is not mutated.
+func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy func(name string) bool) (*config.Config, int, error) {
+	cfg := old.Clone()
+	idx := -1
+	for i, p := range cfg.Printers {
+		if p.ID != "" && p.ID == token {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		for i, p := range cfg.Printers {
+			if p.Name == token {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx < 0 {
+		return nil, -1, errPrinterNotFound
+	}
+	p := &cfg.Printers[idx]
+
+	required := func(field *string, label string) (string, error) {
+		v := strings.TrimSpace(*field)
+		if v == "" {
+			return "", fmt.Errorf("%w: the %s is required", errInvalidPrinterEdit, label)
+		}
+		return v, nil
+	}
+
+	if edit.Name != nil {
+		name := strings.TrimSpace(*edit.Name)
+		if name == "" {
+			return nil, -1, errBlankPrinterName
+		}
+		if name != p.Name {
+			others := make([]config.Printer, 0, len(cfg.Printers))
+			others = append(others, cfg.Printers[:idx]...)
+			others = append(others, cfg.Printers[idx+1:]...)
+			if hasDuplicateName(others, config.Printer{Name: name}) {
+				return nil, -1, fmt.Errorf("a printer named %q already exists: %w", name, errDuplicatePrinterName)
+			}
+			if busy != nil && busy(p.Name) {
+				return nil, -1, errRenameWhilePrinting
+			}
+			p.PreviousNames = addPreviousName(p.PreviousNames, p.Name, name)
+			p.Name = name
+		}
+	}
+
+	switch {
+	case p.IsCloud():
+		// The Bambu account supplies the serial and the access code. Only the
+		// camera address belongs to the user, and it may be cleared.
+		if edit.IP != nil {
+			p.IP = strings.TrimSpace(*edit.IP)
+		}
+	case isBambuPrinterConfig(*p):
+		if edit.IP != nil {
+			v, err := required(edit.IP, "IP address")
+			if err != nil {
+				return nil, -1, err
+			}
+			p.IP = v
+		}
+		if edit.Serial != nil {
+			v, err := required(edit.Serial, "serial number")
+			if err != nil {
+				return nil, -1, err
+			}
+			p.Serial = v
+		}
+		if edit.LANCode != nil && strings.TrimSpace(*edit.LANCode) != "" {
+			p.LANCode = strings.TrimSpace(*edit.LANCode)
+		}
+	default:
+		if edit.MoonrakerURL != nil {
+			v, err := required(edit.MoonrakerURL, "Moonraker URL")
+			if err != nil {
+				return nil, -1, err
+			}
+			p.MoonrakerURL = v
+		}
+		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
+			p.APIKey = strings.TrimSpace(*edit.APIKey)
+		}
+		if edit.WebcamURL != nil {
+			p.WebcamURL = strings.TrimSpace(*edit.WebcamURL)
+		}
+	}
+	return cfg, idx, nil
+}
+
+// addPreviousName records oldName in a printer's rename history. A name the
+// printer takes back is dropped from the history, so it never lists its own
+// current name.
+func addPreviousName(names []string, oldName, newName string) []string {
+	out := make([]string, 0, len(names)+1)
+	for _, n := range names {
+		if n != newName && n != oldName {
+			out = append(out, n)
+		}
+	}
+	if strings.TrimSpace(oldName) != "" {
+		out = append(out, oldName)
+	}
+	return out
+}
+
+// printingPrinterNames returns the names of printers with a print running or
+// paused. Both state maps take their own locks, so call it without configMutex.
+func printingPrinterNames() map[string]bool {
+	states := mqttpkg.GetPrintersState()
+	for k, v := range lanCtrl.GetStates() {
+		states[k] = v
+	}
+	busy := make(map[string]bool)
+	for name, t := range states {
+		if t != nil && (t.Status == "printing" || t.Status == "paused") {
+			busy[name] = true
+		}
+	}
+	return busy
+}
+
+// handleEditPrinter handles PUT /api/printers/{token}. It changes a saved
+// printer's name and connection details — a new IP address after a router
+// change, a corrected serial, a new access code — without removing and adding
+// the printer again.
+func handleEditPrinter(w http.ResponseWriter, r *http.Request, token string) {
+	var edit printerEdit
+	if err := json.NewDecoder(r.Body).Decode(&edit); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
+		return
+	}
+	busy := printingPrinterNames()
+
+	configMutex.Lock()
+	oldCfg := configStore
+	newCfg, idx, err := applyPrinterEdit(oldCfg, token, edit, func(name string) bool { return busy[name] })
+	if err != nil {
+		configMutex.Unlock()
+		status := http.StatusBadRequest
+		switch {
+		case errors.Is(err, errPrinterNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, errDuplicatePrinterName), errors.Is(err, errRenameWhilePrinting):
+			status = http.StatusConflict
+		}
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	before := oldCfg.Printers[idx]
+	configStore = newCfg
+	snapshot := newCfg.Clone()
+	configMutex.Unlock()
+
+	after := snapshot.Printers[idx]
+	if err := config.SaveConfig(snapshot); err != nil {
+		log.Printf("Warning: failed to save config: %v", err)
+	}
+	reconnectEditedPrinter(before, after, snapshot)
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "printer": redactPrinter(after)})
+}
+
+// reconnectEditedPrinter restarts one edited printer's connection when its name
+// or a connection field changed, and leaves every other printer alone. A rename
+// is a remove under the old name followed by an add under the new one, because
+// the MQTT and Moonraker drivers are keyed by name.
+func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
+	renamed := before.Name != after.Name
+	switch {
+	case after.IsCloud():
+		if renamed {
+			mqttpkg.RemovePrinterState(before.Name)
+		}
+		if renamed || before.IP != after.IP {
+			syncCloud(cfg)
+		}
+	case isBambuPrinterConfig(after):
+		if !renamed && mqttPrinter(before, cfg) == mqttPrinter(after, cfg) {
+			return
+		}
+		log.Printf("[%s] printer edited — restarting MQTT connection", after.Name)
+		mqttpkg.DisconnectPrinter(before.Name)
+		if renamed {
+			mqttpkg.RemovePrinterState(before.Name)
+		}
+		mqttpkg.ConnectPrinter(mqttPrinter(after, cfg))
+	default:
+		if !renamed && before.MoonrakerURL == after.MoonrakerURL && before.APIKey == after.APIKey && before.WebcamURL == after.WebcamURL {
+			return
+		}
+		if renamed {
+			lanCtrl.RemovePrinter(before.Name)
+		}
+		lanCtrl.AddOrUpdatePrinter(after, cfg.APIKey, cfg.FoxTrack2APIKey)
+		log.Printf("[%s] printer edited — reconnected via Moonraker", after.Name)
+	}
+}
+
+// printerHistory returns the local print history for the printer named name,
+// including prints recorded under the names it had before a rename.
+func printerHistory(name string) ([]history.Record, error) {
+	names := map[string]bool{name: true}
+	if p, ok := findPrinter(name); ok {
+		for _, n := range p.PreviousNames {
+			names[n] = true
+		}
+	}
+	if len(names) == 1 {
+		return history.ForPrinter(name)
+	}
+	all, err := history.Load()
+	if err != nil {
+		return nil, err
+	}
+	out := []history.Record{}
+	for _, rec := range all {
+		if names[rec.PrinterName] {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
+}
+
 // syncPrinterConnections reconciles running printer connections with cfg.
 // oldCfg is the previously active config (nil at startup): Bambu printers whose
 // connection-relevant fields (IP, serial, LAN code, webhook keys) changed are
@@ -1402,7 +1697,7 @@ func handleHistoryByPrinter(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing printer name", http.StatusBadRequest)
 		return
 	}
-	records, err := history.ForPrinter(name)
+	records, err := printerHistory(name)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})

@@ -215,14 +215,14 @@
 <div id="addPrinterModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAddPrinterModal()">
     <div class="floating w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div class="flex items-start justify-between gap-3 mb-1">
-            <h3 class="font-heading text-xl font-medium leading-tight">Add printer</h3>
+            <h3 id="printerModalTitle" class="font-heading text-xl font-medium leading-tight">Add printer</h3>
             <button onclick="closeAddPrinterModal()" class="btn-icon -mr-2 -mt-1" title="Close" aria-label="Close">
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        <p class="text-sm leading-relaxed text-text-2 mb-4">Connect a printer to FoxTrack Bridge.</p>
+        <p id="printerModalSubtitle" class="text-sm leading-relaxed text-text-2 mb-4">Connect a printer to FoxTrack Bridge.</p>
         <div class="space-y-3">
-            <div>
+            <div id="fieldBrand">
                 <label for="pBrand" class="field-label">Printer type</label>
                 <div class="select-wrap">
                     <select id="pBrand" onchange="onBrandChange()" class="field">
@@ -246,6 +246,7 @@
                 <div>
                     <label for="pName" class="field-label">Printer name</label>
                     <input type="text" id="pName" autocomplete="off" class="field" placeholder="e.g. Studio P1S">
+                    <p id="pNameHint" class="hidden text-xs text-text-2 mt-1.5">FoxTrack knows Klipper printers by name. If you rename this printer, link it again in FoxTrack.</p>
                 </div>
                 <div id="fieldIp">
                     <label for="pIp" id="labelIp" class="field-label">IP address</label>
@@ -427,7 +428,7 @@
                         FoxTrack settings <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
                     </a>
                 </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">Paste your API token from FoxTrack Settings &gt; Integrations &gt; 3D Printer to sync with the cloud. Leave blank to use the Bridge locally only.</p>
+                <p class="text-sm leading-relaxed text-text-2 mb-4">Create a Bridge token in FoxTrack under Settings &gt; Integrations &gt; FoxTrack Bridge, and paste it into FoxTrack sync. Leave blank to use the Bridge locally only. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Setup guide</a></p>
                 <label for="foxtrack2ApiKey" class="field-label">FoxTrack sync</label>
                 <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field mb-4" placeholder="Paste API key (optional)">
                 <label for="apiKey" class="field-label">FoxTrack (legacy)</label>
@@ -1087,8 +1088,49 @@ function openAddPrinterModal() {
     document.getElementById('addPrinterModal').classList.remove('hidden');
 }
 
+// Id of the printer the modal is editing, or null when it is adding one. Edit
+// mode reuses the add form: the type is fixed, secrets start blank (the
+// dashboard never receives them) and a blank secret keeps the saved one.
+let editingPrinterId = null;
+
+const SECRET_PLACEHOLDERS = { pLanCode: '8-character code', pKlipperKey: 'Moonraker API key' };
+
+function openEditPrinterModalEncoded(enc) { openEditPrinterModal(decodePrinterId(enc)); }
+
+function openEditPrinterModal(id) {
+    const printer = configuredPrinters.find(p => p.id === id);
+    if (!printer) return;
+    closeAddPrinterModal();
+    editingPrinterId = id;
+    const brand = isCloudPrinter(printer) ? 'bambu_cloud' : (printerTypeLabel(printer) === 'Bambu' ? 'bambu' : 'klipper');
+    document.getElementById('printerModalTitle').textContent = 'Edit printer';
+    document.getElementById('printerModalSubtitle').textContent = 'Change the details of ' + printer.name + '. Saving reconnects the printer if its connection details changed.';
+    document.getElementById('fieldBrand').classList.add('hidden');
+    document.getElementById('pBrand').value = brand;
+    onBrandChange();
+    document.getElementById('pName').value = printer.name || '';
+    // The Bridge reports a Klipper printer to FoxTrack under its name, so a
+    // rename shows up there as a new device.
+    document.getElementById('pNameHint').classList.toggle('hidden', brand !== 'klipper');
+    document.getElementById('pIp').value = printer.ip || '';
+    document.getElementById('pSerial').value = printer.serial || '';
+    document.getElementById('pMoonrakerUrl').value = printer.moonraker_url || '';
+    document.getElementById('pWebcamUrl').value = printer.webcam_url || '';
+    if (printer.lan_code_set) document.getElementById('pLanCode').placeholder = 'Saved — leave blank to keep it';
+    if (printer.api_key_set) document.getElementById('pKlipperKey').placeholder = 'Saved — leave blank to keep it';
+    const btn = document.getElementById('connectBtn');
+    if (btn) btn.textContent = 'Save';
+    document.getElementById('addPrinterModal').classList.remove('hidden');
+}
+
 function closeAddPrinterModal() {
     document.getElementById('addPrinterModal').classList.add('hidden');
+    editingPrinterId = null;
+    document.getElementById('printerModalTitle').textContent = 'Add printer';
+    document.getElementById('printerModalSubtitle').textContent = 'Connect a printer to FoxTrack Bridge.';
+    document.getElementById('fieldBrand').classList.remove('hidden');
+    document.getElementById('pNameHint').classList.add('hidden');
+    Object.entries(SECRET_PLACEHOLDERS).forEach(([id, text]) => { const el=document.getElementById(id); if(el) el.placeholder=text; });
     ['pName','pIp','pMoonrakerUrl','pSerial','pLanCode','pKlipperKey','pWebcamUrl'].forEach(id => { const el=document.getElementById(id); if(el) { el.value=''; el.classList.remove(FIELD_ERROR_CLASS); } });
     document.getElementById('pBrand').value = '';
     document.getElementById('brandInstructions').classList.add('hidden');
@@ -1113,7 +1155,8 @@ function onBrandChange() {
     document.getElementById('testResult').classList.add('hidden');
     if (!brand) { ins.classList.add('hidden'); fields.classList.add('hidden'); return; }
     const cfg = brands[brand];
-    ins.innerHTML = cfg.instructions; ins.classList.remove('hidden');
+    // Setup instructions are for adding a printer; an edit only changes details.
+    ins.innerHTML = cfg.instructions; ins.classList.toggle('hidden', !!editingPrinterId);
     fields.classList.remove('hidden');
     document.getElementById('fieldIp').style.display = cfg.fields.ip ? '' : 'none';
     document.getElementById('fieldSerial').style.display = cfg.fields.serial ? '' : 'none';
@@ -1127,13 +1170,16 @@ function onBrandChange() {
     const pn = document.getElementById('pName');
     if (pn) pn.placeholder = cfg.fields.moonrakerUrl ? 'e.g. Creality K1' : 'e.g. Studio P1S';
     const isCloud = !!cfg.fields.cloudDevices;
+    // A cloud printer's account and serial are fixed once added, so edit mode
+    // never shows the device picker.
+    const pickDevice = isCloud && !editingPrinterId;
     const cd = document.getElementById('fieldCloudDevices');
-    if (cd) cd.classList.toggle('hidden', !isCloud);
+    if (cd) cd.classList.toggle('hidden', !pickDevice);
     const tb = document.getElementById('testBtn');
     if (tb) tb.style.display = isCloud ? 'none' : '';
     const li = document.getElementById('labelIp');
     if (li) li.textContent = isCloud ? 'Printer IP (optional, for the camera)' : 'IP address';
-    if (isCloud) loadCloudDevices(false);
+    if (pickDevice) loadCloudDevices(false);
 }
 
 // Cloud printers come from the linked account's device list (cached server-side,
@@ -1227,10 +1273,16 @@ async function addPrinter() {
     if (brand === 'bambu') {
         markField('pIp', !ip);       if (!ip)     invalid = true;
         markField('pSerial', !serial); if (!serial) invalid = true;
-        markField('pLanCode', !lanCode); if (!lanCode) invalid = true;
+        // An edit may leave the access code blank to keep the saved one.
+        if (!editingPrinterId) { markField('pLanCode', !lanCode); if (!lanCode) invalid = true; }
     }
     if (brand === 'klipper') {
         markField('pMoonrakerUrl', !moonrakerUrl); if (!moonrakerUrl) invalid = true;
+    }
+    if (editingPrinterId) {
+        if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return; }
+        await savePrinterEdit(editingPrinterId, brand, { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl });
+        return;
     }
     let payload = { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl };
     if (brand === 'bambu_cloud') {
@@ -1250,6 +1302,30 @@ async function addPrinter() {
     } catch (e) {
         showAddPrinterError('Failed: ' + e.message);
         if (btn) { btn.textContent='Connect'; btn.disabled=false; }
+    }
+}
+
+// Sends only the fields the printer's type uses (PUT /api/printers/{id}). The
+// server keeps the saved access code or API key when the field is blank.
+async function savePrinterEdit(id, brand, fields) {
+    const payload = { name: fields.name };
+    if (brand === 'bambu') Object.assign(payload, { ip: fields.ip, serial: fields.serial, lan_code: fields.lan_code });
+    else if (brand === 'bambu_cloud') payload.ip = fields.ip;
+    else Object.assign(payload, { moonraker_url: fields.moonraker_url, api_key: fields.api_key, webcam_url: fields.webcam_url });
+    const btn = document.getElementById('connectBtn');
+    if (btn) { btn.textContent='Saving…'; btn.disabled=true; }
+    try {
+        await apiFetch('/api/printers/' + encodeURIComponent(id), { method:'PUT', body:JSON.stringify(payload) });
+        closeAddPrinterModal();
+        toast('Saved ' + fields.name, 'info');
+        // Rebuild the card so an open camera stream closes: its URL uses the
+        // old name, and the old connection details.
+        forceFullCardRefresh = true;
+        await loadConfig();
+        await pollStatus();
+    } catch (e) {
+        showAddPrinterError('Failed: ' + e.message);
+        if (btn) { btn.textContent='Save'; btn.disabled=false; }
     }
 }
 
@@ -1771,7 +1847,11 @@ function cardInnerHTML(printer, live) {
     const camPanel = (removeMode || camHidden) ? '' :
         '<div id="cam-' + enc + '" class="cam-panel hidden border-t border-border bg-panel-2">'
         + '<img class="cam-img" src="" alt="Camera" style="display:block;width:100%;max-height:300px;object-fit:contain;">'
-        + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>Camera unavailable — check webcam service or URL</div>'
+        + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>'
+        + (isBambu
+            ? 'Camera unavailable. The Bridge camera works with A1 and P1 series printers. Check the IP address and LAN access code.'
+            : 'Camera unavailable — check webcam service or URL')
+        + '</div>'
         + '</div>';
 
     const gcodePanel = (isBambu && !removeMode && !isCloud) ?
@@ -1793,6 +1873,7 @@ function cardInnerHTML(printer, live) {
         + '</div>'
         + '<div class="flex items-center gap-1.5 shrink-0">'
         + checkbox
+        + (removeMode ? '' : '<button onclick="openEditPrinterModalEncoded(\'' + enc + '\')" class="btn-icon edit-btn" title="Edit printer" aria-label="Edit printer"><i class="fas fa-pencil"></i></button>')
         + '<span class="type-badge inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] text-text-2">' + typeLabel + '</span>'
         + '<span class="status-badge inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] ' + meta.badge + '"><span class="status-dot w-1.5 h-1.5 rounded-full ' + meta.dot + '"></span><span class="status-label">' + meta.label + '</span></span>'
         + '</div>'
