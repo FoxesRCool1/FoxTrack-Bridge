@@ -57,8 +57,13 @@ type releaseResponse struct {
 	Assets     []releaseAsset `json:"assets"`
 }
 
+// stagedUpdate is a downloaded update waiting to be applied. Exactly one of
+// scriptPath and binaryPath is set: Windows and macOS hand off to a helper
+// script, Linux swaps the binary in-process — see applyLinuxUpdate.
 type stagedUpdate struct {
 	scriptPath string
+	binaryPath string
+	exePath    string
 	version    string
 	stagedAt   time.Time
 }
@@ -277,13 +282,15 @@ func downloadAndStage(ctx context.Context, asset Asset, checksumAsset Asset, has
 	if err != nil {
 		return err
 	}
-	// The apply script and the downloaded payload both live in tmpDir and must
-	// outlive this process on the success path, so the directory is only removed
-	// when staging fails. Without this every failed attempt (a checksum
-	// mismatch, a truncated download) left the whole payload on disk forever.
-	staged := false
+	// On Windows and macOS the apply script and the downloaded payload both live
+	// in tmpDir and must outlive this process on the success path, so the
+	// directory is only removed when staging fails. Without this every failed
+	// attempt (a checksum mismatch, a truncated download) left the whole payload
+	// on disk forever. Linux stages the new binary next to the executable and
+	// needs nothing from tmpDir afterwards.
+	keepTmpDir := false
 	defer func() {
-		if !staged {
+		if !keepTmpDir {
 			os.RemoveAll(tmpDir)
 		}
 	}()
@@ -324,12 +331,12 @@ func downloadAndStage(ctx context.Context, asset Asset, checksumAsset Asset, has
 		return err
 	}
 
-	var scriptPath string
+	var scriptPath, binaryPath string
 	switch runtime.GOOS {
 	case "windows":
 		scriptPath, err = stageWindowsUpdate(tmpDir, tmpFile, exePath)
 	case "linux":
-		scriptPath, err = stageLinuxUpdate(tmpDir, tmpFile, exePath)
+		binaryPath, err = stageLinuxUpdate(tmpFile, exePath)
 	case "darwin":
 		scriptPath, err = stageDarwinUpdate(tmpDir, tmpFile, exePath)
 	default:
@@ -339,10 +346,16 @@ func downloadAndStage(ctx context.Context, asset Asset, checksumAsset Asset, has
 		return err
 	}
 
-	staged = true
+	keepTmpDir = scriptPath != ""
 
 	pendingMu.Lock()
-	pendingUpdate = &stagedUpdate{scriptPath: scriptPath, version: latestVersion, stagedAt: time.Now()}
+	pendingUpdate = &stagedUpdate{
+		scriptPath: scriptPath,
+		binaryPath: binaryPath,
+		exePath:    exePath,
+		version:    latestVersion,
+		stagedAt:   time.Now(),
+	}
 	pendingMu.Unlock()
 
 	cacheMu.Lock()
@@ -372,31 +385,43 @@ func stageWindowsUpdate(tmpDir, downloadPath, exePath string) (string, error) {
 	return scriptPath, nil
 }
 
-func stageLinuxUpdate(tmpDir, downloadPath, exePath string) (string, error) {
-	scriptPath := filepath.Join(tmpDir, "apply-update.sh")
-	// Wait for the old process to exit before touching the binary, then
-	// rename a same-directory copy into place: overwriting a running
-	// executable fails with ETXTBSY, a rename never does.
+// stageLinuxUpdate copies the downloaded binary next to the running executable
+// so applyLinuxUpdate can rename it into place. It writes no helper script —
+// see applyLinuxUpdate for why.
+func stageLinuxUpdate(downloadPath, exePath string) (string, error) {
 	stagedPath := exePath + ".update"
-	pid := os.Getpid()
-	script := "#!/bin/sh\nset -e\n" +
-		"waited=0\n" +
-		fmt.Sprintf("while kill -0 %d 2>/dev/null; do\n", pid) +
-		"  if [ \"$waited\" -ge 30 ]; then\n" +
-		fmt.Sprintf("    echo \"timed out waiting for pid %d to exit\" >&2\n", pid) +
-		"    exit 1\n" +
-		"  fi\n" +
-		"  sleep 1\n" +
-		"  waited=$((waited+1))\n" +
-		"done\n" +
-		fmt.Sprintf("cp \"%s\" \"%s\"\n", downloadPath, stagedPath) +
-		fmt.Sprintf("chmod +x \"%s\"\n", stagedPath) +
-		fmt.Sprintf("mv \"%s\" \"%s\"\n", stagedPath, exePath) +
-		fmt.Sprintf("\"%s\" >/dev/null 2>&1 &\n", exePath)
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := copyFile(downloadPath, stagedPath, 0o755); err != nil {
 		return "", err
 	}
-	return scriptPath, nil
+	return stagedPath, nil
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	// The mode passed to OpenFile is masked by the umask, so set it explicitly.
+	if err := os.Chmod(dst, mode); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	return nil
 }
 
 func stageDarwinUpdate(tmpDir, downloadPath, exePath string) (string, error) {
@@ -454,13 +479,46 @@ func RestartToApply() error {
 	cachedAt = time.Time{}
 	cacheMu.Unlock()
 
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "linux":
+		return applyLinuxUpdate(pending)
+	case "windows":
 		cmd := exec.Command("cmd", "/C", "start", "", "/B", pending.scriptPath)
 		return cmd.Start()
+	default:
+		cmd := exec.Command("sh", pending.scriptPath)
+		return cmd.Start()
 	}
+}
 
-	cmd := exec.Command("sh", pending.scriptPath)
-	return cmd.Start()
+// applyLinuxUpdate swaps the staged binary into place and, only when nothing
+// else will restart the bridge, relaunches it.
+//
+// The swap happens here instead of in a helper script because the old helper
+// was started as a child of this process. Under systemd it therefore lived in
+// the service cgroup, and the default KillMode=control-group killed it along
+// with the service — while it was still waiting for this pid to exit, before
+// it could move the new binary into place. The bridge came back on the old
+// version, or with Restart=on-failure and a clean exit did not come back at
+// all. rename(2) over a running executable is legal on Linux, so the swap can
+// simply happen before this process exits and no helper is needed.
+func applyLinuxUpdate(pending *stagedUpdate) error {
+	if err := os.Rename(pending.binaryPath, pending.exePath); err != nil {
+		os.Remove(pending.binaryPath)
+		return fmt.Errorf("install %s: %w", pending.version, err)
+	}
+	if supervisorRestarts() {
+		return nil
+	}
+	return relaunchDetached(pending.exePath)
+}
+
+// supervisorRestarts reports whether a service manager will start the bridge
+// again after a clean exit. systemd sets INVOCATION_ID for every unit it
+// starts; relaunching ourselves there would leave a second, unsupervised copy
+// racing the one systemd starts for the same port.
+func supervisorRestarts() bool {
+	return strings.TrimSpace(os.Getenv("INVOCATION_ID")) != ""
 }
 
 func pickChecksumAsset(assets []releaseAsset) (Asset, bool) {

@@ -12,7 +12,7 @@ Description=FoxTrack Bridge - local 3D printer dashboard
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/foxtrack-bridge
-Restart=on-failure
+Restart=always
 RestartSec=10
 
 [Install]

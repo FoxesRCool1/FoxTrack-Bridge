@@ -2,6 +2,8 @@ package update
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"foxtrack-bridge/version"
@@ -78,4 +80,78 @@ func TestPickAssetFor(t *testing.T) {
 	check("darwin", "arm64", "headless", "FoxTrack-Bridge-macOS-Apple-Silicon-Headless")
 	check("darwin", "amd64", "", "FoxTrack-Bridge-macOS-Intel.zip")
 	check("darwin", "amd64", "headless", "FoxTrack-Bridge-macOS-Intel-Headless")
+}
+
+// Regression: the Linux apply step used to run in a helper script spawned as a
+// child of this process. Under systemd that script sat in the service cgroup
+// and was killed with the service while it was still waiting for this pid to
+// exit, so the binary was never swapped and the bridge came back on the old
+// version. applyLinuxUpdate must do the swap itself, before the process exits.
+func TestApplyLinuxUpdateSwapsBinaryWithoutHelper(t *testing.T) {
+	t.Setenv("INVOCATION_ID", "0123456789abcdef")
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "foxtrack-bridge")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staged := exe + ".update"
+	if err := os.WriteFile(staged, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pending := &stagedUpdate{binaryPath: staged, exePath: exe, version: "9.9.9"}
+	if err := applyLinuxUpdate(pending); err != nil {
+		t.Fatalf("applyLinuxUpdate: %v", err)
+	}
+
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "new" {
+		t.Fatalf("installed binary = %q, want %q — the update did not apply", b, "new")
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("staged file still present after apply (stat err %v)", err)
+	}
+}
+
+// A failed swap must leave the installed binary runnable and not strand the
+// staged copy next to it.
+func TestApplyLinuxUpdateKeepsBinaryWhenSwapFails(t *testing.T) {
+	t.Setenv("INVOCATION_ID", "0123456789abcdef")
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "foxtrack-bridge")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing was staged, so the rename cannot succeed.
+	pending := &stagedUpdate{binaryPath: filepath.Join(dir, "missing.update"), exePath: exe, version: "9.9.9"}
+	if err := applyLinuxUpdate(pending); err == nil {
+		t.Fatal("expected an error when the staged binary is missing")
+	}
+
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "old" {
+		t.Fatalf("installed binary = %q, want it left at %q", b, "old")
+	}
+}
+
+// Under a service manager the bridge must not start a second copy of itself:
+// systemd restarts the unit, and a detached relaunch would race it for the port.
+func TestSupervisorRestartsDetectsSystemd(t *testing.T) {
+	t.Setenv("INVOCATION_ID", "")
+	if supervisorRestarts() {
+		t.Error("want supervisorRestarts=false when INVOCATION_ID is unset")
+	}
+	t.Setenv("INVOCATION_ID", "0123456789abcdef")
+	if !supervisorRestarts() {
+		t.Error("want supervisorRestarts=true when systemd set INVOCATION_ID")
+	}
 }

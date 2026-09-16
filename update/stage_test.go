@@ -8,23 +8,41 @@ import (
 	"testing"
 )
 
-// The apply scripts must never destroy the installed binary or bundle before a
+// The apply step must never destroy the installed binary or bundle before a
 // verified replacement is in place: a failure at that point leaves the user
-// with nothing to run.
-func TestStageLinuxUpdate_RenamesIntoPlace(t *testing.T) {
+// with nothing to run. On Linux staging only writes a sibling file; the
+// running binary is untouched until applyLinuxUpdate renames over it.
+func TestStageLinuxUpdate_StagesSiblingAndLeavesBinaryAlone(t *testing.T) {
 	dir := t.TempDir()
-	path, err := stageLinuxUpdate(dir, filepath.Join(dir, "payload"), "/opt/foxtrack/foxtrack-bridge")
+	exe := filepath.Join(dir, "foxtrack-bridge")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := filepath.Join(dir, "payload")
+	if err := os.WriteFile(payload, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staged, err := stageLinuxUpdate(payload, exe)
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}
-	script := readScript(t, path)
-	if !strings.Contains(script, "foxtrack-bridge.update") {
-		t.Error("linux script does not stage through a sibling path")
+	if staged != exe+".update" {
+		t.Errorf("staged at %q, want the sibling path %q", staged, exe+".update")
 	}
-	if strings.Contains(script, "rm -rf \"/opt/foxtrack/foxtrack-bridge\"") {
-		t.Error("linux script removes the installed binary")
+	if got := readFileString(t, staged); got != "new" {
+		t.Errorf("staged binary = %q, want %q", got, "new")
 	}
-	mustOrder(t, "linux", script, `cp "`, `mv "`)
+	fi, err := os.Stat(staged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm()&0o111 == 0 {
+		t.Errorf("staged binary is not executable: %v", fi.Mode())
+	}
+	if got := readFileString(t, exe); got != "old" {
+		t.Errorf("staging modified the running binary: %q", got)
+	}
 }
 
 func TestStageDarwinUpdate_CopiesBeforeRemoving(t *testing.T) {
@@ -68,6 +86,15 @@ func TestStageWindowsUpdate_StagesAndChecksErrors(t *testing.T) {
 		t.Error("windows script does not stop on a failed replace")
 	}
 	mustOrder(t, "windows", script, "copy /Y", "move /Y", "start ")
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
 }
 
 func readScript(t *testing.T, path string) string {

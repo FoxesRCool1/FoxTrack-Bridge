@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+**Updates (Linux)**
+- Fixed the update restart on Linux. Pressing "restart to apply" — or letting
+  auto-update restart the bridge — could leave the bridge stopped and still on
+  the old version. The bridge handed the install off to a helper script that it
+  started as a child process. Under systemd that script lived in the service
+  cgroup, so systemd killed it along with the service before it could put the
+  new binary in place. The bridge now swaps the binary itself, before it exits.
+- The shipped systemd units now use `Restart=always`. The update path exits
+  cleanly on purpose so the new binary takes over; `Restart=on-failure` read
+  that as a deliberate stop and left the bridge down until it was started by
+  hand. **Existing installs keep their old unit file — see below.**
+- Under systemd the bridge no longer relaunches itself after an update, so a
+  second unsupervised copy can no longer race the one systemd starts.
+
+If you installed before this release, update your unit once:
+
+```
+sed -i 's/^Restart=on-failure$/Restart=always/' ~/.config/systemd/user/foxtrack-bridge.service
+systemctl --user daemon-reload
+```
+
 ## v2.3.0
 
 **Dashboard**
