@@ -70,6 +70,9 @@
   troubleshooting.
 - The Settings page now names the right place to create a Bridge token and
   links to the guide.
+- The guide and the assistant now describe FoxTrack commands correctly (they
+  reach the Bridge in seconds and expire after 2 minutes), explain the printer
+  limit warning, and say how to remove an old device in FoxTrack after a rename.
 
 ## v2.3.1
 

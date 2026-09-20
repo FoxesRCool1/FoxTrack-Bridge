@@ -124,7 +124,7 @@ Saving reconnects only that printer, and only if a connection detail changed. Ot
 
 A printer cannot be renamed during a print, because the running print is tracked under its name and its history record would be lost. The IP address can be changed during a print. Local print history from before a rename stays with the printer.
 
-In FoxTrack, a renamed Bambu printer keeps its link because FoxTrack follows the serial number. A renamed Klipper printer shows up in FoxTrack as a new device, because FoxTrack knows Klipper printers by name. Changing a Bambu serial number has the same effect. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays in the list and shows as offline.`,
+In FoxTrack, a renamed Bambu printer keeps its link because FoxTrack follows the serial number. A renamed Klipper printer shows up in FoxTrack as a new device, because FoxTrack knows Klipper printers by name. Changing a Bambu serial number has the same effect. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays under "Detected on your network, not linked" and shows as offline. A FoxTrack owner or admin can clear it with its Remove button, which appears once the device is offline.`,
 	},
 	{
 		ID:       "connection-problems",
@@ -213,7 +213,11 @@ Once linked, the Bridge relays telemetry, print history and camera snapshots to 
 
 Printers that already exist in FoxTrack should be linked, not deleted. Deleting a printer in FoxTrack also deletes its maintenance schedules, maintenance log and installed hardware. FoxTrack recognizes a Bambu printer by its serial number and a Klipper printer by its name in the Bridge, so the names do not have to match.
 
-If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the key was revoked, the key was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.`,
+If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the key was revoked, the key was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.
+
+A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Enterprise). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Detected on your network, not linked", and click Remove.
+
+Pause, resume, stop and light commands sent from FoxTrack reach the Bridge within a few seconds, and FoxTrack shows the result. A command the Bridge does not pick up within 2 minutes expires, so it never fires late.`,
 	},
 	{
 		ID:       "config-files",

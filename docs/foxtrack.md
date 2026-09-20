@@ -115,7 +115,9 @@ linked yet. So unlink the old device first:
 3. In the **Fleet** view, find the new device under **Detected on your network,
    not linked**, and link it to the printer.
 
-The old device stays in the list and shows as offline.
+The old device stays under **Detected on your network, not linked** and shows as
+offline. An owner or admin can clear it with its **Remove** button. The button
+appears once the device is offline. Its print history in FoxTrack stays.
 
 ## Cameras
 
@@ -174,6 +176,21 @@ for a line that starts with `[camera/`.
 
 ### A command from FoxTrack did nothing
 
-If the Bridge is offline, FoxTrack queues the command. The Bridge runs it when it
-reconnects, but a command that waits longer than 2 minutes expires. Start the
-Bridge and send the command again.
+FoxTrack sends the command to the Bridge, and the Bridge picks it up within a few
+seconds. FoxTrack then shows the result under the buttons.
+
+- **The buttons are greyed out.** FoxTrack has not heard from the printer for 90
+  seconds, so it shows as offline. Check that the Bridge is running and that the
+  printer shows status in the Bridge dashboard.
+- **FoxTrack says the Bridge did not pick the command up in time.** A command
+  that waits longer than 2 minutes expires. Start the Bridge and press the button
+  again.
+- **FoxTrack shows an error from the printer.** The Bridge reached the printer,
+  but the printer refused the command. The message says why.
+
+### A new printer does not show up, and the Bridge warns about a printer limit
+
+Your FoxTrack plan limits how many Bridge printers a workspace can have (5 on
+Pro, unlimited on Enterprise). Printers you renamed or removed still count while
+their old device is in FoxTrack. In FoxTrack, open **Printers**, find the old
+device under **Detected on your network, not linked**, and click **Remove**.
