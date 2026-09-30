@@ -16,6 +16,7 @@ import (
 	configpkg "foxtrack-bridge/config"
 	"foxtrack-bridge/history"
 	mqttpkg "foxtrack-bridge/mqtt"
+	"foxtrack-bridge/pace"
 	"foxtrack-bridge/webhook"
 )
 
@@ -40,6 +41,7 @@ type Controller struct {
 	snapInFlight   map[string]bool
 	snapInFlightMu sync.Mutex
 	relayLastT     map[string]int64
+	relayHeld      map[string]bool
 	relayLastTMu   sync.Mutex
 }
 
@@ -52,13 +54,14 @@ func NewController() *Controller {
 		snapLastT:    map[string]int64{},
 		snapInFlight: map[string]bool{},
 		relayLastT:   map[string]int64{},
+		relayHeld:    map[string]bool{},
 	}
 }
 
 // relayHeartbeatSec floors how often telemetry reaches FoxTrack, whether or not
 // anything changed. FoxTrack marks a printer offline after 90s of silence and
 // disables its controls, so the floor must sit comfortably under that.
-const relayHeartbeatSec = 60
+const relayHeartbeatSec = pace.HeartbeatSec
 
 // shouldRelay reports whether this poll should push telemetry to FoxTrack, and
 // records the send when it says yes.
@@ -68,15 +71,25 @@ const relayHeartbeatSec = 60
 // silent and show as offline on the website while the bridge was perfectly
 // healthy — taking its pause/stop buttons with it. mqtt.go already applies this
 // same one-a-minute heartbeat to Bambu printers.
+//
+// Status, file, error and light changes go out at once; progress and
+// temperatures follow at the pace FoxTrack asked for (pace.Decide).
 func (c *Controller) shouldRelay(name string, prev, curr *mqttpkg.TelemetryData, now int64) bool {
 	c.relayLastTMu.Lock()
 	defer c.relayLastTMu.Unlock()
 
-	if !mqttpkg.ShouldSendWebhook(prev, curr) && now-c.relayLastT[name] < relayHeartbeatSec {
-		return false
+	send, held := pace.Decide(
+		mqttpkg.UrgentChange(prev, curr),
+		mqttpkg.ShouldSendWebhook(prev, curr),
+		c.relayHeld[name],
+		now-c.relayLastT[name],
+		now,
+	)
+	c.relayHeld[name] = held
+	if send {
+		c.relayLastT[name] = now
 	}
-	c.relayLastT[name] = now
-	return true
+	return send
 }
 
 func (c *Controller) SyncPrinters(printers []configpkg.Printer, foxAPIKey, fox2APIKey string) {
@@ -320,7 +333,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 			if fox2APIKey != "" && (t.Status == "printing" || t.Status == "paused") && strings.TrimSpace(p.WebcamURL) != "" {
 				now := time.Now().Unix()
 				c.snapLastTMu.Lock()
-				eligible := now-c.snapLastT[p.Name] >= 25
+				eligible := now-c.snapLastT[p.Name] >= pace.SnapshotGap(now)
 				if eligible {
 					c.snapLastT[p.Name] = now
 				}

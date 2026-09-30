@@ -166,7 +166,7 @@ A camera can be hidden per printer. That setting is saved on the Bridge, so it a
 
 If a feed is black or blank: confirm the printer's own interface shows the camera, check the printer is reachable at all (an offline printer has no camera either), and for Klipper confirm the webcam URL is right and reachable from the Bridge's machine rather than only from your laptop.
 
-In FoxTrack, the live picture only loads when the browser runs on the same computer as the Bridge. Everywhere else FoxTrack shows the latest snapshot. The Bridge sends a snapshot about every 25 seconds, and only while a print is running or paused, so an idle printer's snapshot does not update. Klipper printers send snapshots only when a webcam URL is set on the printer.`,
+In FoxTrack, the live picture only loads when the browser runs on the same computer as the Bridge. Everywhere else FoxTrack shows the latest snapshot. While a print is running or paused, the Bridge sends a snapshot about every 30 seconds when a FoxTrack page with the printers is open, and about every 10 minutes otherwise. An idle printer's snapshot does not update. Klipper printers send snapshots only when a webcam URL is set on the printer.`,
 	},
 	{
 		ID:       "print-problems",
@@ -217,7 +217,7 @@ If the relay stops working the dashboard reports the problem rather than retryin
 
 A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Enterprise). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Detected on your network, not linked", and click Remove.
 
-Pause, resume, stop and light commands sent from FoxTrack reach the Bridge within a few seconds, and FoxTrack shows the result. A command the Bridge does not pick up within 2 minutes expires, so it never fires late.`,
+Pause, resume, stop and light commands sent from FoxTrack reach the Bridge within a few seconds (up to 30 seconds right after the page is opened), and FoxTrack shows the result. A command the Bridge does not pick up within 2 minutes expires, so it never fires late.`,
 	},
 	{
 		ID:       "config-files",

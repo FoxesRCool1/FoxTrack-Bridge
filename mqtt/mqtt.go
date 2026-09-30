@@ -14,6 +14,7 @@ import (
 
 	"foxtrack-bridge/capture"
 	"foxtrack-bridge/history"
+	"foxtrack-bridge/pace"
 	"foxtrack-bridge/webhook"
 )
 
@@ -145,11 +146,13 @@ var (
 	snapInFlight   = make(map[string]bool)
 	snapInFlightMu sync.Mutex
 
-	// relay webhook dedup: unix time of the last relay send per printer,
-	// used for the 60s heartbeat when telemetry is otherwise unchanged.
+	// relay webhook pacing: unix time of the last relay send per printer, and
+	// whether a change is still waiting to be sent (pace.Decide). All three
+	// maps are guarded by webhookLastSentMu.
 	// webhookNoKeyLogged marks printers already told they have no API key,
 	// so that line is logged once and not on every send.
 	webhookLastSent    = make(map[string]int64)
+	webhookHeld        = make(map[string]bool)
 	webhookNoKeyLogged = make(map[string]bool)
 	webhookLastSentMu  sync.Mutex
 
@@ -157,12 +160,13 @@ var (
 	sendRelay = webhook.SendRelay
 )
 
-// A Bambu camera snapshot is taken at most every snapInterval seconds while
-// printing. After snapFailLimit failures in a row the printer is left alone for
+// A Bambu camera snapshot is taken at most every pace.SnapshotGap seconds while
+// printing (snapInterval, 25 s, until FoxTrack says whether anyone is watching).
+// After snapFailLimit failures in a row the printer is left alone for
 // snapFailBackoff seconds: the X1 and H2 series do not serve the port 6000
 // stream, so without a pause they log an error every 25 seconds all print long.
 const (
-	snapInterval    = 25
+	snapInterval    = pace.SnapshotGapLegacySec
 	snapFailLimit   = 3
 	snapFailBackoff = 10 * 60
 )
@@ -672,6 +676,7 @@ func RemovePrinterState(name string) {
 
 	webhookLastSentMu.Lock()
 	delete(webhookLastSent, name)
+	delete(webhookHeld, name)
 	delete(webhookNoKeyLogged, name)
 	webhookLastSentMu.Unlock()
 }
@@ -855,6 +860,20 @@ func ShouldSendWebhook(prev, curr *TelemetryData) bool {
 		int(prev.BedTemp) != int(curr.BedTemp) ||
 		prev.LightOn != curr.LightOn ||
 		prev.TimeRemaining != curr.TimeRemaining
+}
+
+// UrgentChange reports whether curr differs from prev in a field FoxTrack must
+// see at once: the first reading, or a change of status, file, error or light.
+// Progress, temperatures and time left can wait for the next paced send
+// (pace.Decide). Shared by the Bambu and Klipper paths like ShouldSendWebhook.
+func UrgentChange(prev, curr *TelemetryData) bool {
+	if prev == nil {
+		return true
+	}
+	return prev.Status != curr.Status ||
+		prev.FileName != curr.FileName ||
+		prev.Error != curr.Error ||
+		prev.LightOn != curr.LightOn
 }
 
 func makeHandler(p Printer) mqtt.MessageHandler {
@@ -1105,22 +1124,28 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			p.Name, status, fileName, progress,
 			nozzleTemp, bedTemp)
 
-		// Deduplicate relay webhooks — Bambu pushes ~1 message/second while
-		// printing. Terminal transitions (print complete/failed) always send
-		// immediately; otherwise send on meaningful change, with a 60s
-		// heartbeat so the cloud still sees the printer as alive.
+		// Pace relay webhooks. Bambu pushes ~1 message/second while printing.
+		// Status, file, error and light changes (and print complete/failed) go
+		// out at once; progress and temperatures follow at the pace FoxTrack
+		// asked for (pace.Decide), with a 60 s heartbeat so the website still
+		// sees the printer as alive.
 		terminal := status != prev.Status && (status == "finished" || status == "error")
-		sendWebhook := terminal || ShouldSendWebhook(prev, &t)
-		if !sendWebhook {
-			webhookLastSentMu.Lock()
-			sendWebhook = time.Now().Unix()-webhookLastSent[p.Name] >= 60
-			webhookLastSentMu.Unlock()
+		relayNow := time.Now().Unix()
+		webhookLastSentMu.Lock()
+		sendWebhook, held := pace.Decide(
+			terminal || UrgentChange(prev, &t),
+			ShouldSendWebhook(prev, &t),
+			webhookHeld[p.Name],
+			relayNow-webhookLastSent[p.Name],
+			relayNow,
+		)
+		webhookHeld[p.Name] = held
+		if sendWebhook {
+			webhookLastSent[p.Name] = relayNow
 		}
+		webhookLastSentMu.Unlock()
 
 		if sendWebhook {
-			webhookLastSentMu.Lock()
-			webhookLastSent[p.Name] = time.Now().Unix()
-			webhookLastSentMu.Unlock()
 
 			go func() {
 				b := lightOn
@@ -1296,7 +1321,7 @@ func hasPrintObject(payload []byte) bool {
 func snapshotDue(name string, now int64) bool {
 	snapLastTMu.Lock()
 	defer snapLastTMu.Unlock()
-	if now-snapLastT[name] < snapInterval || now < snapRetryAfter[name] {
+	if now-snapLastT[name] < pace.SnapshotGap(now) || now < snapRetryAfter[name] {
 		return false
 	}
 	snapLastT[name] = now

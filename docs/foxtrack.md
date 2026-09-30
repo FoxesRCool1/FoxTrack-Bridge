@@ -140,8 +140,9 @@ FoxTrack shows a camera picture in two ways:
 - **Live picture.** This works only when your browser runs on the same computer
   as the Bridge.
 - **Snapshot.** On other computers and phones, FoxTrack shows the most recent
-  picture the Bridge sent. The Bridge sends one about every 25 seconds, and only
-  while a print is running or paused. When the printer is idle, the snapshot
+  picture the Bridge sent. While a print is running or paused, the Bridge sends
+  one about every 30 seconds when a FoxTrack page with your printers is open,
+  and about every 10 minutes otherwise. When the printer is idle, the snapshot
   does not update. For Klipper printers, the Bridge sends snapshots only when
   **Webcam URL** is set on the printer.
 
@@ -177,7 +178,8 @@ for a line that starts with `[camera/`.
 ### A command from FoxTrack did nothing
 
 FoxTrack sends the command to the Bridge, and the Bridge picks it up within a few
-seconds. FoxTrack then shows the result under the buttons.
+seconds (up to 30 seconds if the page was only just opened). FoxTrack then shows
+the result under the buttons.
 
 - **The buttons are greyed out.** FoxTrack has not heard from the printer for 90
   seconds, so it shows as offline. Check that the Bridge is running and that the

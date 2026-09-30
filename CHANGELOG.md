@@ -53,6 +53,17 @@
   that once.
 - The log no longer shows "MQTT skip (no usable data)" for empty `{}` messages,
   which some Bambu firmware sends.
+- The Bridge now talks to FoxTrack much less when nobody is looking. While a
+  FoxTrack page with your printers is open, it sends updates about every 10
+  seconds and checks for Pause and Stop about every 5 seconds. Otherwise it
+  sends status changes at once and everything else once a minute, which keeps
+  printers online, and it checks for commands every 30 seconds. FoxTrack tells
+  the Bridge which pace to use, so it catches up within 30 seconds of someone
+  opening the page.
+- Camera snapshots follow the same rule: about every 30 seconds while someone is
+  looking, every 10 minutes otherwise.
+- When FoxTrack turns the Bridge token down (revoked, or a plan without Bridge),
+  the Bridge stops retrying every few seconds and asks again every 5 minutes.
 
 **Camera**
 - A Bambu Lab camera that sends no picture now fails after 15 seconds with

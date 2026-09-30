@@ -11,6 +11,7 @@ import (
 	"time"
 
 	mqttpkg "foxtrack-bridge/mqtt"
+	"foxtrack-bridge/pace"
 	"foxtrack-bridge/webhook"
 )
 
@@ -27,6 +28,20 @@ type bridgeCommandResult struct {
 	ErrorMessage string `json:"error_message,omitempty"` // driver error message when failed
 }
 
+// bridgeCommandsReply is the bridge-commands GET reply. Watched and
+// PollAfterMs are missing on FoxTrack servers from before 2026-09-30; Bridge
+// then keeps its old pace (package pace).
+type bridgeCommandsReply struct {
+	Commands    []bridgeCommand `json:"commands"`
+	Watched     *bool           `json:"watched"`
+	PollAfterMs int64           `json:"poll_after_ms"`
+}
+
+// httpStatusError is a non-2xx answer from FoxTrack.
+type httpStatusError struct{ code int }
+
+func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+
 // errNoMatchingPrinter is returned by executeBridgeCommand when no local printer
 // matches the command's external_id. The poll loop skips the command silently —
 // it may be intended for a different Bridge instance in a multi-Bridge workspace.
@@ -34,14 +49,17 @@ var errNoMatchingPrinter = errors.New("no matching printer")
 
 var bridgeCommandsHTTPClient = &http.Client{Timeout: 8 * time.Second}
 
-// pollBridgeCommands runs as a single long-lived goroutine. Every ~4 seconds it
-// fetches pending commands from FoxTrack, executes each locally, and POSTs the
-// result back. A missing or empty API key silently skips each cycle.
+// pollBridgeCommands runs as a single long-lived goroutine. It fetches pending
+// commands from FoxTrack, executes each locally, and POSTs the result back,
+// then waits as long as FoxTrack asked (package pace): about 5 s while someone
+// has a FoxTrack printer page open, 30 s otherwise, and the old 4 s on servers
+// that do not say. A missing or empty API key silently skips each cycle.
 func pollBridgeCommands() {
 	// Brief startup delay — lets the server bind and load its initial config.
 	time.Sleep(3 * time.Second)
 
 	for {
+		delay := pace.PollLegacy
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -60,13 +78,24 @@ func pollBridgeCommands() {
 				return
 			}
 
-			commands, err := fetchBridgeCommands(apiKey)
+			reply, err := fetchBridgeCommands(apiKey)
 			if err != nil {
+				status := 0
+				var statusErr *httpStatusError
+				if errors.As(err, &statusErr) {
+					status = statusErr.code
+					if status == http.StatusUnauthorized || status == http.StatusForbidden {
+						pace.Refused()
+					}
+				}
+				delay = pace.ErrorDelay(status)
 				log.Printf("[bridge-commands] fetch error: %v", err)
 				return
 			}
+			pace.Update(reply.Watched != nil, reply.Watched != nil && *reply.Watched, time.Now().Unix())
+			delay = pace.PollDelay(reply.PollAfterMs)
 
-			for _, cmd := range commands {
+			for _, cmd := range reply.Commands {
 				execErr := executeBridgeCommand(cmd)
 				if errors.Is(execErr, errNoMatchingPrinter) {
 					// Not our command — leave it pending for another Bridge instance.
@@ -86,37 +115,35 @@ func pollBridgeCommands() {
 			}
 		}()
 
-		time.Sleep(4 * time.Second)
+		time.Sleep(delay)
 	}
 }
 
-func fetchBridgeCommands(apiKey string) ([]bridgeCommand, error) {
+func fetchBridgeCommands(apiKey string) (bridgeCommandsReply, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", webhook.BridgeCommandsURLV2, nil)
 	if err != nil {
-		return nil, err
+		return bridgeCommandsReply{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := bridgeCommandsHTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return bridgeCommandsReply{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return bridgeCommandsReply{}, &httpStatusError{code: resp.StatusCode}
 	}
 
-	var result struct {
-		Commands []bridgeCommand `json:"commands"`
+	var reply bridgeCommandsReply
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		return bridgeCommandsReply{}, err
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-	return result.Commands, nil
+	return reply, nil
 }
 
 func ackBridgeCommand(apiKey string, result bridgeCommandResult) error {
