@@ -56,7 +56,7 @@ func TestStageDarwinUpdate_CopiesBeforeRemoving(t *testing.T) {
 		t.Fatal(err)
 	}
 	// stageDarwinUpdate unzips first, so hand it a real (if tiny) zip holding a
-	// bundle — see zipAppBundle below.
+	// bundle; see zipAppBundle below.
 	payload := zipAppBundle(t, dir)
 
 	path, err := stageDarwinUpdate(dir, payload, exe)

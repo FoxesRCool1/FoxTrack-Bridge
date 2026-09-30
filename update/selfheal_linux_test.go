@@ -69,7 +69,7 @@ func TestEnsureRestartAlwaysNoOpWithoutSystemd(t *testing.T) {
 	}
 }
 
-// The drop-in must be whole or absent — systemd refuses to parse a truncated
+// The drop-in must be whole or absent: systemd refuses to parse a truncated
 // one, which would take the unit down instead of repairing it.
 func TestWriteFileAtomicReplacesWholeFile(t *testing.T) {
 	dir := t.TempDir()

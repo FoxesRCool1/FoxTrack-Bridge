@@ -43,7 +43,7 @@ type httpStatusError struct{ code int }
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
 
 // errNoMatchingPrinter is returned by executeBridgeCommand when no local printer
-// matches the command's external_id. The poll loop skips the command silently —
+// matches the command's external_id. The poll loop skips the command silently:
 // it may be intended for a different Bridge instance in a multi-Bridge workspace.
 var errNoMatchingPrinter = errors.New("no matching printer")
 
@@ -55,7 +55,7 @@ var bridgeCommandsHTTPClient = &http.Client{Timeout: 8 * time.Second}
 // has a FoxTrack printer page open, 30 s otherwise, and the old 4 s on servers
 // that do not say. A missing or empty API key silently skips each cycle.
 func pollBridgeCommands() {
-	// Brief startup delay — lets the server bind and load its initial config.
+	// Brief startup delay: lets the server bind and load its initial config.
 	time.Sleep(3 * time.Second)
 
 	for {
@@ -98,7 +98,7 @@ func pollBridgeCommands() {
 			for _, cmd := range reply.Commands {
 				execErr := executeBridgeCommand(cmd)
 				if errors.Is(execErr, errNoMatchingPrinter) {
-					// Not our command — leave it pending for another Bridge instance.
+					// Not our command. Leave it pending for another Bridge instance.
 					continue
 				}
 				result := bridgeCommandResult{CommandID: cmd.ID, Status: "done"}
@@ -175,7 +175,7 @@ func ackBridgeCommand(apiKey string, result bridgeCommandResult) error {
 }
 
 // executeBridgeCommand resolves external_id to a local printer and dispatches
-// the command directly to the appropriate driver — no HTTP roundtrip through
+// the command directly to the appropriate driver, with no HTTP roundtrip through
 // the bridge's own server.
 //
 // Bambu printers: external_id matches p.Serial (not p.Name)

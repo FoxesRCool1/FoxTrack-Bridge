@@ -16,7 +16,7 @@ const restartDropInBody = `# Written by FoxTrack Bridge.
 #
 # The update path exits 0 on purpose so the replacement binary takes over.
 # Units shipped before v2.3.1 used Restart=on-failure, which systemd reads as a
-# deliberate stop — so the bridge stayed down after an update instead of coming
+# deliberate stop, so the bridge stayed down after an update instead of coming
 # back on the new version.
 #
 # Delete this file and run "systemctl --user daemon-reload" to go back to
@@ -30,7 +30,7 @@ Restart=always
 //
 // It writes a drop-in beside the unit instead of editing the unit itself: the
 // user's file is never touched, and the override can be removed at any time.
-// Nothing here is fatal — a bridge that cannot fix its unit still runs.
+// Nothing here is fatal: a bridge that cannot fix its unit still runs.
 //
 // The returned string says what was done, and is empty when there was nothing
 // to do.
@@ -55,7 +55,7 @@ func EnsureRestartAlways() (string, error) {
 		return "", err
 	}
 	if filepath.Dir(fragment) != ownDir {
-		return "", fmt.Errorf("unit %s lives at %s, outside %s — set Restart=always by hand", unit, fragment, ownDir)
+		return "", fmt.Errorf("unit %s lives at %s, outside %s; set Restart=always by hand", unit, fragment, ownDir)
 	}
 
 	dropInDir := fragment + ".d"

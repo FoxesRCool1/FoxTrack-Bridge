@@ -8,10 +8,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type Config struct {
+	// gen orders snapshots: Clone stamps each copy with a higher number than
+	// any before it, and SaveConfig uses that to never write an older snapshot
+	// over a newer one. Unexported, so it is never written to config.json.
+	gen uint64
+
 	APIKey          string    `json:"api_key"`
 	FoxTrack2APIKey string    `json:"foxtrack2_api_key,omitempty"`
 	Printers        []Printer `json:"printers"`
@@ -30,7 +37,7 @@ type Config struct {
 //
 // APIKey is a secret and must never leave the server (see redactConfig in
 // server.go). It is the user's own provider key, billed to them, and the
-// request goes out from this machine straight to the provider — nothing about
+// request goes out from this machine straight to the provider. Nothing about
 // the assistant passes through FoxTrack.
 type AI struct {
 	Enabled bool   `json:"enabled,omitempty"`
@@ -117,7 +124,7 @@ func (p Printer) IsCloud() bool {
 func NewPrinterID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand.Read failing means the OS entropy source is broken —
+		// crypto/rand.Read failing means the OS entropy source is broken, which is
 		// extremely rare, but fall back to a timestamp-derived ID rather than
 		// leaving the printer with no identity at all.
 		return "fallback-" + hex.EncodeToString([]byte(time.Now().String()))[:32]
@@ -128,7 +135,7 @@ func NewPrinterID() string {
 // Clone returns a deep copy of c. The printer slice, each printer's
 // PreviousNames, and the Bambu account block are all copied, so the result
 // shares no memory with c. Callers snapshot the live config under the mutex and
-// then read or save the snapshot with the lock released — marshalling the live
+// then read or save the snapshot with the lock released: marshalling the live
 // config unlocked races with any handler that is adding or removing a printer,
 // and a torn marshal would write a partial printer list to disk.
 func (c *Config) Clone() *Config {
@@ -136,6 +143,7 @@ func (c *Config) Clone() *Config {
 		return nil
 	}
 	out := *c
+	out.gen = cloneGen.Add(1)
 	if c.Printers != nil {
 		out.Printers = make([]Printer, len(c.Printers))
 		copy(out.Printers, c.Printers)
@@ -204,7 +212,7 @@ func LoadConfig() (*Config, error) {
 
 	// Best-effort migration so future updates keep using the stable user config path.
 	if err := SaveConfig(&cfg); err != nil && backfilled {
-		log.Printf("WARNING: failed to persist backfilled printer IDs (%v) — IDs will be regenerated on next restart until this config can be saved; printer identity will not be stable across restarts", err)
+		log.Printf("WARNING: failed to persist backfilled printer IDs (%v); IDs will be regenerated on next restart until this config can be saved; printer identity will not be stable across restarts", err)
 	}
 
 	return &cfg, nil
@@ -220,8 +228,32 @@ func ConfigDir() string {
 	return filepath.Join(base, "FoxTrack-Bridge")
 }
 
+var (
+	// cloneGen hands out snapshot numbers. Callers clone while holding the
+	// server's config lock, so a higher number always means a newer state.
+	cloneGen atomic.Uint64
+
+	// saveMu serializes SaveConfig. savedGen records, per file, the newest
+	// snapshot written there.
+	saveMu   sync.Mutex
+	savedGen = map[string]uint64{}
+)
+
+// SaveConfig writes cfg to disk. Handlers clone the config under their lock
+// and save after unlocking, so two saves can arrive in either order. A cloned
+// snapshot older than the one already on disk is skipped: the newer snapshot
+// was cloned later from the same live config, so it already holds every change
+// the older one has. A config that did not come from Clone is always written.
 func SaveConfig(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("refusing to save a nil config")
+	}
 	p := configPath()
+	saveMu.Lock()
+	defer saveMu.Unlock()
+	if cfg.gen != 0 && cfg.gen < savedGen[p] {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		return err
 	}
@@ -229,7 +261,13 @@ func SaveConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return WriteFileAtomic(p, data, 0600)
+	if err := WriteFileAtomic(p, data, 0600); err != nil {
+		return err
+	}
+	if cfg.gen > savedGen[p] {
+		savedGen[p] = cfg.gen
+	}
+	return nil
 }
 
 // WriteFileAtomic writes data to a temp file in the target directory and renames

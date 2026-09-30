@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"runtime"
@@ -25,7 +26,7 @@ import (
 // The assistant. Everything here is read-only by design: the executor below can
 // look at printers, telemetry, history and logs, and it can take one camera
 // still, but there is no path from a model reply to a config write or a printer
-// command. That is not enforced by a prompt — it is enforced by there being no
+// command. That is not enforced by a prompt. It is enforced by there being no
 // such tool.
 
 // serverPort is the port the dashboard is listening on, recorded so
@@ -42,6 +43,36 @@ func aiSettings() config.AI {
 		return config.AI{}
 	}
 	return *configStore.AI
+}
+
+// requireJSON refuses a POST whose body is not declared as JSON. A page on
+// another origin can only send a JSON Content-Type after a CORS preflight, and
+// the assistant endpoints answer no preflight, so this is what stops any page
+// the user happens to visit from driving them. Returns false once it has
+// written the refusal.
+func requireJSON(w http.ResponseWriter, r *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return false
+	}
+	return true
+}
+
+// sameAIEndpoint reports whether two settings reach the same provider URL. The
+// stored key is only ever sent to the endpoint it was saved for: without this,
+// switching the provider or editing the custom base URL would send the saved
+// key (an OpenAI key, say) to whatever server the new URL names.
+func sameAIEndpoint(a, b ai.Settings) bool {
+	urlA, errA := a.ResolveBaseURL()
+	urlB, errB := b.ResolveBaseURL()
+	if errA != nil || errB != nil {
+		// Neither names a usable endpoint yet, so keeping the key sends it
+		// nowhere; still keep it only when nothing changed at all.
+		trim := func(s string) string { return strings.TrimRight(strings.TrimSpace(s), "/") }
+		return a.Preset == b.Preset && trim(a.BaseURL) == trim(b.BaseURL)
+	}
+	return urlA == urlB
 }
 
 // handleAISettings reads or writes the assistant's provider settings. They live
@@ -62,6 +93,9 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(view)
 	case "POST":
+		if !requireJSON(w, r) {
+			return
+		}
 		var req struct {
 			Enabled     bool    `json:"enabled"`
 			Preset      string  `json:"preset"`
@@ -85,6 +119,7 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 			configStore.AI = &config.AI{}
 		}
 		stored := configStore.AI
+		oldEndpoint := ai.Settings{Preset: stored.Preset, BaseURL: stored.BaseURL}
 		stored.Enabled = req.Enabled
 		stored.Preset = req.Preset
 		stored.BaseURL = strings.TrimSpace(req.BaseURL)
@@ -93,8 +128,13 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 		// A nil api_key means "keep what is stored"; an empty string means
 		// "clear it". The dashboard only ever sees api_key_set, so it sends nil
 		// unless the user actually typed a new key or cleared the box.
+		// A kept key only survives while it still goes to the same endpoint:
+		// a new provider or base URL without a new key drops the old one.
 		if req.APIKey != nil {
 			stored.APIKey = strings.TrimSpace(*req.APIKey)
+		} else if stored.APIKey != "" && !sameAIEndpoint(oldEndpoint, ai.Settings{Preset: stored.Preset, BaseURL: stored.BaseURL}) {
+			stored.APIKey = ""
+			log.Printf("[assistant] provider endpoint changed with no new key; the saved API key was cleared")
 		}
 		view := redactAI(stored)
 		cfg := configStore.Clone()
@@ -112,7 +152,8 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 // handleAIModels asks a provider what models it offers, so the settings screen
 // can show a picker rather than a free-text box. The settings in the body are
 // the ones being edited, which may not be saved yet; an omitted key falls back
-// to the stored one so the user does not have to retype it to refresh the list.
+// to the stored one so the user does not have to retype it to refresh the list,
+// but only when the request names the same endpoint the key was saved for.
 func handleAIModels(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method == "OPTIONS" {
@@ -120,6 +161,9 @@ func handleAIModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != "POST" {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireJSON(w, r) {
 		return
 	}
 
@@ -138,8 +182,20 @@ func handleAIModels(w http.ResponseWriter, r *http.Request) {
 		BaseURL: strings.TrimSpace(req.BaseURL),
 		APIKey:  strings.TrimSpace(req.APIKey),
 	}
+	if !ai.ValidPreset(s.Preset) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Choose an AI provider first."})
+		return
+	}
 	if s.APIKey == "" {
-		s.APIKey = aiSettings().APIKey
+		if stored := aiSettings(); sameAIEndpoint(ai.Settings{Preset: stored.Preset, BaseURL: stored.BaseURL}, s) {
+			s.APIKey = stored.APIKey
+		}
+	}
+	if s.APIKey == "" && s.Preset != ai.PresetCustom && s.Preset != ai.PresetLocal {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Paste your API key for this provider first, then fetch the models."})
+		return
 	}
 
 	models, err := ai.NewClient(s).ListModels(r.Context())
@@ -161,6 +217,9 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != "POST" {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireJSON(w, r) {
 		return
 	}
 
@@ -372,7 +431,7 @@ func toolListPrinters() map[string]any {
 		row := map[string]any{
 			"name":             p.Name,
 			"kind":             printerKind(p),
-			"reporting":        states[p.Name] != nil,
+			"reporting":        states[p.Name] != nil && states[p.Name].Status != "disconnected",
 			"camera_available": p.WebcamURL != "" || (isBambuPrinterConfig(p) && p.IP != "" && p.LANCode != ""),
 			"camera_hidden":    p.CameraHidden,
 		}
@@ -414,6 +473,24 @@ func toolPrinterStatus(name string) ai.ToolResult {
 			"reporting":    false,
 			"message":      "The Bridge has no live telemetry for this printer. It may be off, unreachable, or the connection may have been refused. Use test_printer_connection and get_recent_logs to find out which.",
 		}}
+	}
+
+	// A printer the Bridge cannot reach still has a state: "disconnected",
+	// carrying the Bridge's own error. That is a connection problem, not a
+	// firmware code, and the printer is not reporting.
+	if st.Status == "disconnected" {
+		out := map[string]any{
+			"printer_name": name,
+			"kind":         printerKind(p),
+			"reporting":    false,
+			"status":       st.Status,
+			"message":      "The Bridge cannot reach this printer right now. Use test_printer_connection and get_recent_logs to find out why.",
+		}
+		if st.Error != "" {
+			out["connection_error"] = st.Error
+			out["connection_error_note"] = "This error comes from the Bridge's own connection to the printer, not from the printer's firmware. It says why the Bridge could not reach it; it is not an error code to look up."
+		}
+		return ai.ToolResult{Value: out}
 	}
 
 	out := map[string]any{
@@ -676,7 +753,7 @@ func toolRecentLogs(printerName string, lines int) map[string]any {
 
 // toolCamera fetches one still frame and hands it back as a data URL for the
 // chat loop to attach. Reaching this function at all means the user switched
-// the camera on, because the tool is not offered otherwise — but it is checked
+// the camera on, because the tool is not offered otherwise, but it is checked
 // again here, since a setting can change between the schema being built and the
 // call arriving.
 func toolCamera(ctx context.Context, name string) (ai.ToolResult, error) {

@@ -76,16 +76,16 @@ func StartServer(port int) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			log.Printf("No config found — starting fresh")
+			log.Printf("No config found; starting fresh")
 		} else {
 			// The file exists but failed to load. Never start with an empty
-			// config in that case — a later save would overwrite the user's
+			// config in that case, because a later save would overwrite the user's
 			// printers. Move the bad file aside first.
 			backup, backupErr := config.BackupCorrupt()
 			if backupErr != nil {
-				log.Fatalf("ERROR: config failed to load (%v) and could not be backed up (%v) — refusing to start with an empty config; fix or move the file manually", err, backupErr)
+				log.Fatalf("ERROR: config failed to load (%v) and could not be backed up (%v); refusing to start with an empty config; fix or move the file manually", err, backupErr)
 			}
-			log.Printf("ERROR: config failed to load (%v) — the original file was backed up to %s; starting with an empty config", err, backup)
+			log.Printf("ERROR: config failed to load (%v); the original file was backed up to %s; starting with an empty config", err, backup)
 		}
 		cfg = &config.Config{Printers: []config.Printer{}}
 	}
@@ -136,13 +136,13 @@ func StartServer(port int) {
 	http.HandleFunc("/api/test", handleTest)
 	http.HandleFunc("/api/control/", handleControl)          // /api/control/{name}/{command}
 	http.HandleFunc("/api/camera/", handleCamera)            // /api/camera/{name}
-	http.HandleFunc("/api/logs", handleLogs)                 // GET — SSE log stream
+	http.HandleFunc("/api/logs", handleLogs)                 // GET: SSE log stream
 	http.HandleFunc("/api/history", handleHistory)           // GET all history records
 	http.HandleFunc("/api/history/", handleHistoryByPrinter) // GET /api/history/{name}
 	http.HandleFunc("/api/cloud/", handleCloud)              // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
-	http.HandleFunc("/api/ai/settings", handleAISettings)    // GET/POST — assistant provider settings
-	http.HandleFunc("/api/ai/models", handleAIModels)        // POST — list a provider's models
-	http.HandleFunc("/api/ai/chat", handleAIChat)            // POST — answer one message
+	http.HandleFunc("/api/ai/settings", handleAISettings)    // GET/POST: assistant provider settings
+	http.HandleFunc("/api/ai/models", handleAIModels)        // POST: list a provider's models
+	http.HandleFunc("/api/ai/chat", handleAIChat)            // POST: answer one message
 
 	printStartupBanner(port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
@@ -266,7 +266,7 @@ func jsonHeaders(w http.ResponseWriter) {
 // The FoxTrack web app tries the local bridge first for pause/resume/stop/light
 // and falls back to the cloud command queue when that call fails. With no CORS
 // headers the browser rejected every response, so the fast path always looked
-// like it had failed — *after* the bridge had already executed the command —
+// like it had failed (*after* the bridge had already executed the command),
 // and the queued copy then ran it a second time a few seconds later.
 //
 // Deliberately an allow-list rather than "*": /api/control has no auth of its
@@ -391,7 +391,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 // handleRelayHealth reports a FoxTrack rejection the user has to act on: a
 // revoked or mistyped bridge token, or a workspace whose plan no longer covers
 // the Bridge. Those answers never change on a retry, so they used to be tried
-// three times and dropped — the dashboard looked healthy while nothing at all
+// three times and dropped, and the dashboard looked healthy while nothing at all
 // reached FoxTrack. Returns {"problem": null} when the relay is fine.
 func handleRelayHealth(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
@@ -559,7 +559,7 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 		printerName = decodedName
 	}
 
-	// Find the printer config. Copy it by value while holding the lock — the
+	// Find the printer config. Copy it by value while holding the lock: the
 	// delete handler compacts configStore.Printers in place, so a pointer into
 	// the slice would race once the lock is released.
 	configMutex.RLock()
@@ -606,11 +606,11 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 //
 // Auth: 80-byte binary struct (NOT JSON):
 //
-//	[0:4]  = 0x40 (LE u32) — magic
-//	[4:8]  = 0x3000 (LE u32) — command
-//	[8:16] = 8 zero bytes — padding
-//	[16:48] = "bblp" NUL-padded to 32 bytes — username
-//	[48:80] = access_code NUL-padded to 32 bytes — password
+//	[0:4]  = 0x40 (LE u32), magic
+//	[4:8]  = 0x3000 (LE u32), command
+//	[8:16] = 8 zero bytes, padding
+//	[16:48] = "bblp" NUL-padded to 32 bytes, username
+//	[48:80] = access_code NUL-padded to 32 bytes, password
 //
 // Each frame: 16-byte header where bytes [0:4] are the LE u32 JPEG payload size,
 // followed by that many bytes of JPEG data.
@@ -647,11 +647,11 @@ func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) 
 	}
 	defer conn.Close()
 
-	// 80-byte binary auth payload — not JSON.
+	// 80-byte binary auth payload, not JSON.
 	auth := make([]byte, 80)
 	binary.LittleEndian.PutUint32(auth[0:4], 0x40)   // magic
 	binary.LittleEndian.PutUint32(auth[4:8], 0x3000) // command
-	// bytes [8:16] remain zero — padding
+	// bytes [8:16] remain zero (padding)
 	copy(auth[16:48], []byte("bblp"))  // username field, NUL-padded to 32 bytes
 	copy(auth[48:80], []byte(lanCode)) // password field, NUL-padded to 32 bytes
 
@@ -853,7 +853,7 @@ func redactPrinter(p config.Printer) redactedPrinter {
 
 // assignMissingIDs fills in a fresh, server-generated ID for any printer that
 // doesn't already have one. Printers that already carry an ID (backfilled at
-// boot, or echoed back by a client that already knows it) are left untouched —
+// boot, or echoed back by a client that already knows it) are left untouched:
 // an ID is generated once on creation and never changed.
 func assignMissingIDs(printers []config.Printer) {
 	for i := range printers {
@@ -865,7 +865,7 @@ func assignMissingIDs(printers []config.Printer) {
 
 // normalizeName folds a printer name for uniqueness comparisons only. Every
 // identity lookup by name elsewhere in this file (delete, camera, control,
-// applyStoredSecrets' name-fallback) stays exact-match and untouched —
+// applyStoredSecrets' name-fallback) stays exact-match and untouched;
 // case-folding applies solely to the uniqueness guards below.
 func normalizeName(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
@@ -888,10 +888,25 @@ func hasDuplicateName(existing []config.Printer, incoming config.Printer) bool {
 	return false
 }
 
+// previousNameOwner returns the printer that used name before a rename. Print
+// history is filed under current AND previous names, so a printer that takes
+// someone else's old name would show that printer's prints as its own.
+func previousNameOwner(printers []config.Printer, name string) (string, bool) {
+	target := normalizeName(name)
+	for _, p := range printers {
+		for _, prev := range p.PreviousNames {
+			if normalizeName(prev) == target {
+				return p.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 // rejectNewlyIntroducedDuplicateNames checks a full-replace printer list
 // against the previous one and rejects only a name that the payload itself
 // makes duplicate. A name that was already duplicated in oldPrinters is
-// grandfathered through unchanged (logged once) — no uniqueness check
+// grandfathered through unchanged (logged once): no uniqueness check
 // existed before this session, so some installs may already have duplicates
 // on disk, and a strict reject here would make those installs permanently
 // unable to save any change through this path, including the rename that
@@ -910,7 +925,7 @@ func rejectNewlyIntroducedDuplicateNames(oldPrinters, newPrinters []config.Print
 			continue
 		}
 		if oldCounts[norm] >= 2 {
-			log.Printf("[config] printer name %q is already duplicated in the stored config — kept as-is", norm)
+			log.Printf("[config] printer name %q is already duplicated in the stored config; kept as-is", norm)
 			continue
 		}
 		// Find one of the actual (non-normalized) colliding names for a
@@ -975,9 +990,9 @@ func redactConfig(cfg *config.Config) redactedConfig {
 
 // applyStoredSecrets fills empty secret fields on an incoming config from the
 // currently stored one. The dashboard posts back the redacted config it
-// received, so an empty secret means "keep the existing value" — only a
+// received, so an empty secret means "keep the existing value", and only a
 // non-empty value replaces a stored secret. Printers are matched by ID
-// first — the stable identity that survives a rename — falling back to name
+// first (the stable identity that survives a rename), falling back to name
 // only for the degenerate case of an incoming printer with no ID at all (a
 // legacy or hand-crafted payload that predates this field). The caller must
 // hold configMutex.
@@ -1049,7 +1064,7 @@ var errRefuseClearPrinters = errors.New("This save would remove all of your save
 // resolveConfigUpdate applies a POST /api/config request body to the previous
 // config, enforcing the printer-preservation invariants:
 //   - if the body omits the "printers" key entirely, existing printers are kept
-//     untouched (partial update — used by Settings saves);
+//     untouched (partial update, used by Settings saves);
 //   - if the body carries "printers": [] while printers currently exist, the
 //     update is refused unless it also carries "confirm_clear_printers": true;
 //   - otherwise the printer list is replaced as given.
@@ -1073,7 +1088,7 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 	newCfg := incoming
 	// Every top-level setting is partial: a body that omits a key leaves the
 	// stored value alone. Blank secrets are handled by applyStoredSecrets below;
-	// auto_update is a bool, so "absent" is the only way to say "leave it" — and
+	// auto_update is a bool, so "absent" is the only way to say "leave it", and
 	// without this, a Settings save made from a dashboard whose /api/config load
 	// failed would silently turn auto-update off.
 	if _, ok := raw["auto_update"]; !ok && old != nil {
@@ -1091,7 +1106,7 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 		// Full replace: entries missing an ID (genuinely new printers added
 		// client-side before this save) get one minted now. Entries that
 		// already carry an ID (a rename/edit of an existing printer) keep it
-		// untouched — the client must be able to echo back the ID it has.
+		// untouched: the client must be able to echo back the ID it has.
 		assignMissingIDs(newCfg.Printers)
 		if old != nil {
 			if err := rejectNewlyIntroducedDuplicateNames(old.Printers, newCfg.Printers); err != nil {
@@ -1179,7 +1194,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 			p.Connection = "" // LAN is the zero value; never store an unknown mode
 		}
 
-		// Trim on create only — an existing printer's name is its lookup key and
+		// Trim on create only: an existing printer's name is its lookup key and
 		// is never rewritten behind the user's back.
 		p.Name = strings.TrimSpace(p.Name)
 		if p.Name == "" {
@@ -1192,10 +1207,16 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		if hasDuplicateName(configStore.Printers, p) {
 			configMutex.Unlock()
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("a printer named %q already exists — printer names must be unique", p.Name)})
+			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("a printer named %q already exists; printer names must be unique", p.Name)})
 			return
 		}
-		// Server-generated only — a client-supplied id is never trusted on
+		if owner, ok := previousNameOwner(configStore.Printers, p.Name); ok {
+			configMutex.Unlock()
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("%q is an old name of printer %q, and its print history is filed under that name; choose another name", p.Name, owner)})
+			return
+		}
+		// Server-generated only: a client-supplied id is never trusted on
 		// create, so "generated once on creation" is an actual guarantee.
 		p.ID = config.NewPrinterID()
 		configStore.Printers = append(configStore.Printers, p)
@@ -1221,7 +1242,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 
 // handlePrinterByName handles DELETE /api/printers/{token}. token is checked
 // against printer IDs first, falling back to an exact name match if it
-// matches no ID — so the current, name-only dashboard keeps working exactly
+// matches no ID, so the current, name-only dashboard keeps working exactly
 // as before, while a future ID-aware client can delete by ID with no further
 // server change. Deletion internals (mqtt/lan teardown) are still
 // name-keyed, so once a match is resolved we always operate on the matched
@@ -1418,6 +1439,9 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 			if hasDuplicateName(others, config.Printer{Name: name}) {
 				return nil, -1, fmt.Errorf("a printer named %q already exists: %w", name, errDuplicatePrinterName)
 			}
+			if owner, ok := previousNameOwner(others, name); ok {
+				return nil, -1, fmt.Errorf("%q is an old name of printer %q, and its print history is filed under that name: %w", name, owner, errDuplicatePrinterName)
+			}
 			if busy != nil && busy(p.Name) {
 				return nil, -1, errRenameWhilePrinting
 			}
@@ -1502,8 +1526,8 @@ func printingPrinterNames() map[string]bool {
 }
 
 // handleEditPrinter handles PUT /api/printers/{token}. It changes a saved
-// printer's name and connection details — a new IP address after a router
-// change, a corrected serial, a new access code — without removing and adding
+// printer's name and connection details (a new IP address after a router
+// change, a corrected serial, a new access code) without removing and adding
 // the printer again.
 func handleEditPrinter(w http.ResponseWriter, r *http.Request, token string) {
 	var edit printerEdit
@@ -1561,7 +1585,7 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 		if !renamed && mqttPrinter(before, cfg) == mqttPrinter(after, cfg) {
 			return
 		}
-		log.Printf("[%s] printer edited — restarting MQTT connection", after.Name)
+		log.Printf("[%s] printer edited; restarting MQTT connection", after.Name)
 		mqttpkg.DisconnectPrinter(before.Name)
 		if renamed {
 			mqttpkg.RemovePrinterState(before.Name)
@@ -1575,7 +1599,7 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 			lanCtrl.RemovePrinter(before.Name)
 		}
 		lanCtrl.AddOrUpdatePrinter(after, cfg.APIKey, cfg.FoxTrack2APIKey)
-		log.Printf("[%s] printer edited — reconnected via Moonraker", after.Name)
+		log.Printf("[%s] printer edited; reconnected via Moonraker", after.Name)
 	}
 }
 
@@ -1627,9 +1651,9 @@ func syncPrinterConnections(oldCfg, cfg *config.Config) {
 		if old, ok := oldBambu[p.Name]; ok {
 			delete(oldBambu, p.Name)
 			if old == newP {
-				continue // unchanged — leave the running connection alone
+				continue // unchanged: leave the running connection alone
 			}
-			log.Printf("[%s] connection settings changed — restarting MQTT connection", p.Name)
+			log.Printf("[%s] connection settings changed; restarting MQTT connection", p.Name)
 			mqttpkg.DisconnectPrinter(p.Name)
 		}
 		mqttpkg.ConnectPrinter(newP)
@@ -1728,7 +1752,7 @@ func autoUpdateLoop() {
 	for {
 		if !version.IsValid(version.AppVersion) {
 			if !loggedDevBuild {
-				log.Printf("[auto-update] development build (%s) — update checks disabled", version.AppVersion)
+				log.Printf("[auto-update] development build (%s); update checks disabled", version.AppVersion)
 				loggedDevBuild = true
 			}
 			time.Sleep(1 * time.Hour)
@@ -1741,7 +1765,7 @@ func autoUpdateLoop() {
 
 		if enabled && !update.CanReplaceExecutable() {
 			if !loggedReadOnly {
-				log.Printf("[auto-update] unavailable in this environment: the binary location is read-only — update by pulling a new image or replacing the binary")
+				log.Printf("[auto-update] unavailable in this environment: the binary location is read-only; update by pulling a new image or replacing the binary")
 				loggedReadOnly = true
 			}
 		} else if enabled {
@@ -1751,14 +1775,14 @@ func autoUpdateLoop() {
 			if err != nil {
 				log.Printf("[auto-update] check failed: %v", err)
 			} else if result.Available && result.CanAutoInstall {
-				log.Printf("[auto-update] new version %s available — downloading", result.LatestVersion)
+				log.Printf("[auto-update] new version %s available; downloading", result.LatestVersion)
 				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Minute)
 				err = update.StartInstall(ctx2)
 				cancel2()
 				if err != nil {
 					log.Printf("[auto-update] install failed: %v", err)
 				} else {
-					log.Printf("[auto-update] update staged — restarting to apply %s", result.LatestVersion)
+					log.Printf("[auto-update] update staged; restarting to apply %s", result.LatestVersion)
 					if err := update.RestartToApply(); err != nil {
 						log.Printf("[auto-update] restart failed: %v", err)
 					} else {

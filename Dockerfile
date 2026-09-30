@@ -9,7 +9,7 @@ RUN go mod download
 
 COPY . .
 
-# Defaults to a dev build (update checks disabled — see version.IsValid) so a
+# Defaults to a dev build (update checks disabled; see version.IsValid) so a
 # manual `docker build` without --build-arg never misreports its version.
 # CI always passes --build-arg APP_VERSION=<tag> for real release images.
 ARG APP_VERSION=dev

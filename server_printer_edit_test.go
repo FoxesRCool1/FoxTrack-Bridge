@@ -127,6 +127,30 @@ func TestApplyPrinterEdit_DuplicateNameRejected(t *testing.T) {
 	}
 }
 
+// Print history is looked up by current and previous names, so taking a name
+// another printer used to have would mix the two printers' prints together.
+func TestApplyPrinterEdit_OtherPrintersOldNameRejected(t *testing.T) {
+	old := editFixture()
+	old.Printers[1].PreviousNames = []string{"Watson"}
+	_, _, err := applyPrinterEdit(old, "a", printerEdit{Name: strp(" watson ")}, notBusy)
+	if !errors.Is(err, errDuplicatePrinterName) {
+		t.Fatalf("err = %v, want errDuplicatePrinterName", err)
+	}
+}
+
+// A printer may take back one of its own old names.
+func TestApplyPrinterEdit_OwnOldNameAllowed(t *testing.T) {
+	old := editFixture()
+	old.Printers[0].PreviousNames = []string{"Hercule"}
+	got, _, err := applyPrinterEdit(old, "a", printerEdit{Name: strp("Hercule")}, notBusy)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if got.Printers[0].Name != "Hercule" {
+		t.Fatalf("Name = %q, want Hercule", got.Printers[0].Name)
+	}
+}
+
 func TestApplyPrinterEdit_CaseOnlyRenameAllowed(t *testing.T) {
 	old := editFixture()
 	got, _, err := applyPrinterEdit(old, "a", printerEdit{Name: strp("MONSIEUR")}, notBusy)

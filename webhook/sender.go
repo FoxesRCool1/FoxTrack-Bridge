@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// URL is the FoxTrack primary telemetry endpoint. Same for all users — do not expose in UI or config.
+// URL is the FoxTrack primary telemetry endpoint. Same for all users. Do not expose in UI or config.
 const URL = "https://vcnedcbtnhpmjgneahyk.supabase.co/functions/v1/bambu-local-relay"
 
 // SyncURL is the FoxTrack printer registration endpoint, called on bridge startup.
@@ -171,7 +171,7 @@ func formatLimit(max *int) string {
 	return fmt.Sprintf("%d", *max)
 }
 
-// readCappedBody reads at most 2 KB of an error response — enough for the JSON
+// readCappedBody reads at most 2 KB of an error response: enough for the JSON
 // the receivers return, without pulling an unbounded body into memory.
 func readCappedBody(r io.Reader) []byte {
 	b, _ := io.ReadAll(io.LimitReader(r, 2048))
@@ -405,7 +405,7 @@ func SendHistory(apiKey, historyURL string, p HistoryPayload) {
 			log.Printf("[history] %s: %v", p.PrinterName, err)
 			return
 		}
-		log.Printf("[history] send failed for %s: %v — queuing retry", p.PrinterName, err)
+		log.Printf("[history] send failed for %s: %v; queuing retry", p.PrinterName, err)
 		select {
 		case historyRetryQueue <- historyRetryItem{
 			apiKey:     apiKey,
@@ -455,16 +455,16 @@ func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayP
 }
 
 // SendSnapshot POSTs a raw JPEG frame to the FoxTrack snapshot endpoint.
-// Single attempt only — failures are logged by the caller, not queued for retry.
+// Single attempt only: failures are logged by the caller, not queued for retry.
 func SendSnapshot(apiKey, snapshotURL, serial, name string, jpegBytes []byte) error {
 	if len(jpegBytes) == 0 {
 		return fmt.Errorf("snapshot frame is empty")
 	}
 	// The receiver refuses anything over 2 MB with HTTP 413. A high-resolution
 	// Klipper webcam can exceed that, and uploading a doomed frame every 25
-	// seconds wastes the user's upstream bandwidth — so stop here and say why.
+	// seconds wastes the user's upstream bandwidth, so stop here and say why.
 	if len(jpegBytes) > MaxSnapshotBytes {
-		return fmt.Errorf("snapshot frame is %d bytes, over the %d byte limit — lower the camera resolution or JPEG quality", len(jpegBytes), MaxSnapshotBytes)
+		return fmt.Errorf("snapshot frame is %d bytes, over the %d byte limit; lower the camera resolution or JPEG quality", len(jpegBytes), MaxSnapshotBytes)
 	}
 
 	req, err := http.NewRequest("POST", snapshotURL, bytes.NewReader(jpegBytes))

@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+// A list whose items all open the same way is not a loop when each item says
+// something new. The system prompt asks for exactly this kind of answer.
+func TestTrimRunaway_KeepsListItemsThatShareAnOpening(t *testing.T) {
+	items := []string{
+		"If the printer shows offline, check that its IP address has not changed in your router's device list.",
+		"If the printer is reachable but refuses the connection, re-copy the LAN access code from the printer screen.",
+		"If the printer is connected but reports nothing, make sure LAN Only Mode and Developer Mode are both on.",
+		"If the printer still will not connect, power-cycle it and then press Test connection in the Edit printer dialog.",
+	}
+	for _, marker := range []func(i int) string{
+		func(int) string { return "- " },
+		func(int) string { return "* " },
+		func(i int) string { return string(rune('1'+i)) + ". " },
+		func(int) string { return "" },
+	} {
+		lines := []string{"Here is what to check, in order:"}
+		for i, item := range items {
+			lines = append(lines, marker(i)+item)
+		}
+		in := strings.Join(lines, "\n")
+		if got := TrimRunaway(in); got != in {
+			t.Errorf("a list of distinct items was cut:\n%s", got)
+		}
+	}
+}
+
 // A good answer is left completely alone. This is the case that matters most:
 // a guard that eats real content is worse than no guard.
 func TestTrimRunaway_LeavesAGoodAnswerAlone(t *testing.T) {

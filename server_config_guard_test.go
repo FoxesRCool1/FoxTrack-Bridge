@@ -165,7 +165,7 @@ func TestDeletePrinterByID_TakesPriorityOverNameCollision(t *testing.T) {
 }
 
 // POST /api/printers rejects a name that collides case-insensitively with an
-// existing printer — this path always creates something new, so there's no
+// existing printer: this path always creates something new, so there's no
 // legacy state to grandfather.
 func TestHandlePrinters_POST_RejectsCaseInsensitiveDuplicateName(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -190,8 +190,34 @@ func TestHandlePrinters_POST_RejectsCaseInsensitiveDuplicateName(t *testing.T) {
 	}
 }
 
+// A new printer cannot take a name another printer had before a rename: print
+// history is filed under old names too, so the new printer would show the
+// other printer's prints as its own.
+func TestHandlePrinters_POST_RejectsAnotherPrintersOldName(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	configMutex.Lock()
+	configStore = &config.Config{Printers: []config.Printer{
+		{ID: "printer-1", Name: "Voron", MoonrakerURL: "http://127.0.0.1:1/", PreviousNames: []string{"Ender 3"}},
+	}}
+	configMutex.Unlock()
+
+	body := `{"name":" ender 3 ","moonraker_url":"http://127.0.0.1:2/"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/printers", strings.NewReader(body))
+	handlePrinters(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409, body: %s", rec.Code, rec.Body.String())
+	}
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if len(configStore.Printers) != 1 {
+		t.Fatalf("printers = %d, want 1 (rejected add must not mutate config)", len(configStore.Printers))
+	}
+}
+
 // A full-replace payload that exactly reproduces an already-duplicated old
-// config must save successfully — nothing enforced uniqueness before this
+// config must save successfully: nothing enforced uniqueness before this
 // session, so some installs may already have duplicates on disk, and this
 // path must remain saveable for them (including the rename that would fix
 // the duplicate).
@@ -230,7 +256,7 @@ func TestResolveConfigUpdate_FullReplaceRejectsNewlyIntroducedDuplicateName(t *t
 
 // The core scenario this whole feature exists for: a printer is renamed (its
 // name changes) but its ID is echoed back unchanged and its lan_code is left
-// blank ("keep what's stored"). The secret must survive the rename — matching
+// blank ("keep what's stored"). The secret must survive the rename, because matching
 // by name alone would miss it, since the name in the payload no longer equals
 // the name on disk.
 func TestApplyStoredSecrets_SurvivesRename(t *testing.T) {

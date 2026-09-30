@@ -10,7 +10,7 @@ import (
 // There is no index and no external search library; a linear scan is correct
 // and fast enough.
 
-// SECTION 1 — tokenising.
+// SECTION 1: tokenising.
 
 // helpStopWords are the words dropped from a query before scoring. They carry
 // no signal about which topic a user means.
@@ -45,7 +45,7 @@ func tokenize(s string) []string {
 	return out
 }
 
-// SECTION 2 — scoring.
+// SECTION 2: scoring.
 
 // scoreTopic scores one topic against a query. query is the raw query string
 // (used for the whole-phrase bonus) and queryTokens is its tokenised form.
@@ -108,7 +108,7 @@ func scoreTopic(t Topic, query string, queryTokens []string) int {
 	return score
 }
 
-// SECTION 3 — the two search entry points.
+// SECTION 3: the two search entry points.
 
 const helpMaxResults = 3
 const helpExcerptRunes = 900

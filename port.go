@@ -24,7 +24,7 @@ func defaultPortFromEnv() (int, error) {
 }
 
 // resolvePort parses --port out of args against the given default. It is
-// the single source of truth for the bridge's listen port — every
+// the single source of truth for the bridge's listen port: every
 // self-referential URL (startup banner, systray "Open Dashboard") must read
 // the value it returns rather than assuming a port.
 func resolvePort(args []string, defaultPort int) (int, error) {

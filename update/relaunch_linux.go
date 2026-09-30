@@ -10,7 +10,7 @@ import (
 
 // relaunchDetached starts the updated binary in a new session so it survives
 // this process exiting. It is only used when no service manager is going to
-// restart the bridge for us — see supervisorRestarts.
+// restart the bridge for us; see supervisorRestarts.
 func relaunchDetached(exePath string) error {
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {

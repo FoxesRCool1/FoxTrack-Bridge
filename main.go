@@ -20,7 +20,7 @@ func main() {
 func onReady() {
 	systray.SetIcon(iconBytes)
 	systray.SetTitle("FoxTrack Bridge")
-	systray.SetTooltip("FoxTrack Bridge — 3D Printer Integration")
+	systray.SetTooltip("FoxTrack Bridge: 3D Printer Integration")
 
 	mOpen := systray.AddMenuItem("Open Dashboard", "Open FoxTrack Bridge in browser")
 	systray.AddSeparator()

@@ -59,7 +59,7 @@ type releaseResponse struct {
 
 // stagedUpdate is a downloaded update waiting to be applied. Exactly one of
 // scriptPath and binaryPath is set: Windows and macOS hand off to a helper
-// script, Linux swaps the binary in-process — see applyLinuxUpdate.
+// script, Linux swaps the binary in-process; see applyLinuxUpdate.
 type stagedUpdate struct {
 	scriptPath string
 	binaryPath string
@@ -103,7 +103,7 @@ func CheckLatest(ctx context.Context) (CheckResult, error) {
 		return CheckResult{
 			CurrentVersion: version.AppVersion,
 			DevBuild:       true,
-			Notes:          "development build — update checks are disabled",
+			Notes:          "development build; update checks are disabled",
 		}, nil
 	}
 
@@ -217,7 +217,7 @@ func pickAssetFor(assets []releaseAsset, goos, goarch, buildVariant string) (Ass
 
 func StartInstall(ctx context.Context) error {
 	if !version.IsValid(version.AppVersion) {
-		return fmt.Errorf("development build (%s) — update checks are disabled", version.AppVersion)
+		return fmt.Errorf("development build (%s); update checks are disabled", version.AppVersion)
 	}
 
 	if !CanReplaceExecutable() {
@@ -386,7 +386,7 @@ func stageWindowsUpdate(tmpDir, downloadPath, exePath string) (string, error) {
 }
 
 // stageLinuxUpdate copies the downloaded binary next to the running executable
-// so applyLinuxUpdate can rename it into place. It writes no helper script —
+// so applyLinuxUpdate can rename it into place. It writes no helper script;
 // see applyLinuxUpdate for why.
 func stageLinuxUpdate(downloadPath, exePath string) (string, error) {
 	stagedPath := exePath + ".update"
@@ -497,7 +497,7 @@ func RestartToApply() error {
 // The swap happens here instead of in a helper script because the old helper
 // was started as a child of this process. Under systemd it therefore lived in
 // the service cgroup, and the default KillMode=control-group killed it along
-// with the service — while it was still waiting for this pid to exit, before
+// with the service, while it was still waiting for this pid to exit, before
 // it could move the new binary into place. The bridge came back on the old
 // version, or with Restart=on-failure and a clean exit did not come back at
 // all. rename(2) over a running executable is legal on Linux, so the swap can

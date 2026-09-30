@@ -351,7 +351,7 @@ top bar. It can:
   or a Klipper printer through Moonraker.
 - Diagnose a printer that will not come online, and tell "not reachable on the
   network" apart from "reachable but refusing the credentials".
-- Look at a printer's camera and tell you how a print actually looks — whether it
+- Look at a printer's camera and tell you how a print actually looks, such as whether it
   has warped, lifted or come loose.
 
 **You supply the AI provider and pay for it.** The Bridge ships with none, and
@@ -368,7 +368,7 @@ that speaks the OpenAI chat-completions API works:
 
 Requests go from the machine running the Bridge straight to the provider. Nothing
 about the assistant passes through FoxTrack, and no conversation is written to
-disk — a browser refresh starts a new one.
+disk. A browser refresh starts a new one.
 
 **What it will not do.** The assistant is read-only: it cannot add, edit or
 remove a printer, cannot start, pause or stop a print, and cannot change a

@@ -13,13 +13,13 @@ import (
 
 func TestAssetsEmbedded(t *testing.T) {
 	if len(tailwindCSS) == 0 {
-		t.Error("tailwindCSS is empty — web/tailwind.css not embedded")
+		t.Error("tailwindCSS is empty: web/tailwind.css not embedded")
 	}
 	if len(iconsCSS) == 0 {
-		t.Error("iconsCSS is empty — web/icons.css not embedded")
+		t.Error("iconsCSS is empty: web/icons.css not embedded")
 	}
 	if len(fontsCSS) == 0 {
-		t.Error("fontsCSS is empty — web/fonts.css not embedded")
+		t.Error("fontsCSS is empty: web/fonts.css not embedded")
 	}
 }
 

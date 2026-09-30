@@ -635,7 +635,7 @@ func (r *cloudRunner) nudgeSilent(client mqtt.Client) {
 		}
 		r.lastNudge[serial] = now
 		client.Publish(cloudRequestTopic(serial), 0, false, `{"pushing": {"sequence_id": "0", "command": "start"}}`)
-		log.Printf("[%s] no cloud report for %s — asked the printer to resume pushing", p.Name, now.Sub(last).Round(time.Second))
+		log.Printf("[%s] no cloud report for %s; asked the printer to resume pushing", p.Name, now.Sub(last).Round(time.Second))
 	}
 }
 

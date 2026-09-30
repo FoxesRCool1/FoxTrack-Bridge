@@ -69,7 +69,7 @@ const relayHeartbeatSec = pace.HeartbeatSec
 // A change-only gate is not enough: an idle Klipper printer settles at ambient
 // and then reports the same numbers for minutes at a time, so it used to fall
 // silent and show as offline on the website while the bridge was perfectly
-// healthy — taking its pause/stop buttons with it. mqtt.go already applies this
+// healthy, taking its pause/stop buttons with it. mqtt.go already applies this
 // same one-a-minute heartbeat to Bambu printers.
 //
 // Status, file, error and light changes go out at once; progress and
@@ -299,7 +299,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 					}
 				}()
 			} else {
-				// Ongoing print — sample temps once per minute.
+				// Ongoing print: sample temps once per minute.
 				if t.Status == "printing" && sess != nil {
 					if sess.FileName == "" && t.FileName != "" {
 						sess.FileName = t.FileName
@@ -747,7 +747,7 @@ func cameraCandidates(p configpkg.Printer) []string {
 // sharedInsecureTransport is created once and reused by every Moonraker and
 // webcam request. An http.Transport owns a connection pool, so building a fresh
 // one per request meant every poll opened a new keep-alive connection that the
-// discarded transport never closed — with a 2-8s poll interval those idle
+// discarded transport never closed. With a 2-8s poll interval those idle
 // sockets accumulated for the life of the process until the bridge ran out of
 // file descriptors. One shared transport reuses connections and, unlike a bare
 // &http.Transport{}, retires idle ones on a timer. Transports are safe for

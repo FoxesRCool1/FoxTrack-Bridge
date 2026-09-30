@@ -173,8 +173,8 @@ func TestMapMoonrakerRelayState(t *testing.T) {
 }
 
 // FoxTrack marks a printer offline after 90s without a relay and disables its
-// controls. A change-only gate let an idle Klipper printer — which settles at
-// ambient and then reports identical numbers for minutes — fall silent and show
+// controls. A change-only gate let an idle Klipper printer (which settles at
+// ambient and then reports identical numbers for minutes) fall silent and show
 // as offline while the bridge was perfectly healthy.
 func TestShouldRelay_HeartbeatsWhileNothingChanges(t *testing.T) {
 	c := NewController()

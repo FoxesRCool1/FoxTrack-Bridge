@@ -7,18 +7,18 @@ import "strings"
 // CollapseRepetition drops lines that are IDENTICAL. That catches a model stuck
 // on one sentence, and misses the commoner failure: a model that has finished
 // answering and cannot stop signing off, writing a different closing line every
-// time. Observed on a 27B local model asked how to add a printer — the answer
+// time. Observed on a 27B local model asked how to add a printer. The answer
 // was correct and complete, then forty paragraphs of "That's it, let me know if
 // you need anything else", each one worded slightly differently, running until
 // the token cap.
 //
 // Exact matching cannot see that, and similarity scoring on whole lines scores
 // those closings at around 0.5, which is also where genuinely different
-// sentences sit — there is no threshold that separates them.
+// sentences sit, and there is no threshold that separates them.
 //
 // Word trigrams do separate them. A line that adds nothing new is one whose
 // word trigrams have almost all appeared already, whatever order they are
-// rearranged into. Real new content — a step, a warning, a temperature — brings
+// rearranged into. Real new content (a step, a warning, a temperature) brings
 // new trigrams with it.
 
 const (
@@ -34,6 +34,11 @@ const (
 	// How many leading words make up a line's opening, for the second signal
 	// below.
 	runawayPrefixWords = 4
+	// A line whose opening repeats an earlier line's still has to share at least
+	// this fraction of its trigrams before it counts as adding nothing. List items
+	// that all open "If the printer..." share almost nothing past the opening;
+	// a reworded sign-off shares a good part of the rest too.
+	runawayOpeningStaleRatio = 0.2
 )
 
 // prefix returns a line's normalized opening words, or "" when the line is too
@@ -42,17 +47,45 @@ const (
 // This is the second signal, and it is the one that catches the sign-off loop.
 // Trigram overlap alone does not: a model rewording the same sentence five
 // different ways scores about 0.45, which is also where genuinely different
-// sentences sit. What those rewordings DO share is how they start — "if you run
-// into...", "that's the full...", "if the printer..." — because the opening is
+// sentences sit. What those rewordings DO share is how they start ("if you run
+// into...", "that's the full...", "if the printer..."), because the opening is
 // what the loop is anchored on. Real prose almost never opens two substantial
 // lines with the same four words unless it is restating itself, and when it
 // does, the allowance covers it.
+// A leading list marker is skipped, so numbered items compare by their words.
 func prefix(line string) string {
 	words := strings.Fields(repeatKey(line))
+	if len(words) > 0 && isListMarker(words[0]) {
+		words = words[1:]
+	}
 	if len(words) < runawayPrefixWords {
 		return ""
 	}
 	return strings.Join(words[:runawayPrefixWords], " ")
+}
+
+// isListMarker reports whether a word is a list bullet or number ("-", "*",
+// "+", "•", "1.", "2)"), which says nothing about what the line is about.
+func isListMarker(word string) bool {
+	if word == "-" || word == "*" || word == "+" || word == "•" {
+		return true
+	}
+	if len(word) == 0 {
+		return false
+	}
+	digits := 0
+	for i := 0; i < len(word); i++ {
+		c := word[i]
+		if c >= '0' && c <= '9' {
+			digits++
+			continue
+		}
+		if i == len(word)-1 && (c == '.' || c == ')') && digits > 0 {
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // trigrams returns the word trigrams of one line, normalized.
@@ -108,7 +141,8 @@ func TrimRunaway(text string) string {
 		repeatedOpening := opening != "" && seenPrefix[opening]
 		seenPrefix[opening] = true
 
-		if !repeatedOpening && float64(old)/float64(len(grams)) < runawayStaleRatio {
+		ratio := float64(old) / float64(len(grams))
+		if ratio < runawayStaleRatio && !(repeatedOpening && ratio >= runawayOpeningStaleRatio) {
 			// This line brought something new, so whatever came before it was
 			// not a loop after all.
 			stale = 0

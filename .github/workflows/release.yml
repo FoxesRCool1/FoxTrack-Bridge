@@ -9,8 +9,13 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Test
+    uses: ./.github/workflows/test.yml
+
   create_release:
     name: Create release
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Create the release if it does not exist

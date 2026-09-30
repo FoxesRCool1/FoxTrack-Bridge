@@ -24,7 +24,7 @@ func Normalized(v string) string {
 }
 
 // IsValid reports whether v parses as a numeric x.y.z version. AppVersion
-// defaults to "dev" for source builds, which is not a valid version — this
+// defaults to "dev" for source builds, which is not a valid version; this
 // lets callers skip update checks instead of comparing it as 0.0.0.
 func IsValid(v string) bool {
 	if strings.TrimSpace(v) == "" {

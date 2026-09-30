@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.4.0
 
 **Assistant (new, experimental)**
 - Added an assistant to the dashboard. It answers questions about your printers,
@@ -27,6 +27,10 @@
   frame sent is written to the Bridge log.
 - Stored secrets (printer access codes, API keys, the Bambu token) are stripped
   out of log lines before the assistant ever sees them.
+- Your provider key is only ever sent to the provider it was saved for. If you
+  change the provider or its base URL without entering a new key, the saved key
+  is cleared. The assistant accepts requests only from the dashboard itself, so
+  another website you visit cannot change its settings or use your key.
 - Note: the dashboard has no login, so anyone who can reach it on your network
   can use the assistant and spend credit on the key you save.
 
@@ -40,7 +44,11 @@
 - A printer cannot be renamed during a print, because that print's history
   record would be lost. Changing the IP address during a print is allowed.
 - Print history for a renamed printer still includes the prints from before the
-  rename.
+  rename. For that reason a printer cannot take a name that another printer had
+  before.
+- Two saves at the same moment can no longer write an older copy of your
+  settings over a newer one. Before, a printer you had just added could go
+  missing from the file until the next save.
 
 **FoxTrack Connection**
 - Fixed Bambu Lab printers showing as "Unknown" in FoxTrack. Most updates from a
@@ -48,7 +56,7 @@
   FoxTrack. A printer showed the right state for a moment after each full
   report, then went back to "Unknown". The Bridge now always sends the printer's
   last known state.
-- The log no longer says "skipping webhook — API key not configured" for
+- The log no longer says "skipping webhook: API key not configured" for
   printers that use a FoxTrack Bridge token. A printer with no key at all logs
   that once.
 - The log no longer shows "MQTT skip (no usable data)" for empty `{}` messages,
@@ -88,8 +96,8 @@
 ## v2.3.1
 
 **Updates (Linux)**
-- Fixed the update restart on Linux. Pressing "restart to apply" — or letting
-  auto-update restart the bridge — could leave the bridge stopped and still on
+- Fixed the update restart on Linux. Pressing "restart to apply", or letting
+  auto-update restart the bridge, could leave the bridge stopped and still on
   the old version. The bridge handed the install to a helper script that it
   started as a child process. Under systemd that script lived in the service
   cgroup, so systemd killed it along with the service before it could put the
@@ -105,7 +113,7 @@
 
 **If your bridge is stuck on an older version**
 
-A bridge running a build from before v2.3.1 cannot update itself — the broken
+A bridge running a build from before v2.3.1 cannot update itself: the broken
 updater is the part that would have to do it. Install once by hand and every
 update after this one works normally:
 

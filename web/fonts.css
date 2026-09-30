@@ -1,7 +1,7 @@
 /*
- * Inter (latin subset, variable) — https://github.com/rsms/inter
+ * Inter (latin subset, variable): https://github.com/rsms/inter
  * Copyright (c) 2016-2020 The Inter Project Authors.
- * Licensed under the SIL Open Font License 1.1 — see THIRD_PARTY_LICENSES.md
+ * Licensed under the SIL Open Font License 1.1; see THIRD_PARTY_LICENSES.md
  *
  * One variable woff2 covers weights 400-600 (the weights the UI uses); the three
  * @font-face rules below mirror the discrete weights Google Fonts served.
@@ -29,9 +29,9 @@
 }
 
 /*
- * Cormorant Garamond 500 (latin subset) — https://github.com/CatharsisFonts/Cormorant
+ * Cormorant Garamond 500 (latin subset): https://github.com/CatharsisFonts/Cormorant
  * Copyright 2015 The Cormorant Project Authors.
- * Licensed under the SIL Open Font License 1.1 — see THIRD_PARTY_LICENSES.md
+ * Licensed under the SIL Open Font License 1.1; see THIRD_PARTY_LICENSES.md
  *
  * The FoxTrack heading face: titles and big numbers only (font-heading).
  */

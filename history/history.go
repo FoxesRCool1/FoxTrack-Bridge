@@ -79,7 +79,7 @@ func backupCorrupt() (string, error) {
 
 // Append adds a record to the history file in a thread-safe manner.
 // Load returns no error for a missing file, so an error here means an existing
-// file failed to load — back it up rather than overwrite the user's history.
+// file failed to load. Back it up rather than overwrite the user's history.
 func Append(r Record) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -89,7 +89,7 @@ func Append(r Record) error {
 		if backupErr != nil {
 			return fmt.Errorf("history failed to load (%v) and could not be backed up: %w", err, backupErr)
 		}
-		log.Printf("[history] history failed to load (%v) — backed up to %s, starting a new file", err, backup)
+		log.Printf("[history] history failed to load (%v); backed up to %s, starting a new file", err, backup)
 		records = []Record{}
 	}
 	records = append(records, r)

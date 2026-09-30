@@ -28,7 +28,7 @@ const (
 
 // The "you know nothing" rules below are load-bearing, not boilerplate. A model
 // that has seen ONE successful tool result starts treating itself as informed
-// and answers the next question from imagination — which for a printer
+// and answers the next question from imagination, which for a printer
 // assistant means inventing a temperature, a status, or a Bambu error code and
 // sending someone to take a working printer apart. Weaken these lines and that
 // comes back.

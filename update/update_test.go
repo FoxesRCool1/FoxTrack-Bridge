@@ -110,7 +110,7 @@ func TestApplyLinuxUpdateSwapsBinaryWithoutHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(b) != "new" {
-		t.Fatalf("installed binary = %q, want %q — the update did not apply", b, "new")
+		t.Fatalf("installed binary = %q, want %q: the update did not apply", b, "new")
 	}
 	if _, err := os.Stat(staged); !os.IsNotExist(err) {
 		t.Fatalf("staged file still present after apply (stat err %v)", err)

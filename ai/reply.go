@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// SECTION 1 — types.
+// SECTION 1: types.
 
 // ToolCall is one tool invocation the model asked for.
 type ToolCall struct {
@@ -33,7 +33,7 @@ type Reply struct {
 // ErrEmptyReply is returned when the provider gives back no usable message.
 var ErrEmptyReply = errors.New("the AI provider returned an empty response")
 
-// SECTION 2 — ParseReply.
+// SECTION 2: ParseReply.
 
 // ParseReply decodes an OpenAI-compatible chat-completion response body into a
 // Reply.
@@ -122,7 +122,7 @@ func ParseReply(body []byte) (Reply, error) {
 	return Reply{Content: "", ToolCalls: embedded, Raw: newRaw}, nil
 }
 
-// SECTION 3 — ParseEmbeddedToolCalls.
+// SECTION 3: ParseEmbeddedToolCalls.
 
 var (
 	toolCallTagRe = regexp.MustCompile(`(?s)<tool_call>\s*(.*?)\s*</tool_call>`)
@@ -197,7 +197,7 @@ func ParseEmbeddedToolCalls(content string) []ToolCall {
 	return calls
 }
 
-// SECTION 4 — repetition collapsing.
+// SECTION 4: repetition collapsing.
 
 const (
 	repeatMinLength       = 24
@@ -312,7 +312,7 @@ func CollapseRepetition(text string) string {
 	return out
 }
 
-// SECTION 5 — error text helpers.
+// SECTION 5: error text helpers.
 
 const rateLimitMessage = "Your AI provider says you have hit its rate limit. Wait a moment and try again, or check your plan and billing with your provider. Free tiers allow only a few requests per minute."
 

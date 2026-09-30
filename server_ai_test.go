@@ -12,6 +12,7 @@ import (
 
 	"foxtrack-bridge/ai"
 	"foxtrack-bridge/config"
+	mqttpkg "foxtrack-bridge/mqtt"
 )
 
 // isolateConfigDir points config.ConfigDir() at a temp directory so a handler
@@ -19,6 +20,13 @@ import (
 func isolateConfigDir(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+}
+
+// jsonPost builds a POST the way the dashboard sends it, with a JSON body type.
+func jsonPost(path, body string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }
 
 func aiPrinters() []config.Printer {
@@ -37,7 +45,7 @@ func TestHandleAISettings_SavePreservesPrinters(t *testing.T) {
 	configMutex.Unlock()
 
 	body := `{"enabled":true,"preset":"openai","model":"gpt-4o-mini","api_key":"sk-secret-value","allow_camera":false}`
-	req := httptest.NewRequest(http.MethodPost, "/api/ai/settings", strings.NewReader(body))
+	req := jsonPost("/api/ai/settings", body)
 	rec := httptest.NewRecorder()
 	handleAISettings(rec, req)
 
@@ -47,7 +55,7 @@ func TestHandleAISettings_SavePreservesPrinters(t *testing.T) {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
 	if len(configStore.Printers) != 2 {
-		t.Fatalf("printers = %d, want 2 — an AI settings save wiped the printer list", len(configStore.Printers))
+		t.Fatalf("printers = %d, want 2: an AI settings save wiped the printer list", len(configStore.Printers))
 	}
 	if configStore.APIKey != "fox" {
 		t.Errorf("FoxTrack key = %q, want it preserved", configStore.APIKey)
@@ -73,7 +81,7 @@ func TestHandleAISettings_ResponseNeverCarriesTheKey(t *testing.T) {
 		req  *http.Request
 	}{
 		{"get", httptest.NewRequest(http.MethodGet, "/api/ai/settings", nil)},
-		{"post", httptest.NewRequest(http.MethodPost, "/api/ai/settings", strings.NewReader(`{"enabled":true,"preset":"openai","model":"gpt-4o-mini"}`))},
+		{"post", jsonPost("/api/ai/settings", `{"enabled":true,"preset":"openai","model":"gpt-4o-mini"}`)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -103,7 +111,7 @@ func TestHandleAISettings_OmittedKeyKeepsStoredKey(t *testing.T) {
 	}
 	configMutex.Unlock()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/ai/settings", strings.NewReader(`{"enabled":true,"preset":"openai","model":"new"}`))
+	req := jsonPost("/api/ai/settings", `{"enabled":true,"preset":"openai","model":"new"}`)
 	handleAISettings(httptest.NewRecorder(), req)
 
 	configMutex.RLock()
@@ -123,7 +131,7 @@ func TestHandleAISettings_ExplicitEmptyKeyClearsIt(t *testing.T) {
 	configStore = &config.Config{Printers: aiPrinters(), AI: &config.AI{APIKey: "sk-old"}}
 	configMutex.Unlock()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/ai/settings", strings.NewReader(`{"preset":"openai","model":"m","api_key":""}`))
+	req := jsonPost("/api/ai/settings", `{"preset":"openai","model":"m","api_key":""}`)
 	handleAISettings(httptest.NewRecorder(), req)
 
 	configMutex.RLock()
@@ -139,11 +147,155 @@ func TestHandleAISettings_RejectsUnknownPreset(t *testing.T) {
 	configStore = &config.Config{Printers: aiPrinters()}
 	configMutex.Unlock()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/ai/settings", strings.NewReader(`{"preset":"definitely-not-a-provider","model":"m"}`))
+	req := jsonPost("/api/ai/settings", `{"preset":"definitely-not-a-provider","model":"m"}`)
 	rec := httptest.NewRecorder()
 	handleAISettings(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// A page on another origin can send text/plain without a CORS preflight. The
+// assistant endpoints must refuse it, or any site the user visits could change
+// the provider settings or spend their credit.
+func TestAIEndpoints_RefuseNonJSONBody(t *testing.T) {
+	isolateConfigDir(t)
+	configMutex.Lock()
+	configStore = &config.Config{
+		Printers: aiPrinters(),
+		AI:       &config.AI{Enabled: true, Preset: "openai", Model: "m", APIKey: "sk-keep-me"},
+	}
+	configMutex.Unlock()
+
+	for _, tc := range []struct {
+		path    string
+		handler http.HandlerFunc
+		body    string
+	}{
+		{"/api/ai/settings", handleAISettings, `{"enabled":true,"preset":"custom","base_url":"http://192.0.2.1/v1","model":"m"}`},
+		{"/api/ai/models", handleAIModels, `{"preset":"custom","base_url":"http://192.0.2.1/v1"}`},
+		{"/api/ai/chat", handleAIChat, `{"messages":[{"role":"user","content":"hi"}]}`},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "text/plain")
+			rec := httptest.NewRecorder()
+			tc.handler(rec, req)
+			if rec.Code != http.StatusUnsupportedMediaType {
+				t.Errorf("status = %d, want 415", rec.Code)
+			}
+		})
+	}
+
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if configStore.AI.Preset != "openai" || configStore.AI.APIKey != "sk-keep-me" {
+		t.Errorf("settings changed by a refused request: %+v", *configStore.AI)
+	}
+}
+
+// Changing the provider without a new key must drop the saved key, or the next
+// chat sends (say) the OpenAI key to whatever server the new base URL names.
+func TestHandleAISettings_EndpointChangeDropsKey(t *testing.T) {
+	isolateConfigDir(t)
+	configMutex.Lock()
+	configStore = &config.Config{
+		Printers: aiPrinters(),
+		AI:       &config.AI{Enabled: true, Preset: "openai", Model: "m", APIKey: "sk-openai"},
+	}
+	configMutex.Unlock()
+
+	handleAISettings(httptest.NewRecorder(), jsonPost("/api/ai/settings", `{"enabled":true,"preset":"custom","base_url":"http://192.0.2.1/v1","model":"m"}`))
+
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if configStore.AI.APIKey != "" {
+		t.Errorf("APIKey = %q, want it dropped when the endpoint changed", configStore.AI.APIKey)
+	}
+	if configStore.AI.Preset != "custom" {
+		t.Errorf("Preset = %q, want custom", configStore.AI.Preset)
+	}
+}
+
+// A new key sent with the endpoint change is kept.
+func TestHandleAISettings_EndpointChangeWithNewKeyKeepsIt(t *testing.T) {
+	isolateConfigDir(t)
+	configMutex.Lock()
+	configStore = &config.Config{
+		Printers: aiPrinters(),
+		AI:       &config.AI{Enabled: true, Preset: "openai", Model: "m", APIKey: "sk-openai"},
+	}
+	configMutex.Unlock()
+
+	handleAISettings(httptest.NewRecorder(), jsonPost("/api/ai/settings", `{"enabled":true,"preset":"gemini","model":"m","api_key":"g-new"}`))
+
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if configStore.AI.APIKey != "g-new" {
+		t.Errorf("APIKey = %q, want g-new", configStore.AI.APIKey)
+	}
+}
+
+// The model picker falls back to the stored key only for the endpoint it was
+// saved for. Any other URL gets no key at all.
+func TestHandleAIModels_StoredKeyOnlyGoesToItsOwnEndpoint(t *testing.T) {
+	isolateConfigDir(t)
+	const secret = "sk-never-send-elsewhere"
+	var gotAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"m1"}]}`))
+	}))
+	defer srv.Close()
+
+	// Stored for OpenAI; the request names a different server.
+	configMutex.Lock()
+	configStore = &config.Config{
+		Printers: aiPrinters(),
+		AI:       &config.AI{Enabled: true, Preset: "openai", Model: "m", APIKey: secret},
+	}
+	configMutex.Unlock()
+	handleAIModels(httptest.NewRecorder(), jsonPost("/api/ai/models", `{"preset":"custom","base_url":"`+srv.URL+`/v1"}`))
+	for _, h := range gotAuth {
+		if strings.Contains(h, secret) {
+			t.Fatalf("stored key sent to a different endpoint: %q", h)
+		}
+	}
+
+	// Stored for this very server: the fallback still works.
+	gotAuth = nil
+	configMutex.Lock()
+	configStore.AI = &config.AI{Enabled: true, Preset: "custom", BaseURL: srv.URL + "/v1/", Model: "m", APIKey: secret}
+	configMutex.Unlock()
+	rec := httptest.NewRecorder()
+	handleAIModels(rec, jsonPost("/api/ai/models", `{"preset":"custom","base_url":"`+srv.URL+`/v1"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if len(gotAuth) == 0 || !strings.Contains(gotAuth[0], secret) {
+		t.Errorf("stored key not used for its own endpoint: %q", gotAuth)
+	}
+}
+
+func TestHandleAIModels_BadRequestsAre400(t *testing.T) {
+	isolateConfigDir(t)
+	configMutex.Lock()
+	configStore = &config.Config{Printers: aiPrinters()}
+	configMutex.Unlock()
+
+	for name, body := range map[string]string{
+		"no preset":             `{}`,
+		"unknown preset":        `{"preset":"nope"}`,
+		"hosted preset, no key": `{"preset":"openai"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handleAIModels(rec, jsonPost("/api/ai/models", body))
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -219,7 +371,7 @@ func TestHandleAIChat_RefusesWhenNotConfigured(t *testing.T) {
 	configStore = &config.Config{Printers: aiPrinters()}
 	configMutex.Unlock()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
+	req := jsonPost("/api/ai/chat", `{"messages":[{"role":"user","content":"hi"}]}`)
 	rec := httptest.NewRecorder()
 	handleAIChat(rec, req)
 	if rec.Code != http.StatusPreconditionFailed {
@@ -294,6 +446,40 @@ func TestExecuteAITool_ListPrintersReportsKind(t *testing.T) {
 	}
 	if kinds["Sherlock"] != "klipper" {
 		t.Errorf("Sherlock kind = %q, want klipper", kinds["Sherlock"])
+	}
+}
+
+// A printer the Bridge cannot reach carries the Bridge's own HTTP error in its
+// state. The model must be told that is a connection error, not a firmware
+// code to look up, and that the printer is not reporting.
+func TestExecuteAITool_DisconnectedPrinterIsAConnectionError(t *testing.T) {
+	configMutex.Lock()
+	configStore = &config.Config{Printers: aiPrinters()}
+	configMutex.Unlock()
+	const httpErr = `Get "http://192.168.87.30:7125/printer/objects/query": context deadline exceeded`
+	mqttpkg.UpdatePrinterState("Sherlock", mqttpkg.TelemetryData{Status: "disconnected", Error: httpErr})
+	defer mqttpkg.RemovePrinterState("Sherlock")
+
+	got := toolValue(t, "get_printer_status", `{"printer_name":"Sherlock"}`)
+	if got["reporting"] != false {
+		t.Errorf("reporting = %v, want false", got["reporting"])
+	}
+	if _, ok := got["printer_error"]; ok {
+		t.Errorf("printer_error present; a Bridge connection error is not a firmware code: %v", got)
+	}
+	if got["connection_error"] != httpErr {
+		t.Errorf("connection_error = %v, want the Bridge's error", got["connection_error"])
+	}
+	if note, _ := got["connection_error_note"].(string); !strings.Contains(note, "Bridge") {
+		t.Errorf("connection_error_note = %q, want it to say the error comes from the Bridge", note)
+	}
+
+	list := toolValue(t, "list_printers", `{}`)
+	for _, r := range list["printers"].([]any) {
+		row := r.(map[string]any)
+		if row["name"] == "Sherlock" && row["reporting"] != false {
+			t.Errorf("list_printers: Sherlock reporting = %v, want false", row["reporting"])
+		}
 	}
 }
 

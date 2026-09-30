@@ -259,7 +259,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 		return fmt.Errorf("printer %q is not connected (no active MQTT session)", printerName)
 	}
 	if !client.IsConnected() {
-		return fmt.Errorf("printer %q MQTT session dropped — reconnecting, try again in a moment", printerName)
+		return fmt.Errorf("printer %q MQTT session dropped; reconnecting, try again in a moment", printerName)
 	}
 
 	// Find serial for the topic
@@ -268,7 +268,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 	stateMutex.RUnlock()
 	_ = hasState
 
-	// We store serial in PrinterID only if set — look it up from connected printer map
+	// We store serial in PrinterID only if set, so look it up from connected printer map
 	serial := getSerial(printerName)
 	if serial == "" {
 		return fmt.Errorf("serial not found for %q", printerName)
@@ -279,7 +279,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 	// light as unverified. Refuse early so the printer never sees them.
 	cloud := IsCloudSerial(serial)
 	if cloud && !cloudCommandAllowed(command) {
-		return fmt.Errorf("%q is not available over Bambu Cloud — only the light can be controlled; switch the printer to LAN mode for full control", command)
+		return fmt.Errorf("%q is not available over Bambu Cloud: only the light can be controlled; switch the printer to LAN mode for full control", command)
 	}
 
 	topic := fmt.Sprintf("device/%s/request", serial)
@@ -483,7 +483,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 		payload = string(b)
 
 	case "ams_unload":
-		// "param" key is required — BambuLab broker silently drops the message without it.
+		// "param" key is required: BambuLab broker silently drops the message without it.
 		b, err := json.Marshal(map[string]interface{}{
 			"print": map[string]interface{}{
 				"sequence_id": nextSequenceID(),
@@ -532,7 +532,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 		return fmt.Errorf("unknown command: %q", command)
 	}
 
-	// QoS 0: same reasoning as sendLights above — BambuLab broker drops QoS-1 PUBACKs.
+	// QoS 0: same reasoning as sendLights above; BambuLab broker drops QoS-1 PUBACKs.
 	client.Publish(topic, 0, false, payload)
 	log.Printf("[%s] sent command: %s", printerName, command)
 
@@ -686,7 +686,7 @@ func ConnectPrinter(p Printer) {
 
 	// Guard against duplicate goroutines. If a management goroutine is already
 	// running for this printer (e.g. syncPrinterConnections called redundantly on
-	// settings save), do nothing — the existing goroutine handles reconnects.
+	// settings save), do nothing: the existing goroutine handles reconnects.
 	managedPrintersMu.Lock()
 	if managedPrinters[p.Name] != nil {
 		managedPrintersMu.Unlock()
@@ -717,7 +717,7 @@ func ConnectPrinter(p Printer) {
 			delete(printerClients, p.Name)
 			clientMutex.Unlock()
 
-			// Stop requested — exit without touching state, so a replacement
+			// Stop requested: exit without touching state, so a replacement
 			// goroutine (or the delete handler) sees no stale writes.
 			select {
 			case <-mc.stop:
@@ -727,7 +727,7 @@ func ConnectPrinter(p Printer) {
 			}
 
 			if err != nil {
-				log.Printf("[%s] disconnected: %v — retrying in 5s", p.Name, err)
+				log.Printf("[%s] disconnected: %v; retrying in 5s", p.Name, err)
 			}
 
 			// Always update status to disconnected right away so the UI
@@ -892,7 +892,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		pr := report.Print
 
 		// Ignore messages that carry no print or system data at all.
-		// msg:1 is a wifi signal heartbeat — silent skip, expected every few seconds.
+		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
 		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0
 		if !hasData {
 			if pr.Msg != 1 && hasPrintObject(msg.Payload()) {
@@ -909,7 +909,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			status = mapGcodeState(pr.GcodeState)
 		}
 
-		// Preserve file name across partial updates — BambuLab omits subtask_name
+		// Preserve file name across partial updates: BambuLab omits subtask_name
 		// in incremental messages even when a print is running.
 		fileName := prev.FileName
 		if pr.SubTaskName != "" {
@@ -973,7 +973,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		amsSlots := prev.AMS
 		if pr.Ams != nil {
 			if len(pr.Ams.AMS) > 0 {
-				// Full tray list present — rebuild slots from scratch.
+				// Full tray list present: rebuild slots from scratch.
 				amsSlots = nil
 				trayNow := -1
 				if n, err := strconv.Atoi(pr.Ams.TrayNow); err == nil && n < 254 {
@@ -996,7 +996,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 					}
 				}
 			} else if pr.Ams.TrayNow != "" {
-				// Incremental update — only tray_now changed (e.g. at print start).
+				// Incremental update: only tray_now changed (e.g. at print start).
 				// Update Active flags on a copy of the existing slot list rather than
 				// mutating the previous state's slice in place.
 				trayNow := -1
@@ -1016,7 +1016,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			coolingFanPct = int(*pr.CoolingFanSpeed) * 100 / 15
 		}
 
-		// Total lifetime print hours and model — only present in pushall responses;
+		// Total lifetime print hours and model: only present in pushall responses;
 		// preserve previous values so incremental updates don't zero them out.
 		totalPrintHours := prev.TotalPrintHours
 		if pr.TotalRunTimeSec > 0 {
@@ -1100,7 +1100,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				}
 			}()
 		} else {
-			// Ongoing print — sample temps once per minute.
+			// Ongoing print: sample temps once per minute.
 			if status == "printing" && sess != nil {
 				if sess.FileName == "" && fileName != "" {
 					sess.FileName = fileName
@@ -1183,7 +1183,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 					webhookNoKeyLogged[p.Name] = true
 					webhookLastSentMu.Unlock()
 					if !logged {
-						log.Printf("[%s] not sending to FoxTrack — no API key configured", p.Name)
+						log.Printf("[%s] not sending to FoxTrack: no API key configured", p.Name)
 					}
 					return
 				}
@@ -1221,7 +1221,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						frame, err := capture.BambuFrame(ip, lanCode, name)
 						if err != nil {
 							if noteSnapshotFailure(name, time.Now().Unix()) {
-								log.Printf("[%s] snapshot capture: %v — no picture after %d tries, next try in %d minutes. The X1 and H2 series stream their camera over RTSP, which the Bridge cannot read yet", name, err, snapFailLimit, snapFailBackoff/60)
+								log.Printf("[%s] snapshot capture: %v; no picture after %d tries, next try in %d minutes. The X1 and H2 series stream their camera over RTSP, which the Bridge cannot read yet", name, err, snapFailLimit, snapFailBackoff/60)
 							} else {
 								log.Printf("[%s] snapshot capture: %v", name, err)
 							}
@@ -1259,7 +1259,7 @@ func mapMachineType(t string) string {
 	case "H2D":
 		return "H2D"
 	default:
-		return t // unknown code — pass through as-is
+		return t // unknown code: pass through as-is
 	}
 }
 

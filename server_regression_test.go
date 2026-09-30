@@ -35,7 +35,7 @@ func TestHandlePrinters_POST_RejectsBlankName(t *testing.T) {
 		n := len(configStore.Printers)
 		configMutex.RUnlock()
 		if n != 0 {
-			t.Fatalf("name %q: printers = %d, want 0 — a nameless printer was stored", name, n)
+			t.Fatalf("name %q: printers = %d, want 0: a nameless printer was stored", name, n)
 		}
 	}
 }
@@ -103,7 +103,7 @@ func TestDeleteUnknownPrinter_Returns404AndKeepsPrinters(t *testing.T) {
 	n := len(configStore.Printers)
 	configMutex.RUnlock()
 	if n != 2 {
-		t.Fatalf("printers = %d, want 2 — a failed delete must not change the list", n)
+		t.Fatalf("printers = %d, want 2: a failed delete must not change the list", n)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestResolveConfigUpdate_OmittedAutoUpdatePreservesExisting(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !got.AutoUpdate {
-		t.Fatal("auto_update = false, want true — an omitted key must not clear it")
+		t.Fatal("auto_update = false, want true: an omitted key must not clear it")
 	}
 }
 
@@ -129,7 +129,7 @@ func TestResolveConfigUpdate_ExplicitAutoUpdateIsApplied(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.AutoUpdate {
-		t.Fatal("auto_update = true, want false — an explicit value must be applied")
+		t.Fatal("auto_update = true, want false: an explicit value must be applied")
 	}
 
 	off := &config.Config{AutoUpdate: false, Printers: twoPrinters()}

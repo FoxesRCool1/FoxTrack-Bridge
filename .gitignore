@@ -9,7 +9,7 @@ dist/
 # Tailwind standalone CLI (dev-time asset generation only)
 web/tailwindcss
 
-# Config with secrets — users should never commit this
+# Config with secrets. Users should never commit this
 config/config.json
 
 # Go

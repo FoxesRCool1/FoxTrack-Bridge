@@ -164,8 +164,8 @@ const chatTemperature = 0.3
 // temperature is skipped there).
 //
 // These are not tuning for its own sake. A small local model asked a "how do I"
-// question will answer it correctly and then keep writing sign-offs — "That's
-// it, let me know if you need anything else" — forty times, until it hits the
+// question will answer it correctly and then keep writing sign-offs ("That's
+// it, let me know if you need anything else") forty times, until it hits the
 // token cap. Temperature alone does not stop that, because every individual
 // line is a plausible next line. A frequency penalty does, because the tokens
 // those lines are made of have all been used already.
@@ -306,8 +306,8 @@ func (c *Client) authorize(req *http.Request) {
 // statusError turns a non-2xx response into a message a user can act on. The
 // provider's body is surfaced, but only a short slice of it, and never the
 // request: the request holds the key and the whole transcript. Providers echo
-// back the key they rejected — OpenAI replies to a bad key with a partly-masked
-// copy of it — so the slice goes through RedactKey first.
+// back the key they rejected (OpenAI replies to a bad key with a partly-masked
+// copy of it), so the slice goes through RedactKey first.
 func (c *Client) statusError(resp *http.Response, _ int) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	body := strings.TrimSpace(string(raw))
