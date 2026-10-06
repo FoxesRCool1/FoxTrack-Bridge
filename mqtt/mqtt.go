@@ -111,6 +111,7 @@ type BambuPrint struct {
 	MachineType        string  `json:"machine_type"`         // model identifier, e.g. "X1C", "P1S"; only present in pushall responses
 	Ams             *struct {
 		AMS []struct {
+			ID   json.RawMessage `json:"id"` // raw AMS unit id: "0".."3", "128".. for an AMS HT (raw so an odd type never fails the message)
 			Tray []struct {
 				ID       string `json:"id"`
 				Color    string `json:"tray_color"` // 8-char RRGGBBAA
@@ -679,6 +680,8 @@ func RemovePrinterState(name string) {
 	delete(webhookHeld, name)
 	delete(webhookNoKeyLogged, name)
 	webhookLastSentMu.Unlock()
+
+	forgetPrintFileState(name)
 }
 
 func ConnectPrinter(p Printer) {
@@ -890,6 +893,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		}
 
 		pr := report.Print
+		noteReportedError(p.Name, msg.Payload(), pr.McPrintErrorCode)
 
 		// Ignore messages that carry no print or system data at all.
 		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
@@ -975,6 +979,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			if len(pr.Ams.AMS) > 0 {
 				// Full tray list present: rebuild slots from scratch.
 				amsSlots = nil
+				var trayRefs []trayRef
 				trayNow := -1
 				if n, err := strconv.Atoi(pr.Ams.TrayNow); err == nil && n < 254 {
 					trayNow = n
@@ -982,6 +987,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				for amsIdx, unit := range pr.Ams.AMS {
 					for i, tray := range unit.Tray {
 						globalSlot := amsIdx*4 + i
+						trayRefs = append(trayRefs, newTrayRef(globalSlot, amsIdx, i, strings.Trim(string(unit.ID), `"`), tray.ID))
 						color := tray.Color
 						if len(color) >= 6 {
 							color = color[:6] // strip alpha channel
@@ -995,6 +1001,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						})
 					}
 				}
+				setTrayRefs(p.Name, trayRefs)
 			} else if pr.Ams.TrayNow != "" {
 				// Incremental update: only tray_now changed (e.g. at print start).
 				// Update Active flags on a copy of the existing slot list rather than
@@ -1177,6 +1184,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						Ams:                relayAms,
 					},
 				}
+				stampRelayIdentity(&relayPayload.Print, p.Serial, t.PrinterModel)
 				if p.APIKey == "" && p.FoxTrack2APIKey == "" {
 					webhookLastSentMu.Lock()
 					logged := webhookNoKeyLogged[p.Name]

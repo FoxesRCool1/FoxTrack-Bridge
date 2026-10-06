@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -28,11 +30,54 @@ const HistoryURL = "https://vcnedcbtnhpmjgneahyk.supabase.co/functions/v1/bridge
 // BridgeCommandsURL is the FoxTrack endpoint for polling and acknowledging pending bridge commands.
 const BridgeCommandsURL = "https://vcnedcbtnhpmjgneahyk.supabase.co/functions/v1/bridge-commands"
 
-// V2 constants point at the new FoxTrack project (cyifamyotqkwcjbbpnhq).
-const RelayURLV2 = "https://cyifamyotqkwcjbbpnhq.supabase.co/functions/v1/bambu-local-relay"
-const SnapshotURLV2 = "https://cyifamyotqkwcjbbpnhq.supabase.co/functions/v1/bridge-snapshot"
-const HistoryURLV2 = "https://cyifamyotqkwcjbbpnhq.supabase.co/functions/v1/bridge-history"
-const BridgeCommandsURLV2 = "https://cyifamyotqkwcjbbpnhq.supabase.co/functions/v1/bridge-commands"
+// defaultV2Base is the current FoxTrack project (cyifamyotqkwcjbbpnhq).
+const defaultV2Base = "https://cyifamyotqkwcjbbpnhq.supabase.co"
+
+// v2BaseEnv points the four V2 URLs at another FoxTrack project (the beta one,
+// or a local Supabase stack) for testing. Ignored unless it passes URLAllowed.
+const v2BaseEnv = "FOXTRACK_SUPABASE_URL"
+
+var v2Base = resolveV2Base(os.Getenv(v2BaseEnv))
+
+// The V2 URLs are set once at startup and never change afterwards.
+var (
+	RelayURLV2          = v2Base + "/functions/v1/bambu-local-relay"
+	SnapshotURLV2       = v2Base + "/functions/v1/bridge-snapshot"
+	HistoryURLV2        = v2Base + "/functions/v1/bridge-history"
+	BridgeCommandsURLV2 = v2Base + "/functions/v1/bridge-commands"
+)
+
+// resolveV2Base returns the FoxTrack base URL to use for the given override
+// ("" = none) and logs when the override is active or refused.
+func resolveV2Base(override string) string {
+	override = strings.TrimSpace(override)
+	if override == "" {
+		return defaultV2Base
+	}
+	if !URLAllowed(override) {
+		log.Printf("Warning: ignoring %s=%q: it must be https://..., or http://127.0.0.1 or http://localhost", v2BaseEnv, override)
+		return defaultV2Base
+	}
+	log.Printf("[config] FoxTrack URL override active (%s): %s", v2BaseEnv, override)
+	return strings.TrimRight(override, "/")
+}
+
+// URLAllowed reports whether raw is an https URL, or an http URL to this
+// computer (127.0.0.1, localhost, ::1), which is only used for local testing.
+func URLAllowed(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return true
+	case "http":
+		h := strings.ToLower(u.Hostname())
+		return h == "127.0.0.1" || h == "localhost" || h == "::1"
+	}
+	return false
+}
 
 // MaxSnapshotBytes mirrors the 2 MB cap the FoxTrack bridge-snapshot endpoint
 // enforces. Keep the two in step.
@@ -275,6 +320,12 @@ type RelayPrint struct {
 	ActiveExtruder     string         `json:"active_extruder,omitempty"`
 	LightOn            *bool          `json:"light_on,omitempty"` // nil when not reported (Klipper)
 	Ams                []RelayAmsSlot `json:"ams,omitempty"`      // nil for Klipper or printers without AMS
+
+	// What FoxTrack's Print dialog needs to list this printer.
+	PrinterKind        string   `json:"printer_kind,omitempty"`        // "bambu" | "klipper"
+	PrinterModel       string   `json:"printer_model,omitempty"`       // "Bambu Lab P1S", "Klipper"
+	BridgeVersion      string   `json:"bridge_version,omitempty"`      // version.AppVersion
+	BridgeCapabilities []string `json:"bridge_capabilities,omitempty"` // ["print_file"]; empty over Bambu Cloud
 }
 
 // Send posts a Payload to the FoxTrack webhook URL.
@@ -492,7 +543,7 @@ func SendSnapshot(apiKey, snapshotURL, serial, name string, jpegBytes []byte) er
 
 // SendRelay posts a relay payload and queues a retry with backoff on failure.
 func SendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayPayload) error {
-	if !strings.HasPrefix(strings.ToLower(webhookURL), "https://") {
+	if !URLAllowed(webhookURL) {
 		return fmt.Errorf("relay webhook URL must use HTTPS")
 	}
 	if err := doSendRelay(apiKey, webhookURL, printerSerial, printerName, p); err != nil {

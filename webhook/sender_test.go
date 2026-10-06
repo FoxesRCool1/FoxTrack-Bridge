@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
 
@@ -85,5 +86,37 @@ func TestSendRelay_PostsHeadersAndPayload(t *testing.T) {
 		received.relayPayload.Print.BedTemper != 58 ||
 		received.relayPayload.Print.BedTargetTemper != 60 {
 		t.Fatalf("unexpected relay temperature fields: %+v", received.relayPayload.Print)
+	}
+}
+
+func TestResolveV2Base_Override(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"unset", "", defaultV2Base},
+		{"https project", "https://zaidtvfiqfwfxegigvox.supabase.co", "https://zaidtvfiqfwfxegigvox.supabase.co"},
+		{"trailing slash trimmed", "https://example.supabase.co/", "https://example.supabase.co"},
+		{"local stack ip", "http://127.0.0.1:54321", "http://127.0.0.1:54321"},
+		{"localhost", "http://localhost:54321", "http://localhost:54321"},
+		{"plain http elsewhere ignored", "http://example.com", defaultV2Base},
+		{"lookalike host ignored", "http://127.0.0.1.evil.com", defaultV2Base},
+		{"no scheme ignored", "example.supabase.co", defaultV2Base},
+		{"other scheme ignored", "ftp://example.com", defaultV2Base},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveV2Base(tc.in); got != tc.want {
+				t.Fatalf("resolveV2Base(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestV2URLs_DefaultBase(t *testing.T) {
+	if os.Getenv(v2BaseEnv) != "" {
+		t.Skip("override set in the environment")
+	}
+	if BridgeCommandsURLV2 != defaultV2Base+"/functions/v1/bridge-commands" {
+		t.Fatalf("unexpected URL %q", BridgeCommandsURLV2)
 	}
 }

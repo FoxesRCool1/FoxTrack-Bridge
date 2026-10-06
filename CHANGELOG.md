@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+**Print from FoxTrack**
+- FoxTrack can now send a sliced file to a printer and start it. The Bridge
+  downloads the file from FoxTrack, checks its size and checksum, puts it on the
+  printer and starts the print. Bambu Lab printers take a Bambu Studio
+  `.gcode.3mf` file (LAN Only Mode and Developer Mode on, the same setup pause
+  and stop need). Klipper printers take a `.gcode` file through Moonraker.
+- Bambu Cloud printers cannot be sent a file, and FoxTrack does not offer them.
+- The Bridge keeps the files it downloaded in a `print-cache` folder in its
+  config folder (at most 20 files and 1 GB, oldest removed first), so printing the
+  same file again does not download it again.
+- A Bambu printer stores every file sent from FoxTrack under one name
+  (`foxtrack-print.gcode.3mf`), so its SD card does not fill up. The printer
+  screen still shows your file's name.
+- The Bridge reports the result of a print to FoxTrack for up to about 3 minutes
+  if FoxTrack cannot be reached, and a print counts as started as soon as the
+  printer leaves idle.
+- The download link must be on the FoxTrack address the Bridge uses and is never
+  redirected, and it is never shown in an error message.
+- Progress shows in the Bridge log, and a failed job tells you why in FoxTrack.
+- For testing, the `FOXTRACK_SUPABASE_URL` environment variable points the Bridge
+  at another FoxTrack project (https, or http on this computer only).
+
 ## v2.4.0
 
 **Assistant (new, experimental)**

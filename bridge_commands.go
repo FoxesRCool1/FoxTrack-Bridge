@@ -12,6 +12,7 @@ import (
 
 	mqttpkg "foxtrack-bridge/mqtt"
 	"foxtrack-bridge/pace"
+	"foxtrack-bridge/version"
 	"foxtrack-bridge/webhook"
 )
 
@@ -24,7 +25,7 @@ type bridgeCommand struct {
 
 type bridgeCommandResult struct {
 	CommandID    string `json:"command_id"`
-	Status       string `json:"status"`                 // "done" or "failed"
+	Status       string `json:"status"`                 // "running" (print_file only), "done" or "failed"
 	ErrorMessage string `json:"error_message,omitempty"` // driver error message when failed
 }
 
@@ -96,6 +97,11 @@ func pollBridgeCommands() {
 			delay = pace.PollDelay(reply.PollAfterMs)
 
 			for _, cmd := range reply.Commands {
+				if cmd.Command == "print_file" {
+					// Long job: accept it here, run it off the poll loop.
+					startPrintFile(apiKey, cmd)
+					continue
+				}
 				execErr := executeBridgeCommand(cmd)
 				if errors.Is(execErr, errNoMatchingPrinter) {
 					// Not our command. Leave it pending for another Bridge instance.
@@ -128,6 +134,8 @@ func fetchBridgeCommands(apiKey string) (bridgeCommandsReply, error) {
 		return bridgeCommandsReply{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("X-Bridge-Capabilities", "print_file")
+	req.Header.Set("X-Bridge-Version", version.AppVersion)
 
 	resp, err := bridgeCommandsHTTPClient.Do(req)
 	if err != nil {
@@ -169,7 +177,7 @@ func ackBridgeCommand(apiKey string, result bridgeCommandResult) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return &httpStatusError{code: resp.StatusCode}
 	}
 	return nil
 }

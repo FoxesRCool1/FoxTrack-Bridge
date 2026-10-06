@@ -24,6 +24,7 @@ Among many other tools, AI was used to develop this program. If you have a probl
 - AMS filament slot display with colors and material types (Bambu Lab only)
 - Print speed selector: Silent, Standard, Sport, Ludicrous (Bambu Lab only)
 - Fan speed control (Bambu Lab and Klipper)
+- Print a sliced file from FoxTrack: the Bridge fetches it, puts it on the printer and starts it (Bambu Lab in LAN Only Mode with Developer Mode, and Klipper)
 - GCode console for sending single commands (Bambu Lab, Advanced mode only)
 - Per-printer camera hiding, saved on the Bridge so it applies in every browser
 - Bambu Cloud sign-in for printers that are not in LAN mode (experimental)

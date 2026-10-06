@@ -17,6 +17,7 @@ import (
 	"foxtrack-bridge/history"
 	mqttpkg "foxtrack-bridge/mqtt"
 	"foxtrack-bridge/pace"
+	"foxtrack-bridge/version"
 	"foxtrack-bridge/webhook"
 )
 
@@ -519,6 +520,10 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 			BedTargetTemper:    floatAny(anyFromMap(bed, "target")),
 			McRemainingTime:    remaining,
 			ActiveExtruder:     activeExtruderField,
+			PrinterKind:        "klipper",
+			PrinterModel:       "Klipper",
+			BridgeVersion:      version.AppVersion,
+			BridgeCapabilities: []string{"print_file"},
 		},
 	}
 

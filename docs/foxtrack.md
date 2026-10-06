@@ -3,7 +3,8 @@
 FoxTrack Bridge runs on a computer on your network and talks to your printers.
 When you connect it to [FoxTrack](https://foxtrack.studio), your printers show up
 in FoxTrack with live status, print history and camera pictures. You can also
-pause, resume, stop and toggle the light from FoxTrack.
+pause, resume, stop and toggle the light from FoxTrack, and send a sliced file to a
+printer and start it.
 
 The Bridge works on its own too. Connecting it to FoxTrack is optional.
 
@@ -11,6 +12,7 @@ The Bridge works on its own too. Connecting it to FoxTrack is optional.
 - [Set it up](#set-it-up)
 - [I already have printers in FoxTrack](#i-already-have-printers-in-foxtrack)
 - [Change a printer later](#change-a-printer-later)
+- [Print a file from FoxTrack](#print-a-file-from-foxtrack)
 - [Cameras](#cameras)
 - [Troubleshooting](#troubleshooting)
 
@@ -118,6 +120,56 @@ linked yet. So unlink the old device first:
 The old device stays under **Detected on your network, not linked** and shows as
 offline. An owner or admin can clear it with its **Remove** button. The button
 appears once the device is offline. Its print history in FoxTrack stays.
+
+## Print a file from FoxTrack
+
+FoxTrack can send a sliced file to a printer and start it. You attach the file to
+a product variant in FoxTrack and press **Print**. The Bridge does the rest:
+
+1. **Accepts the job.** FoxTrack hands the Bridge a `print_file` command. The
+   Bridge tells FoxTrack it has taken it (status `running`), so no other Bridge
+   picks it up. FoxTrack fails a job that takes longer than 15 minutes, and so
+   does the Bridge (after 14).
+2. **Checks it can run.** The file type must fit the printer: a Bambu Studio
+   `.gcode.3mf` for a Bambu Lab printer, a `.gcode` file for a Klipper printer.
+   Only one file at a time can be sent to a printer.
+3. **Downloads the file** from a link FoxTrack signs for 15 minutes, then checks
+   its size and checksum (SHA-256). A file over 60 MB is refused. The link must
+   be on the same FoxTrack address the Bridge already talks to, and the Bridge
+   does not follow redirects. Two jobs for the same file share one download.
+4. **Sends it to the printer and starts it.**
+   - **Bambu Lab:** over the printer's FTPS port, then an MQTT start command. The
+     printer needs **LAN Only Mode** and **Developer Mode**, the same setup as
+     pause and stop. It does not work over Bambu Cloud. Every file is stored on
+     the printer under the same name, `foxtrack-print.gcode.3mf`, so the SD card
+     does not fill up; the printer screen shows your file's name. The Bridge
+     counts the print as started once the printer leaves idle, even if it also
+     reports an error code on the way.
+   - **Klipper:** uploaded to the `gcodes` folder through Moonraker, which starts
+     it, under the file's own name (cleaned up). The printer must be idle.
+     Before sending, the Bridge checks Moonraker accepts its API key.
+5. **Reports the result.** FoxTrack gets `done`, or `failed` with a short reason
+   in plain English that it shows you as is. If FoxTrack cannot be reached, the
+   Bridge keeps trying for about 3 minutes (waits grow from 2 to 30 seconds).
+
+Pause, resume and stop keep working while a file is being sent.
+
+The Bridge keeps downloaded files in the `print-cache` folder, inside its config
+folder (next to `config.json`). It keeps at most 20 files and 1 GB, removes the
+oldest first, and reuses a file it already has instead of downloading it again.
+Each step is written to the Bridge log, for example
+`print_file <id> <printer>: download verified`.
+
+A Bridge that is too old to print files is not offered the job: FoxTrack shows
+"update FoxTrack Bridge" instead.
+
+### Test against another FoxTrack project
+
+Set `FOXTRACK_SUPABASE_URL` before starting the Bridge to send everything to
+another FoxTrack project, for example the beta one or a local Supabase stack
+(`http://127.0.0.1:54321`). It must start with `https://`, or be `http://` to
+`127.0.0.1` or `localhost`. Anything else is ignored with a warning in the log.
+The Bridge logs once at startup when the override is active.
 
 ## Cameras
 
