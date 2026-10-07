@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,7 +39,8 @@ type printEnv struct {
 	runningHTTP int            // status to answer for a "running" ack (0 = 200)
 	runningDrop int            // "running" acks to answer by cutting the connection (-1 = all)
 	runningTry  atomic.Int32
-	doneHTTP    int // status to answer for a "done" ack (0 = 200)
+	doneHTTP    int   // status to answer for a "done" ack (0 = 200)
+	idleErr     error // what the printer idle check answers
 	uploadGate  chan struct{}
 	uploadSeen  chan struct{}
 }
@@ -162,8 +164,12 @@ func newPrintEnv(t *testing.T) *printEnv {
 	configMutex.Unlock()
 	t.Cleanup(func() { configMutex.Lock(); configStore = oldCfg; configMutex.Unlock() })
 
-	oldJobs, oldDir, oldBackoff, oldBambu, oldKlipper, oldRetry := printJobs, printCacheDir, printAckBackoff, printBambuFile, printKlipperFile, printRunningRetryDelay
-	printRunningRetryDelay = time.Millisecond
+	oldJobs, oldDir, oldBackoff, oldBambu, oldKlipper, oldIdle := printJobs, printCacheDir, printAckBackoff, printBambuFile, printKlipperFile, printIdleCheck
+	printIdleCheck = func(config.Printer, bool, mqttpkg.Printer) error {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.idleErr
+	}
 	printJobs = &printJobTracker{seen: map[string]time.Time{}, busy: map[string]bool{}, inUse: map[string]int{}}
 	cache := filepath.Join(t.TempDir(), "print-cache")
 	printCacheDir = func() string { return cache }
@@ -182,7 +188,7 @@ func newPrintEnv(t *testing.T) *printEnv {
 	}
 	t.Cleanup(func() {
 		printJobs, printCacheDir, printAckBackoff, printBambuFile, printKlipperFile = oldJobs, oldDir, oldBackoff, oldBambu, oldKlipper
-		printRunningRetryDelay = oldRetry
+		printIdleCheck = oldIdle
 	})
 	return e
 }
@@ -646,36 +652,19 @@ func TestPrintFile_RedirectIsNotFollowed(t *testing.T) {
 	}
 }
 
-func TestPrintFile_RunningAckNoAnswerRetriesThenRunsAnyway(t *testing.T) {
+// One try only (the poll loop must not stall); no answer at all still runs
+// the job, since FoxTrack may have applied the ack.
+func TestPrintFile_RunningAckNoAnswerRunsAnyway(t *testing.T) {
 	e := newPrintEnv(t)
 	e.runningDrop = -1
 	cmd := e.command("c1", "Voron", "gcode", nil)
 	e.poll(cmd)
-	if e.runningTry.Load() != 3 || e.count("upload:") != 1 || e.count("ack:done") != 1 {
+	if e.runningTry.Load() != 1 || e.count("upload:") != 1 || e.count("ack:done") != 1 {
 		t.Fatalf("running tries %d, events = %v", e.runningTry.Load(), e.snapshot())
 	}
 	e.poll(cmd) // marked seen: not run again
 	if e.count("upload:") != 1 {
 		t.Fatalf("job ran twice: %v", e.snapshot())
-	}
-}
-
-func TestPrintFile_RunningAckSecondTryLands(t *testing.T) {
-	e := newPrintEnv(t)
-	e.runningDrop = 1
-	e.poll(e.command("c1", "Voron", "gcode", nil))
-	if e.runningTry.Load() != 2 || e.count("ack:running") != 1 || e.count("upload:") != 1 {
-		t.Fatalf("running tries %d, events = %v", e.runningTry.Load(), e.snapshot())
-	}
-}
-
-func TestPrintFile_RunningAck404AfterNoAnswerSkips(t *testing.T) {
-	e := newPrintEnv(t)
-	e.runningDrop = 1
-	e.runningHTTP = http.StatusNotFound
-	e.poll(e.command("c1", "Voron", "gcode", nil))
-	if e.runningTry.Load() != 2 || e.count("upload:") != 0 || len(e.snapshot()) != 0 {
-		t.Fatalf("running tries %d, events = %v", e.runningTry.Load(), e.snapshot())
 	}
 }
 
@@ -685,5 +674,30 @@ func TestPrintFile_RunningAckHTTPErrorIsNotRetriedQuickly(t *testing.T) {
 	e.poll(e.command("c1", "Voron", "gcode", nil))
 	if e.runningTry.Load() != 1 || e.count("upload:") != 0 {
 		t.Fatalf("running tries %d, events = %v", e.runningTry.Load(), e.snapshot())
+	}
+}
+
+// A busy printer is refused before the download, not after a 50 MB fetch.
+func TestPrintFile_BusyPrinterIsRefusedBeforeTheDownload(t *testing.T) {
+	e := newPrintEnv(t)
+	e.idleErr = errors.New("The printer is busy. Wait until it is idle, then try again.")
+	e.poll(e.command("c1", "Voron", "gcode", nil))
+	if e.count("ack:failed:The printer is busy.") != 1 || e.fileHits.Load() != 0 || e.count("upload:") != 0 {
+		t.Fatalf("events = %v (downloads %d)", e.snapshot(), e.fileHits.Load())
+	}
+}
+
+// A cache folder that cannot be written is reported in plain words, without
+// the Go error or the path.
+func TestPrintFile_CacheWriteFailureIsPlain(t *testing.T) {
+	e := newPrintEnv(t)
+	blocker := filepath.Join(t.TempDir(), "not-a-folder")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	printCacheDir = func() string { return filepath.Join(blocker, "print-cache") }
+	e.poll(e.command("c1", "Voron", "gcode", nil))
+	if e.count("ack:failed:"+errPrintSave.Error()) != 1 {
+		t.Fatalf("events = %v", e.snapshot())
 	}
 }

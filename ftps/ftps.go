@@ -1,7 +1,7 @@
 // Package ftps uploads one file to a Bambu Lab printer over implicit FTPS
 // (TLS from the first byte, port 990, user "bblp", password = LAN access
-// code). Only what a Bambu printer needs is implemented: login, PASV, STOR,
-// SIZE. Pure stdlib.
+// code). Only what a Bambu printer needs is implemented: login, DELE, PASV,
+// STOR, SIZE. Pure stdlib.
 //
 // Things the printers force on us (each verified against real printers by
 // other open source projects):
@@ -157,6 +157,13 @@ func Upload(ctx context.Context, cfg Config, localPath, remoteName string) (err 
 		if code, msg, err := c.cmd("%s", step.cmd); err != nil || code != 200 {
 			return replyErr(step.cmd, code, msg, err)
 		}
+	}
+
+	// Delete first: the printer refuses STOR over an existing file (553), and
+	// Bridge always uploads under the same name. 550 = there was none.
+	code, msg, err = c.cmd("DELE %s", remoteName)
+	if err != nil || (code != 250 && code != 550) {
+		return replyErr("DELE", code, msg, err)
 	}
 
 	// PASV: use only the port. Printers behind NAT or with odd addresses

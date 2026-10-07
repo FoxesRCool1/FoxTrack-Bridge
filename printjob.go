@@ -43,9 +43,10 @@ var (
 	errPrintArgs        = errors.New("FoxTrack sent an incomplete print command. Update FoxTrack Bridge, then try again.")
 	errPrintBusy        = errors.New("Bridge is already sending a file to this printer.")
 	errPrintCloud       = errors.New("Printing a file needs the printer in LAN Only Mode with Developer Mode on. It does not work over Bambu Cloud.")
-	errPrintMismatch    = errors.New("The file Bridge downloaded does not match the one in FoxTrack. Try again.")
+	errPrintMismatch    = errors.New("The file got damaged on the way to this computer. Try again.")
 	errPrintTooLong     = errors.New("Sending the file took too long. Check the printer's network connection, then try again.")
-	errPrintHost        = errors.New("Bridge did not trust the download link FoxTrack sent. Try again, and contact FoxTrack support if it keeps happening.")
+	errPrintHost        = errors.New("Bridge could not check the file link. Try again, and contact FoxTrack support if it keeps happening.")
+	errPrintSave        = errors.New("Bridge could not save the file on this computer. Check its free disk space.")
 	errPrintDownload    = errors.New("Bridge could not download the file from FoxTrack. Check this computer's internet connection, then try again.")
 	errPrintInterrupted = errors.New("The download from FoxTrack was interrupted. Try again.")
 )
@@ -64,11 +65,18 @@ var (
 		2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second,
 		30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second,
 	}
-	printRunningRetryDelay = time.Second // between tries of the "running" ack
-	printCacheDir          = func() string { return filepath.Join(config.ConfigDir(), "print-cache") }
-	printBambuFile         = mqttpkg.PrintProjectFile
-	printKlipperFile       = func(ctx context.Context, name, localPath, remoteName string) error {
+	printCacheDir    = func() string { return filepath.Join(config.ConfigDir(), "print-cache") }
+	printBambuFile   = mqttpkg.PrintProjectFile
+	printKlipperFile = func(ctx context.Context, name, localPath, remoteName string) error {
 		return lanCtrl.UploadAndPrint(ctx, name, localPath, remoteName)
+	}
+	// printIdleCheck runs before the download, so a busy printer never costs
+	// a 50 MB fetch. The senders check again before they upload.
+	printIdleCheck = func(p config.Printer, isBambu bool, mq mqttpkg.Printer) error {
+		if isBambu {
+			return mqttpkg.PrintPreflight(mq)
+		}
+		return lanCtrl.PrintReady(p.Name)
 	}
 )
 
@@ -187,19 +195,11 @@ func startPrintFile(apiKey string, cmd bridgeCommand) {
 	if !ok {
 		return // maybe another Bridge's printer: leave it pending
 	}
-	// A network error (no HTTP status) does not say whether FoxTrack applied
-	// the ack, so try twice more, quickly.
-	var err error
+	// One try: this runs on the poll loop, and every retry would hold up
+	// pause and stop for the other printers. An HTTP error is retried by the
+	// next poll.
+	err := ackBridgeCommand(apiKey, bridgeCommandResult{CommandID: cmd.ID, Status: "running"})
 	var statusErr *httpStatusError
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(printRunningRetryDelay)
-		}
-		err = ackBridgeCommand(apiKey, bridgeCommandResult{CommandID: cmd.ID, Status: "running"})
-		if err == nil || errors.As(err, &statusErr) {
-			break
-		}
-	}
 	switch {
 	case err == nil:
 	case errors.As(err, &statusErr) && statusErr.code == http.StatusNotFound:
@@ -210,7 +210,7 @@ func startPrintFile(apiKey string, cmd bridgeCommand) {
 		log.Printf("[bridge-commands] print_file %s %s: could not accept: %v", cmd.ID, p.Name, err)
 		return // not marked seen: the next poll tries again
 	default:
-		// Every try failed without an answer. FoxTrack may have applied the ack,
+		// No answer at all. FoxTrack may have applied the ack,
 		// and then never hands the command out again, so the job would be lost
 		// (FoxTrack fails it as timed out after 15 minutes). Run it: the final
 		// done/failed ack is accepted from pending or running. The price: a
@@ -399,6 +399,10 @@ func runPrintJob(ctx context.Context, logf func(string, ...interface{}), args ma
 	case isBambu && p.IsCloud():
 		return errPrintCloud
 	}
+	if err := printIdleCheck(p, isBambu, mq); err != nil {
+		logf("refused before the download: %v", err)
+		return err
+	}
 
 	dir := printCacheDir()
 	path := filepath.Join(dir, a.sha256+cacheExt(a.format))
@@ -472,7 +476,8 @@ func ensureCachedFile(ctx context.Context, logf func(string, ...interface{}), di
 	_ = os.Remove(path)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("Bridge could not create its print cache folder (%v).", err)
+		logf("create the print cache folder: %v", err)
+		return errPrintSave
 	}
 	logf("downloading %d bytes from FoxTrack", a.size)
 	req, err := http.NewRequestWithContext(ctx, "GET", a.downloadURL, nil)
@@ -498,7 +503,8 @@ func ensureCachedFile(ctx context.Context, logf func(string, ...interface{}), di
 
 	tmp, err := os.CreateTemp(dir, "dl-*.tmp")
 	if err != nil {
-		return fmt.Errorf("Bridge could not save the file (%v).", err)
+		logf("create the download file: %v", err)
+		return errPrintSave
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op once renamed
@@ -521,7 +527,8 @@ func ensureCachedFile(ctx context.Context, logf func(string, ...interface{}), di
 	}
 	_ = os.Chmod(tmpName, 0o600)
 	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("Bridge could not save the file (%v).", err)
+		logf("move the download into the cache: %v", err)
+		return errPrintSave
 	}
 	logf("download verified")
 	return nil

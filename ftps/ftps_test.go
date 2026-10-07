@@ -36,6 +36,7 @@ type fakeServer struct {
 	mu       sync.Mutex
 	stored   map[string][]byte
 	resumed  []bool
+	verbs    []string // DELE and STOR, in order
 	dataSeen chan struct{}
 }
 
@@ -142,7 +143,26 @@ func (s *fakeServer) serve(c net.Conn, dataCfg *tls.Config) {
 			}
 			p := pasv.Addr().(*net.TCPAddr).Port
 			say("227 Entering Passive Mode (%s,%d,%d)", strings.ReplaceAll(s.pasvHost, ".", ","), p>>8, p&255)
+		case "DELE":
+			s.mu.Lock()
+			s.verbs = append(s.verbs, "DELE "+arg)
+			_, ok := s.stored[arg]
+			delete(s.stored, arg)
+			s.mu.Unlock()
+			if ok {
+				say("250 Delete operation successful.")
+			} else {
+				say("550 Delete operation failed.")
+			}
 		case "STOR":
+			s.mu.Lock()
+			s.verbs = append(s.verbs, "STOR "+arg)
+			_, exists := s.stored[arg]
+			s.mu.Unlock()
+			if exists { // like the printers: no overwrite
+				say("553 Could not create file.")
+				continue
+			}
 			dc, err := pasv.Accept()
 			if err != nil {
 				say("425 no data connection")
@@ -227,6 +247,28 @@ func TestUpload_StoresBytesAndResumesSession(t *testing.T) {
 	}
 	if len(s.resumed) != 1 || !s.resumed[0] {
 		t.Fatalf("data connection did not resume the control session: %v", s.resumed)
+	}
+}
+
+// Bridge always uploads under one name; the printer refuses STOR over an
+// existing file, so each upload deletes it first (550 when there is none).
+func TestUpload_DeletesBeforeStoreSoTheSecondUploadOverwrites(t *testing.T) {
+	s := newFakeServer(t)
+	first, _ := writeTemp(t, 1000)
+	second, want := writeTemp(t, 2000)
+	for _, path := range []string{first, second} {
+		if err := Upload(context.Background(), s.config(), path, "job.gcode.3mf"); err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !bytes.Equal(s.stored["job.gcode.3mf"], want) {
+		t.Fatalf("stored %d bytes, want the second file", len(s.stored["job.gcode.3mf"]))
+	}
+	got := strings.Join(s.verbs, " | ")
+	if wantVerbs := "DELE job.gcode.3mf | STOR job.gcode.3mf | DELE job.gcode.3mf | STOR job.gcode.3mf"; got != wantVerbs {
+		t.Fatalf("verbs = %s, want %s", got, wantVerbs)
 	}
 }
 

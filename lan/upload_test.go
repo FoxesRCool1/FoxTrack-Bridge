@@ -104,16 +104,17 @@ func TestUploadAndPrint_Errors(t *testing.T) {
 		want   string
 	}{
 		{"not started", 201, `{"print_started":false,"print_queued":false}`, "did not start it"},
-		{"queued is fine", 201, `{"print_started":false,"print_queued":true}`, ""},
+		{"queued is not started", 201, `{"print_started":false,"print_queued":true}`, errQueued.Error()},
 		{"bare started", 201, `{"item":{"path":"a.gcode"},"print_started":true,"print_queued":false,"action":"create_file"}`, ""},
 		{"wrapped started", 201, `{"result":{"item":{"path":"a.gcode"},"print_started":true,"print_queued":false}}`, ""},
-		{"wrapped queued", 201, `{"result":{"print_started":false,"print_queued":true}}`, ""},
+		{"wrapped queued", 201, `{"result":{"print_started":false,"print_queued":true}}`, errQueued.Error()},
 		{"wrapped not started", 201, `{"result":{"print_started":false,"print_queued":false}}`, "did not start it"},
 		{"not json", 201, `ok`, "did not start it"},
 		{"file in use", 403, `{"error":{"message":"File currently in use"}}`, "printing on the printer right now"},
-		{"bad key", 401, `{}`, "refused Bridge's API key"},
-		{"forbidden", 403, `{"error":{"message":"nope"}}`, "refused Bridge's API key"},
-		{"other", 500, `{}`, "The printer refused the file (HTTP 500)."},
+		{"file loaded", 403, `{"error":{"message":"File is loaded, upload not permitted"}}`, "printing on the printer right now"},
+		{"bad key", 401, `{}`, errMoonKey.Error()},
+		{"forbidden", 403, `{"error":{"message":"nope"}}`, errMoonKey.Error()},
+		{"other", 500, `{}`, errRefused.Error()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,5 +213,39 @@ func TestSanitizeRemoteName(t *testing.T) {
 		if got := SanitizeRemoteName(in); got != want {
 			t.Errorf("SanitizeRemoteName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A dead connection is reported in plain words, without the printer address.
+func TestUploadAndPrint_UnreachableHidesTheAddress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/server/info" {
+			return
+		}
+		dropConn(w)
+	}))
+	defer srv.Close()
+	err := newUploadController(t, srv.URL, "idle").UploadAndPrint(context.Background(), "voron", writeTemp(t, "G28"), "a.gcode")
+	if !errors.Is(err, errUnreachable) || strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func dropConn(w http.ResponseWriter) {
+	if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+		conn.Close()
+	}
+}
+
+func TestPrintReady(t *testing.T) {
+	c := newUploadController(t, "http://127.0.0.1:1", "printing")
+	if err := c.PrintReady("voron"); !errors.Is(err, errPrinterBusy) {
+		t.Fatalf("printing: %v", err)
+	}
+	if err := newUploadController(t, "http://127.0.0.1:1", "idle").PrintReady("voron"); err != nil {
+		t.Fatalf("idle: %v", err)
+	}
+	if err := c.PrintReady("nope"); err == nil {
+		t.Fatal("unknown printer accepted")
 	}
 }

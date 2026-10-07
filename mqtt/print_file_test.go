@@ -513,3 +513,41 @@ func TestWaitForStart_TimesOutWithOldMessage(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// The printer's answer to project_file used to be dropped as "no usable data".
+// A "fail" now ends the job at once with the printer's reason; a fail left
+// over from an earlier job does not count.
+func TestPrintProjectFile_PrinterAnswersFail(t *testing.T) {
+	const name = "pf-answer-fail"
+	h, p, path := setupPrint(t, name, "01P00A123", "idle")
+	t.Cleanup(func() { forgetPrintFileState(name) })
+	noteProjectFileReply(name, []byte(`{"print":{"command":"project_file","result":"fail","reason":"old"}}`))
+	h.onPublish = func() {
+		handle := makeHandler(Printer{Name: name, Serial: "01P00A123"})
+		handle(nil, fakeMessage{`{"print":{"command":"project_file","sequence_id":"7","result":"FAIL","reason":"file not found"}}`})
+	}
+	err := PrintProjectFile(context.Background(), p, path, ProjectPrintOptions{AMSMapping: []int{-1, 0}})
+	if err == nil || err.Error() != "The printer refused the print (file not found). Check the printer screen." {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNoteProjectFileReply(t *testing.T) {
+	const name = "pf-answer"
+	t.Cleanup(func() { forgetPrintFileState(name) })
+	if noteProjectFileReply(name, []byte(`{"print":{"command":"push_status","gcode_state":"IDLE"}}`)) {
+		t.Fatal("a status report is not a project_file answer")
+	}
+	if !noteProjectFileReply(name, []byte(`{"print":{"command":"project_file","result":"success"}}`)) {
+		t.Fatal("success answer not recognised")
+	}
+	if _, refused := projectFileRefusal(name); refused {
+		t.Fatal("success counted as a refusal")
+	}
+	noteProjectFileReply(name, []byte(`{"print":{"command":"project_file","result":"fail"}}`))
+	UpdatePrinterState(name, TelemetryData{Status: "idle"})
+	t.Cleanup(func() { RemovePrinterState(name) })
+	if err := waitForStart(context.Background(), name, ""); err == nil || err.Error() != "The printer refused the print. Check the printer screen." {
+		t.Fatalf("err = %v", err)
+	}
+}

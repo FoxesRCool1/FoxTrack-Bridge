@@ -251,6 +251,7 @@ func mqttPrinter(p config.Printer, cfg *config.Config) mqttpkg.Printer {
 		LANCode:         p.LANCode,
 		APIKey:          cfg.APIKey,
 		FoxTrack2APIKey: cfg.FoxTrack2APIKey,
+		Cloud:           p.IsCloud(),
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -18,13 +19,35 @@ import (
 	configpkg "foxtrack-bridge/config"
 )
 
-// errBusy and friends are shown to the FoxTrack user as is.
+// errBusy and friends are shown to the FoxTrack user as is: plain words, no
+// Go errors, addresses or links (those go to the log).
 var (
 	errPrinterBusy = errors.New("The printer is busy. Wait until it is idle, then try again.")
 	errNotStarted  = errors.New("The printer took the file but did not start it. Check that it is idle and ready.")
+	errQueued      = errors.New("The printer put the file in its queue instead of starting it. Check Klipper, then try again.")
 	errFileInUse   = errors.New("That file is printing on the printer right now.")
-	errMoonKey     = errors.New("Moonraker refused Bridge's API key.")
+	errMoonKey     = errors.New("The printer refused the access key saved in Bridge. Check it in the printer settings in Bridge.")
+	errNoAddress   = errors.New("Bridge has no network address saved for this printer. Add it in Bridge.")
+	errUnreachable = errors.New("Bridge could not reach the printer while sending the file. Check that the printer and Klipper are on.")
+	errRefused     = errors.New("The printer refused the file. Check its free space and that Klipper is ready.")
+	errLocalFile   = errors.New("Bridge could not read the downloaded file on this computer. Try again.")
 )
+
+// PrintReady reports whether the Klipper printer called name can take a new
+// print right now: nil, or the plain-English reason it cannot.
+func (c *Controller) PrintReady(name string) error {
+	c.mu.RLock()
+	_, ok := c.printers[name]
+	state := c.states[name]
+	c.mu.RUnlock()
+	if !ok {
+		return errors.New("Bridge does not know this printer any more. Check its printer list.")
+	}
+	if state != nil && (state.Status == "printing" || state.Status == "paused") {
+		return errPrinterBusy
+	}
+	return nil
+}
 
 // uploadTimeout is its own long timeout: the 6 s command client cannot
 // carry a 50 MB file over a slow Wi-Fi link.
@@ -35,19 +58,18 @@ var uploadTimeout = 10 * time.Minute
 // printer started it. remoteName is cleaned first. The error text is plain
 // English, shown to the FoxTrack user.
 func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remoteName string) error {
-	c.mu.RLock()
-	p, ok := c.printers[name]
-	state := c.states[name]
-	c.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("printer %q not found", name)
+	if err := c.PrintReady(name); err != nil {
+		return err
 	}
-	if state != nil && (state.Status == "printing" || state.Status == "paused") {
-		return errPrinterBusy
+	c.mu.RLock()
+	p := c.printers[name]
+	c.mu.RUnlock()
+	logf := func(format string, a ...any) {
+		log.Printf("[%s] print_file: %s", name, fmt.Sprintf(format, a...))
 	}
 	target := moonrakerURL(p, "/server/files/upload")
 	if target == "" {
-		return errors.New("This printer has no Moonraker address in Bridge.")
+		return errNoAddress
 	}
 
 	if err := moonrakerKeyPreflight(ctx, p); err != nil {
@@ -56,19 +78,23 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 
 	f, err := os.Open(localPath)
 	if err != nil {
-		return fmt.Errorf("open file: %w", err)
+		logf("open file: %v", err)
+		return errLocalFile
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return fmt.Errorf("stat file: %w", err)
+		logf("stat file: %v", err)
+		return errLocalFile
 	}
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("hash file: %w", err)
+		logf("hash file: %v", err)
+		return errLocalFile
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("rewind file: %w", err)
+		logf("rewind file: %v", err)
+		return errLocalFile
 	}
 	remote := SanitizeRemoteName(remoteName)
 
@@ -77,19 +103,17 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	// than with chunked bodies).
 	var head bytes.Buffer
 	mw := multipart.NewWriter(&head)
+	// Writes to a bytes.Buffer: these cannot fail.
 	for _, kv := range [][2]string{{"root", "gcodes"}, {"checksum", hex.EncodeToString(h.Sum(nil))}, {"print", "true"}} {
-		if err := mw.WriteField(kv[0], kv[1]); err != nil {
-			return err
-		}
+		_ = mw.WriteField(kv[0], kv[1])
 	}
-	if _, err := mw.CreateFormFile("file", remote); err != nil {
-		return err
-	}
+	_, _ = mw.CreateFormFile("file", remote)
 	tail := []byte("\r\n--" + mw.Boundary() + "--\r\n")
 
 	req, err := http.NewRequestWithContext(ctx, "POST", target, io.MultiReader(&head, f, bytes.NewReader(tail)))
 	if err != nil {
-		return err
+		logf("upload request: %v", err)
+		return errNoAddress
 	}
 	req.ContentLength = int64(head.Len()) + st.Size() + int64(len(tail))
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -98,7 +122,11 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	client := &http.Client{Timeout: uploadTimeout, Transport: insecureTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("The printer could not be reached while sending the file (%v).", err)
+		if ctx.Err() != nil {
+			return ctx.Err() // the job's timeout: the caller words it
+		}
+		logf("upload failed: %v", err)
+		return errUnreachable
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
@@ -107,12 +135,15 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	case resp.StatusCode == http.StatusUnauthorized:
 		return errMoonKey
 	case resp.StatusCode == http.StatusForbidden:
-		if strings.Contains(strings.ToLower(string(body)), "in use") {
+		// "File currently in use", or "File is loaded, upload not permitted"
+		// when that file is the one printing.
+		if lower := strings.ToLower(string(body)); strings.Contains(lower, "in use") || strings.Contains(lower, "loaded") {
 			return errFileInUse
 		}
 		return errMoonKey
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
-		return fmt.Errorf("The printer refused the file (HTTP %d).", resp.StatusCode)
+		logf("upload refused: HTTP %d %.300s", resp.StatusCode, body)
+		return errRefused
 	}
 	// Moonraker's file_manager returns {"item":..., "action":..., "print_started":
 	// ..., "print_queued": ...} and application.py's FileUploadHandler writes
@@ -128,16 +159,20 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(body, &reply); err != nil {
+		logf("upload reply is not JSON: %.300s", body)
 		return errNotStarted
 	}
 	started, queued := reply.PrintStarted, reply.PrintQueued
 	if reply.Result != nil {
 		started, queued = started || reply.Result.PrintStarted, queued || reply.Result.PrintQueued
 	}
-	if !started && !queued {
-		return errNotStarted
+	switch {
+	case started:
+		return nil
+	case queued: // FoxTrack would say "Printing started" for a file that waits
+		return errQueued
 	}
-	return nil
+	return errNotStarted
 }
 
 // moonrakerKeyPreflight makes one authenticated GET before the upload.

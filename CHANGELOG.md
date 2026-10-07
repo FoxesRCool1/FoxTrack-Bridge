@@ -23,6 +23,27 @@
 - Progress shows in the Bridge log, and a failed job tells you why in FoxTrack.
 - For testing, the `FOXTRACK_SUPABASE_URL` environment variable points the Bridge
   at another FoxTrack project (https, or http on this computer only).
+- The Bridge checks that the printer is idle before it downloads the file, so a
+  busy printer never costs a download.
+- A Bambu printer's file is deleted before the new one is sent, so the second
+  print from FoxTrack no longer fails on the same file name.
+- If a Bambu printer refuses the start command, FoxTrack shows the printer's
+  reason, and the Bridge log shows the printer's full answer.
+- A Klipper printer that puts the file in its queue instead of starting it is
+  reported as failed, and a file that is printing right now is named as the reason
+  instead of a wrong API key.
+- Error messages in FoxTrack are plain words; the technical detail goes to the
+  Bridge log.
+
+**Known (not fixed yet)**
+- A file name made only of non-ASCII letters is sent to a Klipper printer as
+  `gcode.gcode`.
+- The job timeout (14 minutes) is close to FoxTrack's 15-minute limit; it should
+  drop to about 12 minutes so the final result always lands first.
+- Files stay on the printer after the print: `foxtrack-print.gcode.3mf` on the
+  Bambu SD card, and one file per name in the Klipper gcodes folder.
+- A Bambu print counts as started at PREPARE/SLICING. An AMS mapping error that
+  shows up later, during heat-up, is not reported back to FoxTrack.
 
 ## v2.4.0
 

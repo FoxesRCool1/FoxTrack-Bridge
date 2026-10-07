@@ -52,6 +52,9 @@ type Printer struct {
 	LANCode         string
 	APIKey          string
 	FoxTrack2APIKey string
+	// Cloud: the config says this printer is reached over Bambu Cloud. Set
+	// even while the cloud connection is down, when IsCloudSerial is false.
+	Cloud bool
 }
 
 // AmsSlot holds the state of a single AMS filament tray.
@@ -894,12 +897,13 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 
 		pr := report.Print
 		noteReportedError(p.Name, msg.Payload(), pr.McPrintErrorCode)
+		projectReply := noteProjectFileReply(p.Name, msg.Payload()) // logged in full there
 
 		// Ignore messages that carry no print or system data at all.
 		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
 		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0
 		if !hasData {
-			if pr.Msg != 1 && hasPrintObject(msg.Payload()) {
+			if pr.Msg != 1 && !projectReply && hasPrintObject(msg.Payload()) {
 				log.Printf("[%s] MQTT skip (no usable data) | gcode=%q nozzle=%.1f bed=%.1f | payload: %.120s", p.Name, pr.GcodeState, pr.NozzleTemper, pr.BedTemper, msg.Payload())
 			}
 			return
@@ -1184,7 +1188,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						Ams:                relayAms,
 					},
 				}
-				stampRelayIdentity(&relayPayload.Print, p.Serial, t.PrinterModel)
+				stampRelayIdentity(&relayPayload.Print, p, t.PrinterModel)
 				if p.APIKey == "" && p.FoxTrack2APIKey == "" {
 					webhookLastSentMu.Lock()
 					logged := webhookNoKeyLogged[p.Name]
