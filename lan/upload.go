@@ -210,7 +210,11 @@ func SanitizeRemoteName(name string) string {
 			b.WriteRune(r)
 		}
 	}
-	s := strings.TrimLeft(b.String(), ".")
+	s := b.String()
+	if strings.HasPrefix(s, ".") && strings.EqualFold(strings.TrimLeft(s, "."), "gcode") {
+		return "print.gcode" // nothing but the extension survived
+	}
+	s = strings.TrimLeft(s, ".")
 	if !strings.HasSuffix(strings.ToLower(s), ".gcode") {
 		s = strings.TrimRight(s, ".") + ".gcode"
 	}

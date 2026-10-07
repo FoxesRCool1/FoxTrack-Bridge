@@ -236,7 +236,7 @@ func TestPrintFile_FetchHeadersAndRunningAckBeforeJob(t *testing.T) {
 	e.mu.Lock()
 	caps, ver := e.getHeader.Get("X-Bridge-Capabilities"), e.getHeader.Get("X-Bridge-Version")
 	e.mu.Unlock()
-	if caps != "print_file" || ver == "" {
+	if caps != "print_file,set_filament" || ver == "" {
 		t.Fatalf("headers: capabilities %q version %q", caps, ver)
 	}
 	got := strings.Join(e.snapshot(), " | ")
@@ -647,7 +647,7 @@ func TestPrintFile_RedirectIsNotFollowed(t *testing.T) {
 	if elsewhere.Load() != 0 || e.count("upload:") != 0 {
 		t.Fatalf("the redirect was followed: %d hits, events %v", elsewhere.Load(), e.snapshot())
 	}
-	if e.count("ack:failed:FoxTrack would not give Bridge the file (HTTP 302)") != 1 {
+	if e.count("ack:failed:FoxTrack could not send the file right now. Try again in a minute.") != 1 {
 		t.Fatalf("events = %v", e.snapshot())
 	}
 }
@@ -699,5 +699,99 @@ func TestPrintFile_CacheWriteFailureIsPlain(t *testing.T) {
 	e.poll(e.command("c1", "Voron", "gcode", nil))
 	if e.count("ack:failed:"+errPrintSave.Error()) != 1 {
 		t.Fatalf("events = %v", e.snapshot())
+	}
+}
+
+func TestPrintFile_DownloadRefusalIsWordedForTheUser(t *testing.T) {
+	expired := "The download link from FoxTrack expired. Press Print again in FoxTrack."
+	gone := "FoxTrack no longer has this file. Upload it again in FoxTrack."
+	later := "FoxTrack could not send the file right now. Try again in a minute."
+	for status, want := range map[int]string{400: expired, 401: expired, 403: expired, 404: gone, 500: later, 429: later} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			e := newPrintEnv(t)
+			e.fileHandler = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }
+			e.poll(e.command("c1", "Voron", "gcode", nil))
+			if e.count("ack:failed:"+want) != 1 {
+				t.Fatalf("events = %v", e.snapshot())
+			}
+		})
+	}
+}
+
+// badTempFile is a temp file whose disk fails at one step.
+type badTempFile struct {
+	*os.File
+	failWrite, failSync, failClose bool
+}
+
+func (f *badTempFile) Write(p []byte) (int, error) {
+	if f.failWrite {
+		return 0, errors.New("no space left on device")
+	}
+	return f.File.Write(p)
+}
+
+func (f *badTempFile) Sync() error {
+	if f.failSync {
+		return errors.New("input/output error")
+	}
+	return f.File.Sync()
+}
+
+func (f *badTempFile) Close() error {
+	err := f.File.Close()
+	if f.failClose {
+		return errors.New("input/output error")
+	}
+	return err
+}
+
+// A disk that fails is the computer's problem, not an interrupted download.
+func TestPrintFile_LocalWriteFailureIsNotAnInterruptedDownload(t *testing.T) {
+	for name, bad := range map[string]badTempFile{
+		"write": {failWrite: true},
+		"sync":  {failSync: true},
+		"close": {failClose: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newPrintEnv(t)
+			old := createTempFile
+			createTempFile = func(dir, pattern string) (tempFile, error) {
+				f, err := os.CreateTemp(dir, pattern)
+				b := bad
+				b.File = f
+				return &b, err
+			}
+			t.Cleanup(func() { createTempFile = old })
+			e.poll(e.command("c1", "Voron", "gcode", nil))
+			if e.count("ack:failed:"+errPrintSave.Error()) != 1 || e.count("upload:") != 0 {
+				t.Fatalf("events = %v", e.snapshot())
+			}
+		})
+	}
+}
+
+// Only a timeout is reworded: a refusal that happens to arrive after the
+// deadline keeps its own message.
+func TestPrintFile_LateRefusalKeepsItsMessage(t *testing.T) {
+	refusal := errors.New("The printer refused the print (error 5). Check the printer screen.")
+	for name, c := range map[string]struct{ err, want error }{
+		"refusal":  {refusal, refusal},
+		"deadline": {context.DeadlineExceeded, errPrintTooLong},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newPrintEnv(t)
+			old := printJobTimeout
+			printJobTimeout = 30 * time.Millisecond
+			t.Cleanup(func() { printJobTimeout = old })
+			printBambuFile = func(ctx context.Context, p mqttpkg.Printer, localPath string, o mqttpkg.ProjectPrintOptions) error {
+				<-ctx.Done()
+				return c.err
+			}
+			e.poll(e.command("c1", "01P00A000000001", "gcode_3mf", nil))
+			if e.count("ack:failed:"+c.want.Error()) != 1 {
+				t.Fatalf("events = %v", e.snapshot())
+			}
+		})
 	}
 }

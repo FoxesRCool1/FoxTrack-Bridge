@@ -31,13 +31,16 @@ import (
 )
 
 const (
-	printJobTimeout   = 14 * time.Minute // FoxTrack fails a running command after 15
 	maxPrintFileBytes = 60 << 20
 	cacheMaxFiles     = 20
 	cacheMaxBytes     = 1 << 30
 	seenCommandTTL    = time.Hour
 	maxErrorChars     = 500
 )
+
+// printJobTimeout: FoxTrack fails a running command after 15 minutes; 12
+// leaves room for the result ack to land first.
+var printJobTimeout = 12 * time.Minute
 
 var (
 	errPrintArgs        = errors.New("FoxTrack sent an incomplete print command. Update FoxTrack Bridge, then try again.")
@@ -46,7 +49,7 @@ var (
 	errPrintMismatch    = errors.New("The file got damaged on the way to this computer. Try again.")
 	errPrintTooLong     = errors.New("Sending the file took too long. Check the printer's network connection, then try again.")
 	errPrintHost        = errors.New("Bridge could not check the file link. Try again, and contact FoxTrack support if it keeps happening.")
-	errPrintSave        = errors.New("Bridge could not save the file on this computer. Check its free disk space.")
+	errPrintSave        = errors.New("Bridge could not save the file on this computer. Free up some disk space, then try again.")
 	errPrintDownload    = errors.New("Bridge could not download the file from FoxTrack. Check this computer's internet connection, then try again.")
 	errPrintInterrupted = errors.New("The download from FoxTrack was interrupted. Try again.")
 )
@@ -249,7 +252,7 @@ func finishPrintFile(apiKey string, cmd bridgeCommand, p config.Printer, isBambu
 		ctx, cancel := context.WithTimeout(context.Background(), printJobTimeout)
 		defer cancel()
 		err = runPrintJob(ctx, logf, cmd.Args, p, isBambu, mq)
-		if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) {
 			logf("timed out: %v", err)
 			err = errPrintTooLong
 		}
@@ -346,7 +349,7 @@ func parsePrintFileArgs(args map[string]interface{}) (printFileArgs, error) {
 		return a, errPrintArgs
 	}
 	if size > maxPrintFileBytes {
-		return a, errors.New("That file is larger than the 60 MB Bridge can send.")
+		return a, errors.New("That file is larger than the 60 MB Bridge can send. Start it from the printer or its own web page instead.")
 	}
 	a.size = int64(size)
 	if v, present := args["plate"]; present && v != nil {
@@ -498,10 +501,11 @@ func ensureCachedFile(ctx context.Context, logf func(string, ...interface{}), di
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("FoxTrack would not give Bridge the file (HTTP %d). Try again.", resp.StatusCode)
+		logf("download refused: HTTP %d", resp.StatusCode)
+		return downloadStatusError(resp.StatusCode)
 	}
 
-	tmp, err := os.CreateTemp(dir, "dl-*.tmp")
+	tmp, err := createTempFile(dir, "dl-*.tmp")
 	if err != nil {
 		logf("create the download file: %v", err)
 		return errPrintSave
@@ -510,12 +514,19 @@ func ensureCachedFile(ctx context.Context, logf func(string, ...interface{}), di
 	defer os.Remove(tmpName) // no-op once renamed
 
 	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, a.size+1))
-	if syncErr := tmp.Sync(); copyErr == nil {
-		copyErr = syncErr
+	w := &recordErrWriter{w: tmp}
+	n, copyErr := io.Copy(io.MultiWriter(w, h), io.LimitReader(resp.Body, a.size+1))
+	// A failed write, Sync or Close is this computer's (disk full), not the network's.
+	localErr := w.err
+	if syncErr := tmp.Sync(); localErr == nil {
+		localErr = syncErr
 	}
-	if closeErr := tmp.Close(); copyErr == nil {
-		copyErr = closeErr
+	if closeErr := tmp.Close(); localErr == nil {
+		localErr = closeErr
+	}
+	if localErr != nil {
+		logf("write the download file: %v", localErr)
+		return errPrintSave
 	}
 	if copyErr != nil {
 		logf("download interrupted: %v", copyErr)
@@ -532,6 +543,44 @@ func ensureCachedFile(ctx context.Context, logf func(string, ...interface{}), di
 	}
 	logf("download verified")
 	return nil
+}
+
+// downloadStatusError words a refused download for FoxTrack's user. The signed
+// link is good for a short time, so most refusals mean it ran out.
+func downloadStatusError(status int) error {
+	switch status {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+		return errors.New("The download link from FoxTrack expired. Press Print again in FoxTrack.")
+	case http.StatusNotFound:
+		return errors.New("FoxTrack no longer has this file. Upload it again in FoxTrack.")
+	}
+	return errors.New("FoxTrack could not send the file right now. Try again in a minute.")
+}
+
+// tempFile is what the download needs of the cache's temp file.
+type tempFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+	Name() string
+}
+
+// createTempFile is a test seam.
+var createTempFile = func(dir, pattern string) (tempFile, error) { return os.CreateTemp(dir, pattern) }
+
+// recordErrWriter remembers the first error of the writer it wraps, so a
+// failed write can be told apart from a failed read when io.Copy returns it.
+type recordErrWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (r *recordErrWriter) Write(p []byte) (int, error) {
+	n, err := r.w.Write(p)
+	if err != nil && r.err == nil {
+		r.err = err
+	}
+	return n, err
 }
 
 func hashFile(path string) (string, error) {

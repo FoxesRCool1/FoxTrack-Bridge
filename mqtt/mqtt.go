@@ -86,6 +86,7 @@ type TelemetryData struct {
 	FilamentUsedMM  float64 `json:"filament_used_mm,omitempty"`
 	TotalPrintHours float64 `json:"total_print_hours,omitempty"` // lifetime hours: from printer for Bambu/Klipper, Bridge-tracked otherwise
 	PrinterModel    string  `json:"printer_model,omitempty"`     // e.g. "X1 Carbon", "P1S", "Klipper"
+	ExternalSpool   *AmsSlot `json:"external_spool,omitempty"`   // Bambu vt_tray, Slot = ExternalSlot; nil until reported
 }
 
 type BambuReport struct {
@@ -213,6 +214,10 @@ func copyTelemetry(s *TelemetryData) *TelemetryData {
 	if s.AMS != nil {
 		c.AMS = append([]AmsSlot(nil), s.AMS...)
 	}
+	if s.ExternalSpool != nil {
+		ext := *s.ExternalSpool
+		c.ExternalSpool = &ext
+	}
 	return &c
 }
 
@@ -250,6 +255,7 @@ func SendCommand(printerName, command string) error {
 }
 
 // SendCommandWithArgs sends a command with optional arguments.
+// set_filament takes slot, material and color (see SetFilament).
 // For start prints, accepted args are:
 // - file_name or file: printer-local path or URL
 // - url: explicit URL
@@ -500,37 +506,8 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 		}
 		payload = string(b)
 
-	case "ams_filament_setting":
-		amsId, _ := strconv.Atoi(getStringArg(args, "ams"))
-		trayId, _ := strconv.Atoi(getStringArg(args, "tray"))
-		color := getStringArg(args, "color")
-		if len(color) == 6 {
-			color = color + "FF"
-		} else if len(color) != 8 {
-			color = "FFFFFFFF"
-		}
-		material := strings.ToUpper(getStringArg(args, "material"))
-		if material == "" {
-			material = "PLA"
-		}
-		b, err := json.Marshal(map[string]interface{}{
-			"print": map[string]interface{}{
-				"sequence_id":     nextSequenceID(),
-				"command":         "ams_filament_setting",
-				"ams_id":          amsId,
-				"tray_id":         trayId,
-				"tray_color":      strings.ToUpper(color),
-				"nozzle_temp_min": amsTempMin(material),
-				"nozzle_temp_max": amsTempMax(material),
-				"tray_type":       material,
-				"setting_id":      "",
-				"ctype":           0,
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to build ams_filament_setting payload: %w", err)
-		}
-		payload = string(b)
+	case "set_filament":
+		return setFilamentFromArgs(printerName, serial, args)
 
 	default:
 		return fmt.Errorf("unknown command: %q", command)
@@ -542,7 +519,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 
 	// After filament settings change, the printer won't broadcast an update automatically.
 	// Send a pushall after a short delay so the UI reflects the new colors/material.
-	if command == "ams_filament_setting" || command == "ams_unload" || command == "ams_load" {
+	if command == "ams_unload" || command == "ams_load" {
 		go func() {
 			time.Sleep(400 * time.Millisecond)
 			sendPushall(client, printerName, topic)
@@ -550,32 +527,6 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 	}
 
 	return nil
-}
-
-func amsTempMin(material string) int {
-	switch material {
-	case "PETG", "TPU":
-		return 220
-	case "ABS", "ASA":
-		return 240
-	case "PA", "PC":
-		return 260
-	default:
-		return 190
-	}
-}
-
-func amsTempMax(material string) int {
-	switch material {
-	case "PETG", "TPU":
-		return 250
-	case "ABS", "ASA":
-		return 270
-	case "PA", "PC":
-		return 290
-	default:
-		return 230
-	}
 }
 
 func getStringArg(args map[string]interface{}, key string) string {
@@ -879,7 +830,8 @@ func UrgentChange(prev, curr *TelemetryData) bool {
 	return prev.Status != curr.Status ||
 		prev.FileName != curr.FileName ||
 		prev.Error != curr.Error ||
-		prev.LightOn != curr.LightOn
+		prev.LightOn != curr.LightOn ||
+		filamentChanged(prev, curr)
 }
 
 func makeHandler(p Printer) mqtt.MessageHandler {
@@ -897,11 +849,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 
 		pr := report.Print
 		noteReportedError(p.Name, msg.Payload(), pr.McPrintErrorCode)
-		projectReply := noteProjectFileReply(p.Name, msg.Payload()) // logged in full there
+		projectReply := noteCommandReply(p.Name, msg.Payload()) // logged in full there
 
 		// Ignore messages that carry no print or system data at all.
 		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
-		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0
+		vtTray, hasVtTray := parseVtTray(msg.Payload())
+		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0 || hasVtTray
 		if !hasData {
 			if pr.Msg != 1 && !projectReply && hasPrintObject(msg.Payload()) {
 				log.Printf("[%s] MQTT skip (no usable data) | gcode=%q nozzle=%.1f bed=%.1f | payload: %.120s", p.Name, pr.GcodeState, pr.NozzleTemper, pr.BedTemper, msg.Payload())
@@ -1021,6 +974,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			}
 		}
 
+		trayNow := ""
+		if pr.Ams != nil {
+			trayNow = pr.Ams.TrayNow
+		}
+		extSpool := mergeExternalSpool(prev.ExternalSpool, vtTray, trayNow)
+
 		// Cooling fan: raw 0-15 → 0-100%. Preserve previous when not reported (0).
 		coolingFanPct := prev.CoolingFanPct
 		if pr.CoolingFanSpeed != nil {
@@ -1051,6 +1010,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			TimeRemaining:   timeRemaining,
 			SpeedLevel:      speedLevel,
 			AMS:             amsSlots,
+			ExternalSpool:   extSpool,
 			ActiveExtruder:  prev.ActiveExtruder,
 			CoolingFanPct:   coolingFanPct,
 			TotalPrintHours: totalPrintHours,
@@ -1186,6 +1146,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						McRemainingTime:    timeRemaining,
 						LightOn:            &b,
 						Ams:                relayAms,
+						ExternalSpool:      relayExternalSpool(extSpool),
 					},
 				}
 				stampRelayIdentity(&relayPayload.Print, p, t.PrinterModel)

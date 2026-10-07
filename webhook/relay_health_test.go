@@ -45,7 +45,10 @@ func TestNotePermanentReject_PrinterLimitNamesTheNumbers(t *testing.T) {
 
 	body := []byte(`{"error":"printer_limit_reached","currentCount":3,"maxLimit":3,"plan":"starter"}`)
 	msg := notePermanentReject(RelayURLV2, http.StatusForbidden, body, "X1C")
-	for _, want := range []string{"starter", "3"} {
+	if farm := planName("enterprise"); farm != "Farm" {
+		t.Errorf("plan enterprise shows as %q; FoxTrack calls it Farm", farm)
+	}
+	for _, want := range []string{"Starter", "3"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q should mention %q so the user knows what to change", msg, want)
 		}
@@ -197,5 +200,30 @@ func TestSendSnapshot_RefusesEmptyFrame(t *testing.T) {
 	}
 	if hits != 0 {
 		t.Errorf("an empty frame must not be uploaded, got %d request(s)", hits)
+	}
+}
+
+// The command poll raises a refused token before any printer has reported,
+// and a poll that gets through clears it, but never the relay's printer limit.
+func TestNoteBridgeCommandsReply(t *testing.T) {
+	resetRelayHealth(t)
+
+	NoteBridgeCommandsReply(http.StatusUnauthorized, []byte("Unauthorized"))
+	if p := RelayHealth(); p == nil || p.Kind != "unauthorized" {
+		t.Fatalf("after 401: %+v", p)
+	}
+	NoteBridgeCommandsReply(http.StatusInternalServerError, nil)
+	if RelayHealth() == nil {
+		t.Fatal("a server error cleared the problem")
+	}
+	NoteBridgeCommandsReply(http.StatusOK, nil)
+	if p := RelayHealth(); p != nil {
+		t.Fatalf("after 200: %+v", p)
+	}
+
+	notePermanentReject(RelayURLV2, http.StatusForbidden, []byte(`{"error":"printer_limit_reached","currentCount":5,"maxLimit":5,"plan":"pro"}`), "X1C")
+	NoteBridgeCommandsReply(http.StatusOK, nil)
+	if p := RelayHealth(); p == nil || p.Kind != "printer_limit" {
+		t.Fatalf("a poll cleared the printer limit: %+v", p)
 	}
 }

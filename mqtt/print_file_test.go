@@ -266,9 +266,9 @@ type printHarness struct {
 func setupPrint(t *testing.T, name, serial string, status string) (*printHarness, Printer, string) {
 	t.Helper()
 	h := &printHarness{}
-	prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace := ftpsUpload, publishProject, printerClientConnected, startWait, startPoll, startErrGrace
+	prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace := ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace
 	t.Cleanup(func() {
-		ftpsUpload, publishProject, printerClientConnected, startWait, startPoll, startErrGrace = prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace
+		ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace = prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace
 		RemovePrinterState(name)
 	})
 	ftpsUpload = func(_ context.Context, cfg ftps.Config, _, remote string) error {
@@ -281,7 +281,7 @@ func setupPrint(t *testing.T, name, serial string, status string) (*printHarness
 		}
 		return nil
 	}
-	publishProject = func(_, _ string, payload []byte) error {
+	publishRequestFn = func(_, _ string, payload []byte) error {
 		h.published = payload
 		if h.onPublish != nil {
 			h.onPublish()
@@ -521,7 +521,7 @@ func TestPrintProjectFile_PrinterAnswersFail(t *testing.T) {
 	const name = "pf-answer-fail"
 	h, p, path := setupPrint(t, name, "01P00A123", "idle")
 	t.Cleanup(func() { forgetPrintFileState(name) })
-	noteProjectFileReply(name, []byte(`{"print":{"command":"project_file","result":"fail","reason":"old"}}`))
+	noteCommandReply(name, []byte(`{"print":{"command":"project_file","result":"fail","reason":"old"}}`))
 	h.onPublish = func() {
 		handle := makeHandler(Printer{Name: name, Serial: "01P00A123"})
 		handle(nil, fakeMessage{`{"print":{"command":"project_file","sequence_id":"7","result":"FAIL","reason":"file not found"}}`})
@@ -535,19 +535,40 @@ func TestPrintProjectFile_PrinterAnswersFail(t *testing.T) {
 func TestNoteProjectFileReply(t *testing.T) {
 	const name = "pf-answer"
 	t.Cleanup(func() { forgetPrintFileState(name) })
-	if noteProjectFileReply(name, []byte(`{"print":{"command":"push_status","gcode_state":"IDLE"}}`)) {
+	if noteCommandReply(name, []byte(`{"print":{"command":"push_status","gcode_state":"IDLE"}}`)) {
 		t.Fatal("a status report is not a project_file answer")
 	}
-	if !noteProjectFileReply(name, []byte(`{"print":{"command":"project_file","result":"success"}}`)) {
+	if !noteCommandReply(name, []byte(`{"print":{"command":"project_file","result":"success"}}`)) {
 		t.Fatal("success answer not recognised")
 	}
-	if _, refused := projectFileRefusal(name); refused {
+	if _, refused := commandRefusal(name, "project_file"); refused {
 		t.Fatal("success counted as a refusal")
 	}
-	noteProjectFileReply(name, []byte(`{"print":{"command":"project_file","result":"fail"}}`))
+	noteCommandReply(name, []byte(`{"print":{"command":"project_file","result":"fail"}}`))
 	UpdatePrinterState(name, TelemetryData{Status: "idle"})
 	t.Cleanup(func() { RemovePrinterState(name) })
 	if err := waitForStart(context.Background(), name, ""); err == nil || err.Error() != "The printer refused the print. Check the printer screen." {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// MQTT blipping during the upload is waited out, not a failed job.
+func TestPrintProjectFile_ReconnectsAfterUpload(t *testing.T) {
+	const name = "pf-blip"
+	h, p, path := setupPrint(t, name, "01P00A123", "idle")
+	prevWait, prevPoll := reconnectWait, reconnectPoll
+	reconnectWait, reconnectPoll = time.Second, 5*time.Millisecond
+	t.Cleanup(func() { reconnectWait, reconnectPoll = prevWait, prevPoll })
+	var checks int
+	printerClientConnected = func(string) bool {
+		checks++
+		return checks == 1 || checks > 4 // up for the first check, down for three, then back
+	}
+	h.onPublish = func() { UpdatePrinterState(name, TelemetryData{Status: "PREPARE"}) }
+	if err := PrintProjectFile(context.Background(), p, path, ProjectPrintOptions{AMSMapping: []int{-1, 0}}); err != nil {
+		t.Fatalf("PrintProjectFile: %v", err)
+	}
+	if checks != 5 || h.published == nil {
+		t.Fatalf("checks = %d, published = %v", checks, h.published != nil)
 	}
 }

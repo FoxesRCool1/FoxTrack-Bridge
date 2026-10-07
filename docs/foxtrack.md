@@ -18,7 +18,7 @@ The Bridge works on its own too. Connecting it to FoxTrack is optional.
 
 ## Before you start
 
-- **A FoxTrack Pro or Enterprise workspace.** The Free plan does not include the
+- **A FoxTrack Pro or Farm workspace.** The Free plan does not include the
   Bridge.
 - **Owner or admin access** in that workspace, to create a Bridge token.
 - **A computer that stays on**, on the same network as your printers. A desktop,
@@ -44,8 +44,9 @@ runs, open its dashboard at [http://localhost:8080](http://localhost:8080).
 ### 3. Paste the token into the Bridge
 
 1. In the Bridge dashboard, open **Settings**.
-2. Paste the token into **FoxTrack sync**.
-3. Click **Save**.
+2. Paste the token into **Bridge token**.
+3. Click **Save**. The line under the field says **Connected to FoxTrack.** when
+   the token works, or what to fix when it does not.
 
 ### 4. Add your printers to the Bridge
 
@@ -202,8 +203,9 @@ FoxTrack shows a camera picture in two ways:
 
 ### My printers do not show up in FoxTrack
 
-- Check that the token is in the **FoxTrack sync** field, not in
-  **FoxTrack (legacy)**.
+- Open **Settings** in the Bridge and read the line under **Bridge token**. It
+  says **Connected to FoxTrack.** when the token works. Older installs also show
+  a **FoxTrack (legacy)** field: the token belongs in **Bridge token**, not there.
 - Check that the Bridge is running, and that the printer shows status in the
   Bridge dashboard.
 - If the Bridge dashboard shows a warning that FoxTrack rejected the token, the
@@ -245,6 +247,6 @@ the result under the buttons.
 ### A new printer does not show up, and the Bridge warns about a printer limit
 
 Your FoxTrack plan limits how many Bridge printers a workspace can have (5 on
-Pro, unlimited on Enterprise). Printers you renamed or removed still count while
+Pro, unlimited on Farm). Printers you renamed or removed still count while
 their old device is in FoxTrack. In FoxTrack, open **Printers**, find the old
 device under **Detected on your network, not linked**, and click **Remove**.

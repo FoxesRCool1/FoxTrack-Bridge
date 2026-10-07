@@ -129,6 +129,7 @@ func StartServer(port int) {
 	http.HandleFunc("/api/printers/", handlePrinterByName) // PUT (edit), PATCH, DELETE /api/printers/{id}
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/relay-health", handleRelayHealth)
+	http.HandleFunc("/api/foxtrack/check", handleFoxTrackCheck) // GET: try the saved bridge token once
 	http.HandleFunc("/api/version", handleVersion)
 	http.HandleFunc("/api/update/check", handleUpdateCheck)
 	http.HandleFunc("/api/update/install", handleUpdateInstall)
@@ -404,6 +405,53 @@ func handleRelayHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{"problem": webhook.RelayHealth()})
+}
+
+// handleFoxTrackCheck tries the saved bridge token once against FoxTrack, so
+// Settings can say "Connected" or why not right after a save, before any
+// printer has reported. It makes the same GET the command poll makes (pending
+// commands stay pending until acked, and the answer updates the dashboard's
+// FoxTrack warning the same way). Always 200 {"state", "message"}.
+func handleFoxTrackCheck(w http.ResponseWriter, r *http.Request) {
+	jsonHeaders(w)
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	configMutex.RLock()
+	key := ""
+	if configStore != nil {
+		key = configStore.FoxTrack2APIKey
+	}
+	configMutex.RUnlock()
+	state, msg := "not_set", ""
+	if key != "" {
+		_, err := fetchBridgeCommands(key)
+		state, msg = foxtrackCheckState(err)
+		if err != nil {
+			log.Printf("[foxtrack] token check: %v", err)
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]string{"state": state, "message": msg})
+}
+
+// foxtrackCheckState turns the result of a bridge-commands GET into a state
+// and the plain-English line Settings shows.
+func foxtrackCheckState(err error) (state, message string) {
+	var statusErr *httpStatusError
+	var netErr net.Error
+	switch {
+	case err == nil:
+		return "ok", ""
+	case errors.As(err, &statusErr) && statusErr.code == http.StatusUnauthorized:
+		return "bad_token", "FoxTrack did not accept this token. Copy it again from FoxTrack (Settings > Integrations > FoxTrack Bridge), paste it here and save."
+	case errors.As(err, &statusErr) && statusErr.code == http.StatusForbidden:
+		return "plan", "This FoxTrack workspace's plan does not include the Bridge. It needs the Pro or Farm plan."
+	case errors.As(err, &netErr):
+		return "offline", "The Bridge cannot reach FoxTrack. Check this computer's internet connection."
+	default:
+		return "error", "FoxTrack is not answering right now. The Bridge will keep trying."
+	}
 }
 
 func handleVersion(w http.ResponseWriter, r *http.Request) {
@@ -1155,6 +1203,9 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		syncPrinterConnections(oldCfg, snapshot)
 		if err := config.SaveConfig(snapshot); err != nil {
 			log.Printf("Warning: failed to save config: %v", err)
+		}
+		if oldCfg == nil || oldCfg.FoxTrack2APIKey != snapshot.FoxTrack2APIKey {
+			wakeBridgeCommands()
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:

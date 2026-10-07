@@ -148,6 +148,26 @@ func clearRelayProblem() {
 	}
 }
 
+// NoteBridgeCommandsReply takes FoxTrack's answer to the command poll, so a
+// refused token or plan shows on the dashboard before any printer has
+// reported, and clears as soon as FoxTrack accepts the token again. A printer
+// limit is the relay's alone and stays until the relay clears it.
+func NoteBridgeCommandsReply(status int, body []byte) {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		notePermanentReject(BridgeCommandsURLV2, status, body, "")
+		return
+	}
+	if status < 200 || status >= 300 {
+		return
+	}
+	relayProblemMu.Lock()
+	defer relayProblemMu.Unlock()
+	if relayProblem != nil && (relayProblem.Kind == "unauthorized" || relayProblem.Kind == "plan_limit") {
+		log.Printf("[relay-health] cleared (%s resolved)", relayProblem.Kind)
+		relayProblem = nil
+	}
+}
+
 // isCurrentProject reports whether u belongs to the current FoxTrack project.
 // Health is tracked only for those: the bridge still dual-writes to the legacy
 // project, and a stale legacy token must not raise an alarm about a perfectly
@@ -184,13 +204,13 @@ func notePermanentReject(endpoint string, status int, body []byte, printer strin
 
 	switch {
 	case status == 401:
-		msg := "FoxTrack rejected this bridge token. Generate a new one in FoxTrack under Settings → Bridge, then paste it into Settings here."
+		msg := "FoxTrack did not accept this Bridge token. Generate a new one in FoxTrack under Settings > Integrations > FoxTrack Bridge, then paste it into Settings here."
 		setRelayProblem("unauthorized", msg, printer)
 		return msg
 
 	case status == 403 && payload.Error == "printer_limit_reached":
 		msg := fmt.Sprintf("Your FoxTrack plan (%s) allows %s printers and you already have %d. New printers will not appear until you upgrade or remove one.",
-			payload.Plan, formatLimit(payload.MaxLimit), payload.CurrentCount)
+			planName(payload.Plan), formatLimit(payload.MaxLimit), payload.CurrentCount)
 		setRelayProblem("printer_limit", msg, printer)
 		return msg
 
@@ -199,7 +219,7 @@ func notePermanentReject(endpoint string, status int, body []byte, printer strin
 		// Bridge feature; the receiver forwards its text.
 		msg := strings.TrimSpace(payload.Message)
 		if msg == "" {
-			msg = "FoxTrack Bridge requires a Pro or Enterprise plan. Telemetry is paused until this workspace upgrades."
+			msg = "FoxTrack Bridge needs the Pro or Farm plan. Nothing is sent to FoxTrack until this workspace upgrades."
 		}
 		msg = strings.TrimPrefix(msg, "plan_limit: ")
 		setRelayProblem("plan_limit", msg, printer)
@@ -207,6 +227,18 @@ func notePermanentReject(endpoint string, status int, body []byte, printer strin
 	}
 
 	return ""
+}
+
+// planName is the plan as FoxTrack shows it: the plan value "enterprise" is
+// called Farm there.
+func planName(plan string) string {
+	switch plan {
+	case "enterprise", "lifetime":
+		return "Farm"
+	case "":
+		return "current"
+	}
+	return strings.ToUpper(plan[:1]) + plan[1:]
 }
 
 func formatLimit(max *int) string {
@@ -318,14 +350,15 @@ type RelayPrint struct {
 	BedTargetTemper    float64        `json:"bed_target_temper"`
 	McRemainingTime    int            `json:"mc_remaining_time,omitempty"` // minutes
 	ActiveExtruder     string         `json:"active_extruder,omitempty"`
-	LightOn            *bool          `json:"light_on,omitempty"` // nil when not reported (Klipper)
-	Ams                []RelayAmsSlot `json:"ams,omitempty"`      // nil for Klipper or printers without AMS
+	LightOn            *bool          `json:"light_on,omitempty"`       // nil when not reported (Klipper)
+	Ams                []RelayAmsSlot `json:"ams,omitempty"`            // nil for Klipper or printers without AMS
+	ExternalSpool      *RelayAmsSlot  `json:"external_spool,omitempty"` // Bambu external spool (slot 254); nil until reported
 
 	// What FoxTrack's Print dialog needs to list this printer.
 	PrinterKind        string   `json:"printer_kind,omitempty"`        // "bambu" | "klipper"
 	PrinterModel       string   `json:"printer_model,omitempty"`       // "Bambu Lab P1S", "Klipper"
 	BridgeVersion      string   `json:"bridge_version,omitempty"`      // version.AppVersion
-	BridgeCapabilities []string `json:"bridge_capabilities,omitempty"` // ["print_file"]; empty over Bambu Cloud
+	BridgeCapabilities []string `json:"bridge_capabilities,omitempty"` // ["print_file", "set_filament"]; empty over Bambu Cloud
 }
 
 // Send posts a Payload to the FoxTrack webhook URL.

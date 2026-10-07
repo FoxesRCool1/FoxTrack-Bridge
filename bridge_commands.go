@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -25,7 +26,7 @@ type bridgeCommand struct {
 
 type bridgeCommandResult struct {
 	CommandID    string `json:"command_id"`
-	Status       string `json:"status"`                 // "running" (print_file only), "done" or "failed"
+	Status       string `json:"status"`                  // "running" (print_file only), "done" or "failed"
 	ErrorMessage string `json:"error_message,omitempty"` // driver error message when failed
 }
 
@@ -39,7 +40,10 @@ type bridgeCommandsReply struct {
 }
 
 // httpStatusError is a non-2xx answer from FoxTrack.
-type httpStatusError struct{ code int }
+type httpStatusError struct {
+	code int
+	body []byte // first 2 KB, for FoxTrack's reason
+}
 
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
 
@@ -49,6 +53,17 @@ func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code)
 var errNoMatchingPrinter = errors.New("no matching printer")
 
 var bridgeCommandsHTTPClient = &http.Client{Timeout: 8 * time.Second}
+
+// bridgeCommandsWake cuts the poll's wait short, so a newly saved token is
+// tried at once instead of after up to 5 minutes of refused-token backoff.
+var bridgeCommandsWake = make(chan struct{}, 1)
+
+func wakeBridgeCommands() {
+	select {
+	case bridgeCommandsWake <- struct{}{}:
+	default: // a wake is already pending
+	}
+}
 
 // pollBridgeCommands runs as a single long-lived goroutine. It fetches pending
 // commands from FoxTrack, executes each locally, and POSTs the result back,
@@ -121,7 +136,10 @@ func pollBridgeCommands() {
 			}
 		}()
 
-		time.Sleep(delay)
+		select {
+		case <-time.After(delay):
+		case <-bridgeCommandsWake:
+		}
 	}
 }
 
@@ -134,7 +152,7 @@ func fetchBridgeCommands(apiKey string) (bridgeCommandsReply, error) {
 		return bridgeCommandsReply{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("X-Bridge-Capabilities", "print_file")
+	req.Header.Set("X-Bridge-Capabilities", "print_file,set_filament")
 	req.Header.Set("X-Bridge-Version", version.AppVersion)
 
 	resp, err := bridgeCommandsHTTPClient.Do(req)
@@ -144,8 +162,11 @@ func fetchBridgeCommands(apiKey string) (bridgeCommandsReply, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return bridgeCommandsReply{}, &httpStatusError{code: resp.StatusCode}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		webhook.NoteBridgeCommandsReply(resp.StatusCode, body)
+		return bridgeCommandsReply{}, &httpStatusError{code: resp.StatusCode, body: body}
 	}
+	webhook.NoteBridgeCommandsReply(resp.StatusCode, nil)
 
 	var reply bridgeCommandsReply
 	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {

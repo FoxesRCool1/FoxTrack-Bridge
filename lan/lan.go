@@ -608,6 +608,9 @@ func (c *Controller) sendKlipperCommand(p configpkg.Printer, state *mqttpkg.Tele
 		}
 		startURL := moonrakerURL(p, "/printer/print/start?filename="+url.QueryEscape(filename))
 		_, err := sendJSONRequest(client, "POST", startURL, headers, nil)
+		if err != nil && err.Error() == "HTTP 404" {
+			return fmt.Errorf("The printer has no file with that name. Check the name in the printer's file list.")
+		}
 		return err
 	case "fan_speed":
 		pct := 0

@@ -162,6 +162,13 @@
         .border-danger-50 { border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
         .pcard-sel { border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent); }
 
+        /* Text that must wrap inside its card, even an unbroken URL. */
+        .wrap-any { overflow-wrap: anywhere; min-width: 0; }
+        /* Phones: the top bar keeps the page name, status and buttons. */
+        @media (max-width: 480px) { .crumb-app, #footerVersion { display: none; } }
+        /* The external spool sits apart from the AMS slots. */
+        .ams-ext { border-left: 1px solid var(--border); padding-left: .5rem; margin-left: .25rem; }
+
         #logPanel { transition: transform 250ms cubic-bezier(0.4,0,0.2,1); }
         #assistantPanel { transition: transform 250ms cubic-bezier(0.4,0,0.2,1); }
         #logOutput { scroll-behavior: smooth; }
@@ -178,14 +185,14 @@
 <body class="bg-bg text-text font-sans min-h-screen">
 
 <!-- Toast -->
-<div id="toast" class="fixed top-4 right-4 hidden" style="z-index:200">
+<div id="toast" class="fixed top-4 right-4 hidden" style="z-index:200" role="status" aria-live="polite">
     <div id="toastMsg" class="floating px-4 py-2.5 rounded-lg text-sm border shadow-xl"></div>
 </div>
 
 <!-- Update Modal -->
 <div id="updateModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="floating w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-xl">
-        <h3 class="font-heading text-xl font-medium leading-tight">Update available</h3>
+    <div class="floating w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
+        <h3 id="updateTitle" class="font-heading text-xl font-medium leading-tight">Update available</h3>
         <p class="mt-2 text-sm leading-relaxed text-text-2">FoxTrack Bridge <span id="updateVersionLabel" class="text-text font-medium"></span> is available. Your printers and settings are preserved.</p>
         <p id="updateHowTo" class="mt-3 hidden text-sm leading-relaxed text-text-2">Auto-update isn't available here. If you're running the Docker image, pull the new image; otherwise <a id="updateDownloadLink" href="#" target="_blank" rel="noopener" class="text-link underline underline-offset-4">download the release</a> and replace the binary.</p>
         <div id="updateNotes" class="mt-3 hidden max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-panel p-3 text-xs text-text-2"></div>
@@ -201,8 +208,8 @@
 
 <!-- Stop Confirmation Modal -->
 <div id="stopConfirmModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeStopConfirm()">
-    <div class="floating w-full max-w-xs rounded-lg border border-border bg-surface p-6 shadow-xl">
-        <h3 class="font-heading text-xl font-medium leading-tight">Stop this print?</h3>
+    <div class="floating w-full max-w-xs rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="stopConfirmTitle">
+        <h3 id="stopConfirmTitle" class="font-heading text-xl font-medium leading-tight">Stop this print?</h3>
         <p class="mt-2 mb-5 text-sm leading-relaxed text-text-2">This cancels the current print. It cannot be undone.</p>
         <div class="flex gap-2 justify-end">
             <button onclick="closeStopConfirm()" class="btn-outline btn-lg">Cancel</button>
@@ -211,9 +218,37 @@
     </div>
 </div>
 
+<!-- Set Filament Modal -->
+<div id="filamentModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeFilamentEditor()">
+    <div class="floating w-full max-w-xs rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="filamentTitle">
+        <h3 id="filamentTitle" class="font-heading text-xl font-medium leading-tight">Set filament</h3>
+        <p id="filamentSubtitle" class="mt-1 mb-4 text-sm leading-relaxed text-text-2"></p>
+        <div class="mb-4">
+            <label for="filamentMaterial" class="field-label">Material</label>
+            <div class="select-wrap">
+                <select id="filamentMaterial" class="field" onkeydown="if(event.key==='Enter'){event.preventDefault();saveFilament()}">
+                    <option>PLA</option><option>PLA-CF</option><option>PETG</option><option>PETG-CF</option>
+                    <option>ABS</option><option>ASA</option><option>PC</option><option>PA</option>
+                    <option>PA-CF</option><option>TPU</option><option>PVA</option><option>HIPS</option>
+                </select>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+        </div>
+        <div class="mb-5">
+            <label for="filamentColor" class="field-label">Color</label>
+            <input type="color" id="filamentColor" class="field cursor-pointer" onkeydown="if(event.key==='Enter'){event.preventDefault();saveFilament()}">
+        </div>
+        <p id="filamentError" role="alert" class="hidden mb-4 text-xs leading-relaxed text-danger"></p>
+        <div class="flex gap-2 justify-end">
+            <button type="button" onclick="closeFilamentEditor()" class="btn-outline btn-lg">Cancel</button>
+            <button type="button" id="filamentSaveBtn" onclick="saveFilament()" class="btn-primary btn-lg">Save</button>
+        </div>
+    </div>
+</div>
+
 <!-- Add Printer Modal -->
 <div id="addPrinterModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAddPrinterModal()">
-    <div class="floating w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+    <div class="floating w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-xl max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="printerModalTitle">
         <div class="flex items-start justify-between gap-3 mb-1">
             <h3 id="printerModalTitle" class="font-heading text-xl font-medium leading-tight">Add printer</h3>
             <button onclick="closeAddPrinterModal()" class="btn-icon -mr-2 -mt-1" title="Close" aria-label="Close">
@@ -284,6 +319,33 @@
     </div>
 </div>
 
+<!-- Start Print Modal (Klipper) -->
+<div id="startPrintModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeStartPrint()">
+    <div class="floating w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="startPrintTitle">
+        <h3 id="startPrintTitle" class="font-heading text-xl font-medium leading-tight">Start a print</h3>
+        <p id="startPrintSubtitle" class="mt-1 mb-4 text-sm leading-relaxed text-text-2"></p>
+        <label for="startPrintFile" class="field-label">File name on the printer</label>
+        <input type="text" id="startPrintFile" autocomplete="off" class="field" placeholder="benchy.gcode" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStartPrint()}">
+        <p class="mt-1.5 text-xs leading-relaxed text-text-2">A file already in the printer's gcodes folder, like benchy.gcode. To send a new file, use Print in FoxTrack.</p>
+        <div class="mt-5 flex gap-2 justify-end">
+            <button type="button" onclick="closeStartPrint()" class="btn-outline btn-lg">Cancel</button>
+            <button type="button" id="startPrintBtn" onclick="submitStartPrint()" class="btn-primary btn-lg">Start</button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Modal (reusable; see confirmDialog) -->
+<div id="confirmModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeConfirm(false)">
+    <div class="floating w-full max-w-xs rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+        <h3 id="confirmTitle" class="font-heading text-xl font-medium leading-tight"></h3>
+        <p id="confirmBody" class="mt-2 mb-5 text-sm leading-relaxed text-text-2"></p>
+        <div class="flex gap-2 justify-end">
+            <button type="button" id="confirmCancelBtn" onclick="closeConfirm(false)" class="btn-outline btn-lg">Cancel</button>
+            <button type="button" id="confirmOkBtn" onclick="closeConfirm(true)" class="btn-danger btn-lg"></button>
+        </div>
+    </div>
+</div>
+
 <!-- Sidebar rail -->
 <aside class="fixed left-0 top-0 h-full w-14 bg-bg border-r border-border flex flex-col items-center pt-3 pb-4 z-30">
     <a href="/" class="mb-4 flex items-center justify-center w-10 h-10" title="FoxTrack Bridge">
@@ -306,7 +368,7 @@
         <button onclick="toggleLogPanel()" id="logBtn" class="nav-btn" title="Bridge log" aria-label="Bridge log">
             <i class="fas fa-terminal"></i>
         </button>
-        <a href="https://github.com/FoxnTrain/FoxTrack-Bridge" target="_blank" rel="noopener" class="nav-btn" title="GitHub" aria-label="GitHub">
+        <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge" target="_blank" rel="noopener" class="nav-btn" title="GitHub" aria-label="GitHub">
             <i class="fab fa-github"></i>
         </a>
     </div>
@@ -318,8 +380,8 @@
     <!-- Top bar -->
     <header class="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-bg px-4">
         <nav class="text-sm text-text-2 flex items-center gap-1.5">
-            <span>FoxTrack Bridge</span>
-            <span aria-hidden="true">/</span>
+            <span class="crumb-app">FoxTrack Bridge</span>
+            <span class="crumb-app" aria-hidden="true">/</span>
             <span id="breadcrumb" class="text-text">Printers</span>
         </nav>
         <div class="ml-auto flex items-center gap-3">
@@ -373,7 +435,7 @@
         <div class="rounded-lg border border-danger-50 bg-panel px-4 py-3 flex items-start gap-3">
             <i class="fas fa-circle-exclamation text-danger mt-0.5 shrink-0"></i>
             <div class="min-w-0">
-                <p class="text-sm font-medium leading-tight">FoxTrack is not accepting this bridge's data</p>
+                <p class="text-sm font-medium leading-tight">FoxTrack is not accepting the Bridge's data</p>
                 <p id="relayHealthMsg" class="mt-1 text-xs leading-relaxed text-text-2"></p>
                 <p id="relayHealthSince" class="mt-1 text-xs text-text-2"></p>
             </div>
@@ -383,7 +445,7 @@
 
     <!-- View: Printers -->
     <div id="view-printers" class="px-5 pt-3 pb-5">
-        <div class="flex items-center justify-between gap-3 mb-3 min-h-[2rem]">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3 min-h-[2rem]">
             <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">
                 Connected printers
                 <span id="printerCount" class="font-sans inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[11px] text-text-2 tabular-nums">0</span>
@@ -423,18 +485,24 @@
         <div class="max-w-2xl space-y-3">
             <section class="rounded-lg border border-border bg-panel p-5">
                 <div class="flex items-start justify-between gap-3 mb-1">
-                    <h2 class="font-heading text-xl font-medium leading-tight">FoxTrack sync <span class="font-sans text-xs text-text-2">optional</span></h2>
-                    <a href="https://foxtrack.studio/settings" target="_blank" rel="noopener" class="text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0 mt-1">
-                        FoxTrack settings <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
+                    <h2 class="font-heading text-xl font-medium leading-tight">FoxTrack <span class="font-sans text-xs text-text-2">optional</span></h2>
+                    <a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0 mt-1">
+                        Open FoxTrack <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
                     </a>
                 </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">Create a Bridge token in FoxTrack under Settings &gt; Integrations &gt; FoxTrack Bridge, and paste it into FoxTrack sync. Leave blank to use the Bridge locally only. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Setup guide</a></p>
-                <label for="foxtrack2ApiKey" class="field-label">FoxTrack sync</label>
-                <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field mb-4" placeholder="Paste API key (optional)">
-                <label for="apiKey" class="field-label">FoxTrack (legacy)</label>
-                <input type="password" id="apiKey" autocomplete="off" class="field" placeholder="Paste API key (optional)">
+                <p class="text-sm leading-relaxed text-text-2 mb-4">Send live status, print history and snapshots to FoxTrack, and print from FoxTrack. Needs a FoxTrack Pro or Farm plan. In FoxTrack, open Settings &gt; Integrations &gt; FoxTrack Bridge, click Generate token, copy it, and paste it here. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Setup guide</a></p>
+                <label for="foxtrack2ApiKey" class="field-label">Bridge token</label>
+                <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field" placeholder="Paste the token (starts with ftb_)">
+                <p id="foxtrackStatus" class="hidden mt-2 text-xs flex items-center gap-1.5" role="status" aria-live="polite">
+                    <span id="foxtrackStatusDot" class="w-1.5 h-1.5 rounded-full shrink-0"></span>
+                    <span id="foxtrackStatusText" class="min-w-0"></span>
+                </p>
+                <div id="legacyKeyRow" class="hidden mt-4">
+                    <label for="apiKey" class="field-label">FoxTrack (legacy)</label>
+                    <input type="password" id="apiKey" autocomplete="off" class="field" placeholder="Paste API key (optional)">
+                </div>
                 <div class="mt-4 flex justify-end">
-                    <button onclick="saveApiKeys()" class="btn-primary btn-lg">Save</button>
+                    <button id="saveApiKeysBtn" onclick="saveApiKeys()" class="btn-primary btn-lg">Save</button>
                 </div>
             </section>
             <section id="cloudCard" class="rounded-lg border border-border bg-panel p-5">
@@ -585,7 +653,7 @@
 </div>
 
 <!-- Log Panel -->
-<div id="logPanel" class="floating fixed bottom-0 z-30 bg-surface border-t border-border flex flex-col translate-y-full" style="height:40vh;left:3.5rem;right:0">
+<div id="logPanel" class="floating fixed bottom-0 z-30 bg-surface border-t border-border flex flex-col translate-y-full" style="height:40vh;left:3.5rem;right:0" inert>
     <div class="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
         <span class="text-xs font-medium text-text-2 flex items-center gap-2">
             <i class="fas fa-terminal"></i> Bridge log
@@ -599,7 +667,7 @@
 </div>
 
 <!-- Assistant panel -->
-<div id="assistantPanel" class="floating fixed top-0 bottom-0 right-0 z-40 w-full sm:w-[26rem] bg-surface border-l border-border flex flex-col translate-x-full">
+<div id="assistantPanel" class="floating fixed top-0 bottom-0 right-0 z-40 w-full sm:w-[26rem] bg-surface border-l border-border flex flex-col translate-x-full" inert>
     <div class="flex items-center justify-between px-4 h-14 border-b border-border shrink-0">
         <span class="text-sm font-medium flex items-center gap-2">
             <i class="fas fa-sparkles text-text-2"></i> Assistant
@@ -635,6 +703,8 @@ let autoUpdateEnabled = false;
 const pendingLightTarget = {}; // id -> expected light_on boolean; cleared when poll confirms state
 const pendingFanTarget = {}; // id -> expected cooling_fan_pct (0–100); cleared when poll confirms
 const cameraLoading = new Set(); // enc values whose camera stream is still loading
+const cameraTimers = new Map(); // enc -> timer that gives up on a stream that never starts
+function clearCameraTimer(enc) { clearTimeout(cameraTimers.get(enc)); cameraTimers.delete(enc); }
 const printerCardEls = new Map(); // id -> { el, hooks }: keyed patch rendering state
 let forceFullCardRefresh = false; // set true to force a full content rebuild of every card on the next renderPrinters() pass
 
@@ -711,6 +781,7 @@ function printerTypeLabel(p) {
     return (p && p.serial && (p.lan_code || p.lan_code_set) && !p.moonraker_url) ? 'Bambu' : 'Klipper';
 }
 
+let toastTimer = null;
 function toast(msg, type = 'success') {
     const el = document.getElementById('toastMsg');
     const wrap = document.getElementById('toast');
@@ -722,21 +793,89 @@ function toast(msg, type = 'success') {
     el.className = 'floating px-4 py-2.5 rounded-lg text-sm border shadow-xl ' + (colors[type] || colors.info);
     el.textContent = msg;
     wrap.classList.remove('hidden');
-    setTimeout(() => wrap.classList.add('hidden'), 3500);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => wrap.classList.add('hidden'), type === 'error' ? 8000 : 3500);
 }
 
 async function apiFetch(url, options = {}) {
-    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+    let res;
+    try { res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options }); }
+    catch (_) { throw new Error("Can't reach the Bridge. Is it still running?"); }
     if (!res.ok) {
-        let errText = 'HTTP ' + res.status;
-        try { const b = await res.json(); if (b && b.error) errText = b.error; } catch (_) {}
-        throw new Error(errText);
+        // The body is JSON ({"error"}) from most handlers and plain text from
+        // http.Error; read it once and take whichever it is.
+        let errText = '';
+        try {
+            const raw = (await res.text()).trim();
+            try { const b = JSON.parse(raw); if (b && b.error) errText = b.error; }
+            catch (_) { if (raw && raw[0] !== '<') errText = raw.slice(0, 200); }
+        } catch (_) {}
+        throw new Error(errText || 'HTTP ' + res.status);
     }
     if (res.status === 204) return null;
     const text = await res.text();
     if (!text) return null;
     try { return JSON.parse(text); } catch (_) { return text; }
 }
+
+// Rewrites the Go-style errors the Bridge passes along into plain English.
+function friendlyError(msg) {
+    const m = String(msg || '');
+    if (/is not connected|no active MQTT session/i.test(m)) return 'Bridge is not connected to this printer right now. Check that it is on and on the same network.';
+    if (/context deadline exceeded|i\/o timeout|connection refused|no route to host|dial tcp|Get "http/i.test(m)) return "Can't reach the printer. Check that it is on and that the address is right.";
+    return m;
+}
+
+// Dialogs. openModal remembers what had focus so hideModal can give it back.
+const _modalOpener = {};
+function openModal(id) {
+    const m = document.getElementById(id);
+    if (!m) return;
+    if (m.classList.contains('hidden')) _modalOpener[id] = document.activeElement;
+    m.classList.remove('hidden');
+}
+function hideModal(id) {
+    const m = document.getElementById(id);
+    if (m) m.classList.add('hidden');
+    const o = _modalOpener[id];
+    delete _modalOpener[id];
+    if (o && o.isConnected && typeof o.focus === 'function') { try { o.focus(); } catch (_) {} }
+}
+
+// Styled replacement for confirm(). Resolves true when the danger button is hit.
+let _confirmResolve = null;
+function confirmDialog({ title, body, confirmLabel }) {
+    if (_confirmResolve) closeConfirm(false);
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmBody').textContent = body;
+    document.getElementById('confirmOkBtn').textContent = confirmLabel;
+    openModal('confirmModal');
+    document.getElementById('confirmCancelBtn').focus();
+    return new Promise(resolve => { _confirmResolve = resolve; });
+}
+function closeConfirm(result) {
+    const resolve = _confirmResolve;
+    _confirmResolve = null;
+    hideModal('confirmModal');
+    if (resolve) resolve(result);
+}
+
+// Escape closes the topmost open dialog.
+const MODAL_CLOSERS = [
+    ['confirmModal', () => closeConfirm(false)],
+    ['startPrintModal', () => closeStartPrint()],
+    ['filamentModal', () => closeFilamentEditor()],
+    ['stopConfirmModal', () => closeStopConfirm()],
+    ['addPrinterModal', () => closeAddPrinterModal()],
+    ['updateModal', () => dismissUpdateModal()],
+];
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    for (const [id, close] of MODAL_CLOSERS) {
+        const m = document.getElementById(id);
+        if (m && !m.classList.contains('hidden')) { e.preventDefault(); close(); return; }
+    }
+});
 
 function statusMeta(status) {
     // Status colour is the one place a hue is allowed: accent for activity,
@@ -792,6 +931,8 @@ function showView(view) {
     currentView = view;
     if (removeMode) exitRemoveMode();
     if (view === 'history') refreshGlobalHistory();
+    if (view === 'printers') renderPrinters(); // the empty state depends on Settings
+    if (view === 'settings') { if (foxtrackTokenSet) checkFoxTrack(); else setFoxTrackStatus('', '', ''); }
 }
 
 function toggleAdvancedMode() {
@@ -820,13 +961,17 @@ function applyDevBuildState(isDev) {
 }
 
 async function toggleAutoUpdate() {
-    applyAutoUpdateState(!autoUpdateEnabled);
+    const previous = autoUpdateEnabled;
+    applyAutoUpdateState(!previous);
     try {
         // Flipping the switch is an explicit statement about auto_update, so it
         // is always sent, unlike a Settings save, which leaves it alone when
         // the dashboard has not managed to read the stored value yet.
         await apiFetch('/api/config', { method:'POST', body:JSON.stringify(buildSettingsPayload({ includeAutoUpdate: true })) });
-    } catch (e) { toast('Failed to save: ' + e.message, 'error'); }
+    } catch (e) {
+        applyAutoUpdateState(previous);
+        toast("Couldn't save the setting: " + e.message, 'error');
+    }
 }
 
 async function toggleLightEncoded(enc) {
@@ -842,7 +987,7 @@ async function toggleLightEncoded(enc) {
         await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/toggle_light', { method:'POST', body:'{}' });
         pollStatus();
     } catch (e) {
-        toast('Light failed: ' + e.message, 'error');
+        toast("Couldn't switch the light: " + friendlyError(e.message), 'error');
         delete pendingLightTarget[id];
         renderPrinters();
     }
@@ -871,28 +1016,45 @@ function setBridgeStatus(online) {
 
 // The server never returns stored secrets, only *_set flags. Show a masked
 // placeholder when a key is saved; leaving the field blank on save keeps it.
-function updateSecretPlaceholder(id, isSet) {
+function updateSecretPlaceholder(id, isSet, setText = '••••••••  saved, leave blank to keep', unsetText = 'Paste API key (optional)') {
     const el = document.getElementById(id);
-    if (el) el.placeholder = isSet ? '••••••••  saved, leave blank to keep' : 'Paste API key (optional)';
+    if (el) el.placeholder = isSet ? setText : unsetText;
 }
 
 // True once /api/config has been read successfully at least once. Until then the
 // local settings state is a default, not the user's; see buildSettingsPayload.
 let configEverLoaded = false;
+// True when the last /api/config read failed. While the config has never loaded
+// the printer list must not claim "no printers" or offer Add printer.
+let configLoadFailed = false;
+let foxtrackTokenSet = false;   // a Bridge token is saved
+let legacyKeySet = false;       // an old-style FoxTrack API key is saved
 
 async function loadConfig() {
     try {
         const cfg = await apiFetch('/api/config');
-        updateSecretPlaceholder('apiKey', !!(cfg && cfg.api_key_set));
-        updateSecretPlaceholder('foxtrack2ApiKey', !!(cfg && cfg.foxtrack2_api_key_set));
+        foxtrackTokenSet = !!(cfg && cfg.foxtrack2_api_key_set);
+        legacyKeySet = !!(cfg && cfg.api_key_set);
+        updateSecretPlaceholder('apiKey', legacyKeySet);
+        updateSecretPlaceholder('foxtrack2ApiKey', foxtrackTokenSet, 'Saved. Paste a new token to replace it.', 'Paste the token (starts with ftb_)');
+        // The legacy field is only for people who already have one saved.
+        const legacyRow = document.getElementById('legacyKeyRow');
+        if (legacyRow) legacyRow.classList.toggle('hidden', !legacyKeySet);
         configuredPrinters = (cfg && cfg.printers) ? cfg.printers : [];
         // Reflect the stored value in both directions. Only ever setting it to
         // true left the toggle stuck on after auto-update was switched off
         // elsewhere. auto_update is omitted from the response when false.
         applyAutoUpdateState(!!(cfg && cfg.auto_update));
         configEverLoaded = true;
+        configLoadFailed = false;
         setBridgeStatus(true);
-    } catch (_) { setBridgeStatus(false); }
+    } catch (_) { configLoadFailed = true; setBridgeStatus(false); }
+}
+
+async function retryLoadConfig() {
+    await loadConfig();
+    renderPrinters();
+    pollStatus();
 }
 
 // Settings saves must never send the printer array: an empty local state
@@ -912,16 +1074,56 @@ function buildSettingsPayload({ includeAutoUpdate = configEverLoaded } = {}) {
     return payload;
 }
 
+// Shows the result of GET /api/foxtrack/check under the token field. Empty text hides it.
+let foxtrackCheckSeq = 0;
+function setFoxTrackStatus(dotCls, textCls, text) {
+    const wrap = document.getElementById('foxtrackStatus');
+    if (!wrap) return;
+    wrap.classList.toggle('hidden', !text);
+    document.getElementById('foxtrackStatusDot').className = 'w-1.5 h-1.5 rounded-full shrink-0 ' + dotCls;
+    const t = document.getElementById('foxtrackStatusText');
+    t.className = 'min-w-0 ' + textCls;
+    t.textContent = text;
+}
+
+// Resolves to the check's state ("ok", "bad_token", ...) or null when the
+// check did not run (an older Bridge has no such endpoint; the line stays hidden).
+async function checkFoxTrack() {
+    const seq = ++foxtrackCheckSeq;
+    setFoxTrackStatus('bg-text-2 pulse', 'text-text-2', 'Checking…');
+    let r = null;
+    try { r = await apiFetch('/api/foxtrack/check'); } catch (_) {}
+    if (seq !== foxtrackCheckSeq) return null; // a newer check owns the line
+    const state = (r && typeof r === 'object' && r.state) || '';
+    if (state === 'ok') setFoxTrackStatus('bg-brand', 'text-brand', 'Connected to FoxTrack.');
+    else if (state && state !== 'not_set') {
+        const warn = state === 'offline';
+        setFoxTrackStatus(warn ? 'bg-warning' : 'bg-danger', warn ? 'text-warning' : 'text-danger', r.message || "Couldn't check the FoxTrack connection.");
+    } else setFoxTrackStatus('', '', '');
+    return state && state !== 'not_set' ? state : null;
+}
+
 async function saveApiKeys() {
+    const btn = document.getElementById('saveApiKeysBtn');
+    const typedToken = document.getElementById('foxtrack2ApiKey').value.trim();
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Save'; }
     try {
-        await apiFetch('/api/config', { method:'POST', body:JSON.stringify(buildSettingsPayload()) });
-        // Both typed keys (if any) are now stored server-side; clear the
-        // inputs and re-fetch so the placeholders reflect the saved state.
-        document.getElementById('apiKey').value = '';
-        document.getElementById('foxtrack2ApiKey').value = '';
-        await loadConfig();
-        toast('Settings saved');
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+        try {
+            await apiFetch('/api/config', { method:'POST', body:JSON.stringify(buildSettingsPayload()) });
+            // Both typed keys (if any) are now stored server-side; clear the
+            // inputs and re-fetch so the placeholders reflect the saved state.
+            document.getElementById('apiKey').value = '';
+            document.getElementById('foxtrack2ApiKey').value = '';
+            await loadConfig();
+        } catch (e) { toast("Couldn't save settings: " + e.message, 'error'); return; }
+        let state = null;
+        if (foxtrackTokenSet || typedToken) state = await checkFoxTrack();
+        else setFoxTrackStatus('', '', '');
+        // A bad token is explained by the status line, not celebrated by a toast.
+        if (!typedToken || state === 'ok' || state === null) toast('Saved');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+    }
 }
 
 async function saveLegacyApiKey() { await saveApiKeys(); }
@@ -969,7 +1171,7 @@ function renderCloudStatus() {
         }
         let detail = m.detail || '';
         if (s.token_expired) detail = 'The Bambu sign-in has expired. Unlink and sign in again to reconnect cloud printers.';
-        else if (m.state === 'off' && n === 0) detail = 'Add a printer with the type "Bambu Lab (cloud)" to start the connection.';
+        else if (m.state === 'off' && n === 0) detail = 'Add a printer with the type "Bambu Lab (cloud, experimental)" to start the connection.';
         const detailEl = document.getElementById('cloudDetail');
         if (detailEl) { detailEl.textContent = detail; detailEl.classList.toggle('hidden', !detail); }
         const retry = document.getElementById('cloudRetryBtn');
@@ -1065,13 +1267,18 @@ async function cloudUseToken() {
 }
 
 async function cloudUnlink() {
-    if (!confirm('Unlink the Bambu account? Cloud printers stay in the list but stop updating until you sign in again.')) return;
+    const ok = await confirmDialog({
+        title: 'Unlink the Bambu account?',
+        body: 'Cloud printers stay in the list but stop updating until you sign in again.',
+        confirmLabel: 'Unlink',
+    });
+    if (!ok) return;
     try {
         await apiFetch('/api/cloud/unlink', { method:'POST', body:'{}' });
         toast('Bambu account unlinked', 'info');
         await loadCloudStatus();
         pollStatus();
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+    } catch (e) { toast("Couldn't unlink the account: " + e.message, 'error'); }
 }
 
 async function cloudRetry() {
@@ -1085,7 +1292,7 @@ async function cloudRetry() {
 // ── Add Printer Modal ─────────────────────────────────────────────────────────
 
 function openAddPrinterModal() {
-    document.getElementById('addPrinterModal').classList.remove('hidden');
+    openModal('addPrinterModal');
 }
 
 // Id of the printer the modal is editing, or null when it is adding one. Edit
@@ -1120,11 +1327,11 @@ function openEditPrinterModal(id) {
     if (printer.api_key_set) document.getElementById('pKlipperKey').placeholder = 'Saved. Leave blank to keep it';
     const btn = document.getElementById('connectBtn');
     if (btn) btn.textContent = 'Save';
-    document.getElementById('addPrinterModal').classList.remove('hidden');
+    openModal('addPrinterModal');
 }
 
 function closeAddPrinterModal() {
-    document.getElementById('addPrinterModal').classList.add('hidden');
+    hideModal('addPrinterModal');
     editingPrinterId = null;
     document.getElementById('printerModalTitle').textContent = 'Add printer';
     document.getElementById('printerModalSubtitle').textContent = 'Connect a printer to FoxTrack Bridge.';
@@ -1221,17 +1428,20 @@ async function testConnection() {
     const target = brand === 'klipper' ? moonrakerUrl : ip;
     if (!target) { showAddPrinterError(brand==='klipper' ? 'Enter a Moonraker URL first' : 'Enter an IP address first'); return; }
     if (btn) { btn.disabled=true; btn.textContent='Testing…'; }
-    result.className = 'text-xs text-text-2'; result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing...'; result.classList.remove('hidden');
+    result.className = 'text-xs text-text-2'; result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing…'; result.title = ''; result.classList.remove('hidden');
     try {
         const data = await apiFetch('/api/test', { method:'POST', body:JSON.stringify({ ip, moonraker_url:moonrakerUrl }) });
         if (data && data.reachable) {
             result.className='text-xs text-brand'; result.innerHTML='<i class="fas fa-check-circle mr-1"></i> Reachable';
         } else {
-            const hint = data && data.detail ? ': ' + data.detail : '';
-            result.className='text-xs text-danger'; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> Unreachable' + escHtml(hint);
+            // detail is a raw Go error; show the plain version and keep the raw one in the tooltip.
+            const raw = data && data.detail ? data.detail : '';
+            let msg = friendlyError(raw);
+            if (!raw || msg === raw) msg = "Can't reach the printer. Check that it is on and that the address is right.";
+            result.className='text-xs text-danger'; result.title = raw; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> ' + escHtml(msg);
         }
     } catch (e) {
-        result.className='text-xs text-danger'; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> ' + escHtml(e.message);
+        result.className='text-xs text-danger'; result.title=''; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> ' + escHtml(friendlyError(e.message));
     } finally {
         if (btn) { btn.disabled=false; btn.textContent='Test connection'; }
     }
@@ -1296,11 +1506,11 @@ async function addPrinter() {
     try {
         await apiFetch('/api/printers', { method:'POST', body:JSON.stringify(payload) });
         closeAddPrinterModal();
-        toast('Connecting to ' + name + '...', 'info');
+        toast('Connecting to ' + name + '…', 'info');
         await loadConfig();
         await pollStatus();
     } catch (e) {
-        showAddPrinterError('Failed: ' + e.message);
+        showAddPrinterError("Couldn't add the printer: " + e.message);
         if (btn) { btn.textContent='Connect'; btn.disabled=false; }
     }
 }
@@ -1324,7 +1534,7 @@ async function savePrinterEdit(id, brand, fields) {
         await loadConfig();
         await pollStatus();
     } catch (e) {
-        showAddPrinterError('Failed: ' + e.message);
+        showAddPrinterError("Couldn't save the printer: " + e.message);
         if (btn) { btn.textContent='Save'; btn.disabled=false; }
     }
 }
@@ -1370,12 +1580,19 @@ function togglePrinterSelectionEncoded(enc) {
 function updateRemoveCount() {
     const n = selectedForRemoval.size;
     const btn = document.getElementById('confirmRemoveBtn');
-    if (btn) { btn.textContent = n > 0 ? 'Remove ' + n + ' Printer' + (n!==1?'s':'') : 'Remove selected'; btn.disabled = n === 0; }
+    if (btn) { btn.textContent = n > 0 ? 'Remove ' + n + ' printer' + (n!==1?'s':'') : 'Remove selected'; btn.disabled = n === 0; }
 }
 
 async function confirmBulkRemove() {
     const ids = Array.from(selectedForRemoval);
-    if (!ids.length || !confirm('Remove ' + ids.length + ' printer' + (ids.length!==1?'s':'') + '?')) return;
+    if (!ids.length) return;
+    const many = ids.length !== 1;
+    const ok = await confirmDialog({
+        title: 'Remove ' + ids.length + ' printer' + (many ? 's' : '') + '?',
+        body: 'The Bridge stops tracking ' + (many ? 'these printers' : 'this printer') + '. You can add ' + (many ? 'them' : 'it') + ' again later.',
+        confirmLabel: 'Remove ' + ids.length + ' printer' + (many ? 's' : ''),
+    });
+    if (!ok) return;
     // One printer that cannot be removed must not abandon the rest of the batch,
     // so each delete is awaited on its own and failures are counted, not thrown.
     let removed = 0;
@@ -1394,7 +1611,7 @@ async function confirmBulkRemove() {
     } else if (removed > 0) {
         toast(removed + ' of ' + ids.length + ' removed: ' + lastError, 'error');
     } else {
-        toast('Failed: ' + lastError, 'error');
+        toast("Couldn't remove the printer" + (many ? 's' : '') + ': ' + lastError, 'error');
     }
 }
 
@@ -1413,29 +1630,170 @@ function sendControlEncoded(enc,cmd,payload) { sendControl(decodePrinterId(enc),
 function confirmStopEncoded(enc) { confirmStop(decodePrinterId(enc)); }
 function startPrintEncoded(enc) { startPrint(decodePrinterId(enc)); }
 
+const CONTROL_DONE = { pause:'Print paused', resume:'Print resumed', stop:'Print stopped', start:'Print started', print_speed:'Speed changed', toggle_light:'Light switched' };
+
+// Resolves true when the printer took the command (failures are toasted here).
 async function sendControl(id, command, payload) {
     try {
         await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/' + encodeURIComponent(command), { method:'POST', body:JSON.stringify(payload||{}) });
-        toast(command + ' sent');
+        toast(CONTROL_DONE[command] || 'Command sent');
         setTimeout(pollStatus, 800);
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+        return true;
+    } catch (e) { toast("Couldn't send the command: " + friendlyError(e.message), 'error'); return false; }
 }
 
 let _pendingStopId = null;
 function confirmStop(id) {
     _pendingStopId = id;
-    document.getElementById('stopConfirmModal').classList.remove('hidden');
+    openModal('stopConfirmModal');
 }
 function closeStopConfirm() {
     _pendingStopId = null;
-    document.getElementById('stopConfirmModal').classList.add('hidden');
+    hideModal('stopConfirmModal');
 }
 function executeStop() {
     if (_pendingStopId) sendControl(_pendingStopId, 'stop');
     closeStopConfirm();
 }
-function startPrint(id) { const f=prompt('Enter file URL or path:'); if(f) sendControl(id,'start',{file_name:f}); }
+let _startPrintId = null;
+function startPrint(id) {
+    _startPrintId = id;
+    const input = document.getElementById('startPrintFile');
+    input.value = '';
+    document.getElementById('startPrintSubtitle').textContent = 'On ' + printerNameForId(id);
+    const btn = document.getElementById('startPrintBtn');
+    btn.disabled = false;
+    btn.textContent = 'Start';
+    openModal('startPrintModal');
+    input.focus();
+}
+function closeStartPrint() {
+    _startPrintId = null;
+    hideModal('startPrintModal');
+}
+async function submitStartPrint() {
+    const id = _startPrintId;
+    const file = document.getElementById('startPrintFile').value.trim();
+    if (!id || !file) return;
+    const btn = document.getElementById('startPrintBtn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Start';
+    const ok = await sendControl(id, 'start', { file_name: file });
+    if (_startPrintId !== id) return; // closed while waiting
+    if (ok) closeStartPrint();
+    else { btn.disabled = false; btn.textContent = 'Start'; }
+}
 
+// ── Filament editor (Bambu LAN: AMS slots and the external spool) ─────────────
+
+const EXTERNAL_SPOOL_SLOT = 254;
+let _filamentTarget = null; // { id, slot }
+
+function filamentSlotName(slot) {
+    return slot === EXTERNAL_SPOOL_SLOT ? 'External spool' : 'AMS slot ' + (slot + 1);
+}
+
+// The Bridge only accepts the listed materials. Pick the option that matches the
+// printer's value (any case), else the longest option it starts with ("PETG HF"
+// is PETG, "PLA-S" is PLA), else PLA.
+function pickMaterial(current) {
+    const opts = Array.from(document.getElementById('filamentMaterial').options).map(o => o.value);
+    const m = String(current || '').trim().toUpperCase();
+    const exact = opts.find(o => o.toUpperCase() === m);
+    if (exact) return exact;
+    const prefixes = opts.filter(o => m.startsWith(o.toUpperCase())).sort((a, b) => b.length - a.length);
+    return prefixes[0] || 'PLA';
+}
+
+function showFilamentError(msg) {
+    const el = document.getElementById('filamentError');
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+}
+
+function openFilamentEditorEncoded(enc, slot) {
+    const id = decodePrinterId(enc);
+    const live = liveStatus[id] || {};
+    const cur = slot === EXTERNAL_SPOOL_SLOT ? live.external_spool : (live.ams || []).find(s => s.slot === slot);
+    const material = document.getElementById('filamentMaterial');
+    material.value = pickMaterial(cur && cur.material);
+    document.getElementById('filamentColor').value = (cur && /^[0-9a-f]{6}$/i.test(cur.color)) ? '#' + cur.color : '#ffffff';
+    document.getElementById('filamentSubtitle').textContent = filamentSlotName(slot) + ' on ' + printerNameForId(id);
+    showFilamentError('');
+    document.getElementById('filamentSaveBtn').disabled = false;
+    document.getElementById('filamentSaveBtn').textContent = 'Save';
+    _filamentTarget = { id, slot };
+    openModal('filamentModal');
+    material.focus();
+}
+
+function closeFilamentEditor() {
+    _filamentTarget = null;
+    hideModal('filamentModal');
+}
+
+async function saveFilament() {
+    const t = _filamentTarget;
+    if (!t) return;
+    const btn = document.getElementById('filamentSaveBtn');
+    if (btn.disabled) return; // Enter pressed while a save is running
+    const material = document.getElementById('filamentMaterial').value;
+    const color = document.getElementById('filamentColor').value.slice(1).toUpperCase();
+    showFilamentError('');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Save';
+    try {
+        // Bridge waits for the printer to confirm, so this can take several seconds.
+        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(t.id)) + '/set_filament', { method:'POST', body:JSON.stringify({ slot: t.slot, material, color }) });
+        if (_filamentTarget === t) closeFilamentEditor();
+        toast(filamentSlotName(t.slot) + ' set to ' + material);
+        pollStatus();
+    } catch (e) {
+        // The error stays in the dialog so the user can fix it and save again.
+        if (_filamentTarget === t) {
+            showFilamentError(friendlyError(e.message));
+            btn.disabled = false;
+            btn.textContent = 'Save';
+        }
+    }
+}
+
+
+// What the printer list shows when it has no cards: a failed or pending config
+// load (never offer Add printer then, see CLAUDE.md), a first-run guide, or the
+// plain empty state.
+function emptyPrintersHtml() {
+    if (!configEverLoaded) {
+        return configLoadFailed
+            ? '<div class="col-span-full rounded-lg border border-dashed border-border p-8 text-center">'
+              + '<p class="text-text-2 text-sm">Can\'t load your printers. The Bridge may still be starting.</p>'
+              + '<button onclick="retryLoadConfig()" class="mt-3 btn-outline">Retry</button>'
+              + '</div>'
+            : '<div class="col-span-full p-8 text-center"><p class="text-text-2 text-sm">Loading…</p></div>';
+    }
+    if (foxtrackTokenSet || legacyKeySet) {
+        return '<div class="col-span-full rounded-lg border border-dashed border-border p-8 text-center">'
+            + '<p class="text-text-2 text-sm">No printers connected.</p>'
+            + '<button onclick="openAddPrinterModal()" class="mt-3 btn-outline">Add printer</button>'
+            + '</div>';
+    }
+    return '<div class="col-span-full rounded-lg border border-border bg-panel p-5">'
+        + '<h3 class="font-heading text-xl font-medium leading-tight">Get started</h3>'
+        + '<div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">'
+        + '<div class="rounded-md border border-border p-4 flex flex-col items-start">'
+        + '<p class="text-sm font-medium">1. Add a printer</p>'
+        + '<p class="mt-1 mb-3 text-xs leading-relaxed text-text-2">Bambu Lab or Klipper, on the same network as the Bridge.</p>'
+        + '<button onclick="openAddPrinterModal()" class="btn-outline">Add printer</button>'
+        + '</div>'
+        + '<div class="rounded-md border border-border p-4 flex flex-col items-start">'
+        + '<p class="text-sm font-medium">2. Connect FoxTrack (optional)</p>'
+        + '<p class="mt-1 mb-3 text-xs leading-relaxed text-text-2">See your printers in FoxTrack and print from it. Needs a Pro or Farm plan.</p>'
+        + '<button onclick="showView(\'settings\')" class="btn-outline">Connect FoxTrack</button>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+}
 
 function renderPrinters() {
     const list = document.getElementById('printersList');
@@ -1457,14 +1815,19 @@ function renderPrinters() {
         if (confirmed) delete pendingFanTarget[id];
     }
 
-    if (configuredPrinters.length === 0) {
+    // Until the config has loaded there is nothing to add to or remove from.
+    const nm = document.getElementById('normalModeButtons');
+    if (!configEverLoaded) nm.classList.add('hidden');
+    else if (!removeMode) nm.classList.remove('hidden');
+
+    if (!configEverLoaded || configuredPrinters.length === 0) {
         printerCardEls.clear();
-        list.innerHTML = '<div class="col-span-full rounded-lg border border-dashed border-border p-8 text-center">'
-            + '<p class="text-text-2 text-sm">No printers connected.</p>'
-            + '<button onclick="openAddPrinterModal()" class="mt-3 btn-outline">Add printer</button>'
-            + '</div>';
+        const html = emptyPrintersHtml();
+        // Skip identical rewrites so a focused button keeps focus across polls.
+        if (list._emptyHtml !== html) { list.innerHTML = html; list._emptyHtml = html; }
         return;
     }
+    list._emptyHtml = null;
 
     // Drop cards for printers no longer configured.
     const currentIds = new Set(configuredPrinters.map(p => p.id));
@@ -1634,7 +1997,9 @@ function patchCard(entry, printer) {
 
     const error = live && live.error ? live.error : '';
     if (hooks.errorText) {
-        hooks.errorText.textContent = error ? ('Error: ' + error) : '';
+        const errLine = errorLineParts(status, error);
+        hooks.errorText.textContent = errLine.text;
+        hooks.errorText.title = errLine.title;
         hooks.errorText.classList.toggle('hidden', !error);
     }
 
@@ -1645,7 +2010,9 @@ function patchCard(entry, printer) {
         hooks.filamentValue.textContent = filamentUsedMM >= 1000 ? (filamentUsedMM / 1000).toFixed(1) + 'm' : Math.round(filamentUsedMM) + 'mm';
     }
 
-    [hooks.pauseBtn, hooks.resumeBtn, hooks.stopBtn, hooks.startBtn].forEach(b => { if (b) b.disabled = dis; });
+    [hooks.stopBtn, hooks.startBtn].forEach(b => { if (b) b.disabled = dis; });
+    if (hooks.pauseBtn) hooks.pauseBtn.disabled = status !== 'printing';
+    if (hooks.resumeBtn) hooks.resumeBtn.disabled = status !== 'paused';
 
     const lightOn = !!(live && live.light_on);
     const lightPending = printer.id in pendingLightTarget;
@@ -1687,9 +2054,21 @@ function patchCard(entry, printer) {
 
     if (hooks.amsContainer) {
         const amsSlots = live && live.ams ? live.ams : [];
-        hooks.amsContainer.classList.toggle('hidden', amsSlots.length === 0);
-        hooks.amsContainer.innerHTML = amsSlotsInnerHTML(amsSlots);
+        const ext = live && live.external_spool ? live.external_spool : null;
+        hooks.amsContainer.classList.toggle('hidden', amsSlots.length === 0 && !ext);
+        const html = amsSlotsInnerHTML(amsSlots, ext, isBambu && !isCloud && !dis, encodeURIComponent(printer.id), printer.name);
+        // Skip identical rewrites so a focused slot button keeps focus across polls.
+        if (hooks.amsContainer._html !== html) { hooks.amsContainer._html = html; hooks.amsContainer.innerHTML = html; }
     }
+}
+
+// The error line of a card. A raw Go error ("Get "http://...": context deadline
+// exceeded") is only shown, in a tooltip, when the printer is offline and the
+// friendly text replaced it.
+function errorLineParts(status, error) {
+    if (!error) return { text: '', title: '' };
+    const friendly = status === 'disconnected' ? friendlyError(error) : error;
+    return friendly !== error ? { text: friendly, title: error } : { text: 'Error: ' + error, title: '' };
 }
 
 function applyTempValue(el, cls, now, tgt) {
@@ -1704,19 +2083,28 @@ function tempValueP(cls, now, tgt) {
         : '<p class="' + cls + ' text-sm mt-0.5 tabular-nums text-text">' + Math.round(now) + '° <span class="text-text-2">/ ' + (tgt !== null ? Math.round(tgt) : '-') + '°</span></p>';
 }
 
-function amsSlotsInnerHTML(amsSlots) {
-    return '<span class="text-[11px] text-text-2 self-center">AMS</span>'
-        + '<div class="flex items-center gap-2">'
-        + amsSlots.map(s => {
-            // Filament colour is data, so it is the one inline colour on a card.
-            const color = s.color ? '#' + s.color : 'var(--panel-2)';
-            const label = s.material || ('S' + (s.slot + 1));
-            const ring = s.active ? ' ring-2 ring-brand ring-offset-2 ring-offset-bg' : '';
-            return '<div class="flex flex-col items-center gap-1" title="Slot ' + (s.slot + 1) + (s.active ? ' (loaded)' : '') + (label ? ' · ' + escHtml(label) : '') + '">'
-                + '<div class="w-6 h-6 rounded-full border border-border' + ring + '" style="background:' + escHtml(color) + '"></div>'
-                + '<span class="text-[9px] text-text-2 font-mono">' + escHtml(label.slice(0, 5)) + '</span>'
-                + '</div>';
-        }).join('')
+// ext is live.external_spool (or null). canEdit makes each dot a button that
+// opens the filament editor; enc is the encoded printer id for its onclick.
+function amsSlotsInnerHTML(amsSlots, ext, canEdit, enc, printerName) {
+    const dot = (s, extra) => {
+        // Filament colour is data, so it is the one inline colour on a card.
+        const color = s.color ? '#' + s.color : 'var(--panel-2)';
+        const label = s._ext ? 'Ext' : (s.material || 'S' + (s.slot + 1));
+        const ring = s.active ? ' ring-2 ring-brand ring-offset-2 ring-offset-bg' : '';
+        const slotName = s._ext ? 'External spool' : 'Slot ' + (s.slot + 1);
+        const title = escHtml(slotName + (s.active ? ' (loaded)' : '') + (s.material ? ' · ' + s.material : ''));
+        const inner = '<div class="w-6 h-6 rounded-full border border-border' + ring + '" style="background:' + escHtml(color) + '"></div>'
+            + '<span class="text-[9px] text-text-2 font-mono">' + escHtml(label.slice(0, 7)) + '</span>';
+        const cls = 'flex flex-col items-center gap-1' + (extra || '');
+        return canEdit
+            ? '<button type="button" class="' + cls + ' cursor-pointer" title="' + title + '" aria-label="' + escHtml('Set filament for ' + filamentSlotName(s.slot) + ' on ' + printerName + (s.material ? ', now ' + s.material : '')) + '"'
+                + ' onclick="openFilamentEditorEncoded(\'' + enc + '\',' + Number(s.slot) + ')">' + inner + '</button>'
+            : '<div class="' + cls + '" title="' + title + '" role="img" aria-label="' + title + '">' + inner + '</div>';
+    };
+    return (amsSlots.length ? '<span class="text-[11px] text-text-2 self-center">AMS</span>' : '')
+        + '<div class="flex flex-wrap items-center gap-2">'
+        + amsSlots.map(s => dot(s)).join('')
+        + (ext ? dot(Object.assign({}, ext, { _ext: true }), amsSlots.length ? ' ams-ext' : '') : '')
         + '</div>';
 }
 
@@ -1756,6 +2144,7 @@ function cardInnerHTML(printer, live) {
         : '<i class="fas fa-lightbulb mr-1"></i>' + (lightOn ? 'On' : 'Off');
     const speedLevel = live && live.speed_level ? live.speed_level : 0;
     const amsSlots = live && live.ams ? live.ams : [];
+    const extSpool = live && live.external_spool ? live.external_spool : null;
 
     // Camera visibility is a stored per-printer preference (camera_hidden), not a
     // live state: it only hides the camera on this dashboard and never affects the
@@ -1782,8 +2171,8 @@ function cardInnerHTML(printer, live) {
     // AMS container always exists for Bambu cards (visibility toggled by slot
     // count) so its hook is stable; Klipper cards never render it at all.
     const amsPanel = isBambu ?
-        '<div class="ams-container flex items-end gap-2 shrink-0' + (amsSlots.length > 0 ? '' : ' hidden') + '">'
-        + amsSlotsInnerHTML(amsSlots)
+        '<div class="ams-container flex flex-wrap items-end gap-2' + (amsSlots.length > 0 || extSpool ? '' : ' hidden') + '">'
+        + amsSlotsInnerHTML(amsSlots, extSpool, isBambu && !isCloud && !dis, enc, printer.name)
         + '</div>'
         : '';
 
@@ -1824,13 +2213,13 @@ function cardInnerHTML(printer, live) {
         : '';
 
     const controls = removeMode ? '' :
-        '<div class="flex items-end justify-between gap-3 mt-3">'
+        '<div class="flex flex-wrap items-end justify-between gap-3 mt-3">'
         + '<div class="flex flex-wrap gap-1.5">'
         // Cloud printers: current Bambu firmware only honours the light over the
         // cloud, so pause/stop/fan/speed/GCode are LAN-only buttons.
         + (isCloud ? '' :
-            '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline">Pause</button>'
-            + '<button ' + dis + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
+            '<button ' + (status === 'printing' ? '' : 'disabled ') + 'onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline">Pause</button>'
+            + '<button ' + (status === 'paused' ? '' : 'disabled ') + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
             + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger">Stop</button>')
         + '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '">' + lightHtml + '</button>'
         + camControls
@@ -1850,13 +2239,13 @@ function cardInnerHTML(printer, live) {
         + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>'
         + (isBambu
             ? 'Camera unavailable. The Bridge camera works with A1 and P1 series printers. Check the IP address and LAN access code.'
-            : 'Camera unavailable. Check the webcam service or URL')
+            : 'Camera unavailable. Check the webcam service or URL.')
         + '</div>'
         + '</div>';
 
     const gcodePanel = (isBambu && !removeMode && !isCloud) ?
         '<div id="gcode-' + enc + '" class="gcode-panel hidden border-t border-border px-4 py-3 flex gap-2">'
-        + '<input id="gcodeInput-' + enc + '" type="text" placeholder="e.g. M106 P1 S128" autocomplete="off"'
+        + '<input id="gcodeInput-' + enc + '" type="text" placeholder="e.g. M106 P1 S128" autocomplete="off" aria-label="GCode command"'
         + '  class="gcode-input field field-mono flex-1"'
         + '  onkeydown="if(event.key===\'Enter\')sendGcodeEncoded(\'' + enc + '\')">'
         + '<button onclick="sendGcodeEncoded(\'' + enc + '\')" class="btn-outline btn-lg">Send</button>'
@@ -1895,7 +2284,7 @@ function cardInnerHTML(printer, live) {
         + '<p class="eta-dash text-sm text-text-2 mt-0.5' + ((status==='printing'||status==='paused') ? ' hidden' : '') + '">-</p>'
         + '</div>'
         + '</div>'
-        + '<p class="error-text mt-2 text-[11px] text-danger' + (error ? '' : ' hidden') + '">' + (error ? 'Error: ' + escHtml(error) : '') + '</p>'
+        + '<p class="error-text wrap-any mt-2 text-[11px] text-danger' + (error ? '' : ' hidden') + '" title="' + escHtml(errorLineParts(status, error).title) + '">' + escHtml(errorLineParts(status, error).text) + '</p>'
         + '<div class="filament-wrap flex items-center gap-3 mt-2' + ((status==='printing' && filamentUsedMM !== null) ? '' : ' hidden') + '">'
         + '<span class="text-[11px] text-text-2"><i class="fas fa-ruler-horizontal mr-1"></i><span class="filament-value">' + (filamentUsedMM !== null ? (filamentUsedMM >= 1000 ? (filamentUsedMM/1000).toFixed(1)+'m' : Math.round(filamentUsedMM)+'mm') : '') + '</span></span>'
         + '</div>'
@@ -1912,6 +2301,7 @@ function cardInnerHTML(printer, live) {
 async function pollStatus() {
     try {
         const data = await apiFetch('/api/status');
+        if (!configEverLoaded) await loadConfig(); // the Bridge may have been starting
         prevLiveStatus = liveStatus;
         liveStatus = data || {};
         detectStatusTransitions();
@@ -1972,18 +2362,35 @@ function toggleCamera(enc) {
             if (camUnavailable) camUnavailable.classList.add('hidden');
             camImg.style.display = 'block';
             camImg.onload = () => {
+                clearCameraTimer(enc);
                 cameraLoading.delete(enc);
                 if (camBtn) camBtn.innerHTML = '<i class="fas fa-camera mr-1"></i>Camera';
             };
             camImg.onerror = () => {
+                clearCameraTimer(enc);
                 cameraLoading.delete(enc);
                 if (camBtn) camBtn.innerHTML = '<i class="fas fa-camera mr-1"></i>Camera';
                 camImg.style.display = 'none';
                 if (camUnavailable) camUnavailable.classList.remove('hidden');
             };
             camImg.src = '/api/camera/' + encodeURIComponent(printerNameForId(id));
+            // No first frame after 15 s: stop the spinner and say so.
+            clearCameraTimer(enc);
+            cameraTimers.set(enc, setTimeout(() => {
+                cameraTimers.delete(enc);
+                if (!cameraLoading.has(enc)) return;
+                const cur = printerCardEls.get(id);
+                if (!cur) return;
+                teardownCamera(cur);
+                const h = cur.hooks;
+                cameraLoading.delete(enc);
+                if (h.camBtn) h.camBtn.innerHTML = '<i class="fas fa-camera mr-1"></i>Camera';
+                if (h.camImg) h.camImg.style.display = 'none';
+                if (h.camUnavailable) h.camUnavailable.classList.remove('hidden');
+            }, 15000));
         }
     } else {
+        clearCameraTimer(enc);
         cameraLoading.delete(enc);
         camPanel.classList.add('hidden');
         teardownCamera(entry);
@@ -2018,7 +2425,7 @@ async function toggleCameraHiddenEncoded(enc) {
         toast(printer.camera_hidden ? 'Camera hidden for ' + printer.name : 'Camera shown for ' + printer.name, 'info');
     } catch (e) {
         if (hideBtn) hideBtn.disabled = false;
-        toast('Failed: ' + e.message, 'error');
+        toast("Couldn't change the camera setting: " + e.message, 'error');
     }
 }
 
@@ -2056,7 +2463,7 @@ async function setFanSpeedEncoded(enc, pct) {
     } catch (e) {
         clearTimeout(safetyTimer);
         delete pendingFanTarget[id];
-        toast('Fan failed: ' + e.message, 'error');
+        toast("Couldn't change the fan: " + friendlyError(e.message), 'error');
         renderPrinters();
         pollStatus();
     }
@@ -2086,12 +2493,18 @@ async function sendGcodeEncoded(enc) {
         await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/gcode', { method:'POST', body:JSON.stringify({ line }) });
         toast('GCode sent: ' + line, 'info');
         inp.value = '';
-    } catch (e) { toast('GCode failed: ' + e.message, 'error'); }
+    } catch (e) { toast("Couldn't send the GCode: " + friendlyError(e.message), 'error'); }
 }
 
 // ── Global History view ───────────────────────────────────────────────────────
 
 let _historyRecords = [];
+
+// statusMeta() would label an unknown result "Connecting", so map the known ones.
+function resultLabel(result) {
+    const known = { finished:'Finished', cancelled:'Cancelled', error:'Failed', failed:'Failed' };
+    return known[result] || (result ? result.charAt(0).toUpperCase() + result.slice(1) : '-');
+}
 
 function toggleTempChart(uid) {
     const row = document.getElementById('hc-' + uid);
@@ -2174,7 +2587,7 @@ function exportHistoryCsv() {
 async function refreshGlobalHistory() {
     const content = document.getElementById('globalHistoryContent');
     if (!content) return;
-    content.innerHTML = '<p class="text-text-2 text-sm py-4 text-center">Loading...</p>';
+    content.innerHTML = '<p class="text-text-2 text-sm py-4 text-center">Loading…</p>';
     try {
         const data = await apiFetch('/api/history');
         const records = (data && data.records) ? data.records : [];
@@ -2214,11 +2627,11 @@ async function refreshGlobalHistory() {
             const pHours = printerTotalHours !== null
                 ? printerTotalHours.toFixed(1) + 'h'
                 : (pSecs / 3600).toFixed(1) + 'h';
-            const hoursTitle = printerTotalHours !== null ? 'Lifetime total from printer' : 'Tracked by Bridge';
+            const hoursTitle = printerTotalHours !== null ? 'Lifetime total from printer' : 'Tracked by the Bridge';
             const statsStrip = '<div class="grid grid-cols-3 divide-x divide-border border-b border-border">'
                 + '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">Prints</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5">' + recs.length + '</p></div>'
                 + '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">Success</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5">' + pRate + '</p></div>'
-                + '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">Hours</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5" title="' + hoursTitle + '">' + pHours + (printerTotalHours !== null ? ' <span class="text-text-2 text-[10px]" title="' + hoursTitle + '">★</span>' : '') + '</p></div>'
+                + '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">Hours</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5" title="' + hoursTitle + '">' + pHours + (printerTotalHours !== null ? ' <span class="text-text-2 text-[10px]" title="' + hoursTitle + '">(lifetime)</span>' : '') + '</p></div>'
                 + '</div>';
 
             const rows = recs.map((r, i) => {
@@ -2237,7 +2650,7 @@ async function refreshGlobalHistory() {
                 const extraAttr = isExtra ? ' data-extra-for="' + enc + '"' : '';
                 const dataRow = '<tr id="hr-' + uid + '" class="' + dataRowClass + '"' + extraAttr + '>'
                     + '<td class="py-2 pl-4 pr-3 text-text max-w-[160px]"><span class="block truncate" title="' + escHtml(r.file_name) + '">' + escHtml(r.file_name||'-') + '</span></td>'
-                    + '<td class="py-2 pr-3 ' + rc + '">' + escHtml(r.result) + '</td>'
+                    + '<td class="py-2 pr-3 ' + rc + '">' + escHtml(resultLabel(r.result)) + '</td>'
                     + '<td class="py-2 pr-3 text-text-2">' + escHtml(dur) + '</td>'
                     + '<td class="py-2 pr-3 text-text-2">' + escHtml(date) + '</td>'
                     + '<td class="py-2 pr-4 text-right">' + tempsBtn + '</td>'
@@ -2273,12 +2686,12 @@ async function refreshGlobalHistory() {
         }).join('');
 
         content.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">' + cards + '</div>';
-    } catch (_) { content.innerHTML = '<p class="text-danger text-sm py-4 text-center">Failed to load history.</p>'; }
+    } catch (_) { content.innerHTML = '<p class="text-danger text-sm py-4 text-center">Couldn\'t load history. Is the Bridge still running?</p>'; }
 }
 
 // ── Update system ─────────────────────────────────────────────────────────────
 
-function setFooterVersion(v) { const el=document.getElementById('footerVersion'); if(el) el.textContent='v'+(v||'dev'); }
+function setFooterVersion(v) { const el=document.getElementById('footerVersion'); if(el) el.textContent=(!v||v==='dev')?'dev build':'v'+v; }
 
 const DISMISSED_UPDATE_KEY = 'foxtrackDismissedUpdate';
 function getDismissedUpdate() { try { return localStorage.getItem(DISMISSED_UPDATE_KEY); } catch(_) { return null; } }
@@ -2303,12 +2716,12 @@ function showUpdateModal(info) {
         notes.textContent = info.notes || '';
         notes.classList.toggle('hidden', canInstall || !info.notes);
     }
-    modal.classList.remove('hidden');
+    openModal('updateModal');
 }
 
 function dismissUpdateModal() {
     if (updateInfo && updateInfo.latestVersion) { try { localStorage.setItem(DISMISSED_UPDATE_KEY, updateInfo.latestVersion); } catch(_){} }
-    document.getElementById('updateModal').classList.add('hidden');
+    hideModal('updateModal');
 }
 function openReleaseNotes() { if(updateInfo&&updateInfo.releaseUrl) window.open(updateInfo.releaseUrl,'_blank','noopener'); }
 
@@ -2334,14 +2747,13 @@ async function checkForUpdate() {
 async function installUpdate() {
     const btn = document.getElementById('updateNowBtn');
     if (btn) btn.disabled = true;
-    setUpdateProgress('Downloading update...');
+    setUpdateProgress('Downloading update…');
     try {
         await apiFetch('/api/update/install',{method:'POST'});
         const rb=document.getElementById('restartNowBtn'); if(rb) rb.classList.remove('hidden');
         if(btn) btn.classList.add('hidden');
-        setUpdateProgress('Staged. Click Restart when ready.');
-        toast('Update staged. Restart to apply', 'info');
-    } catch(e) { setUpdateProgress('Failed: '+e.message,true); toast('Update failed: '+e.message,'error'); if(btn) btn.disabled=false; }
+        setUpdateProgress('Update downloaded. Click Restart to finish.');
+    } catch(e) { setUpdateProgress("Couldn't install the update: "+e.message,true); if(btn) btn.disabled=false; }
 }
 
 async function restartForUpdate() {
@@ -2351,7 +2763,7 @@ async function restartForUpdate() {
     try {
         await apiFetch('/api/update/restart', { method: 'POST' });
     } catch(e) {
-        setUpdateProgress('Failed: ' + e.message, true);
+        setUpdateProgress("Couldn't restart: " + e.message, true);
         if (rb) rb.disabled = false;
         return;
     }
@@ -2374,25 +2786,49 @@ async function restartForUpdate() {
 
 (function initLogPanel() {
     let open = false, es = null;
-    window.copyLogToClipboard = function() {
+    window.copyLogToClipboard = async function() {
         const out = document.getElementById('logOutput');
         if (!out) return;
         const text = Array.from(out.children).map(el => el.textContent).join('\n');
-        navigator.clipboard.writeText(text).then(() => toast('Log copied')).catch(() => toast('Copy failed', 'error'));
+        let ok = false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); ok = true; }
+        } catch (_) {}
+        if (!ok) {
+            // No clipboard API (plain http on another machine): copy through a hidden textarea.
+            const prev = document.activeElement;
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { ok = document.execCommand('copy'); } catch (_) {}
+            ta.remove();
+            if (prev && prev.focus) prev.focus();
+        }
+        if (ok) toast('Log copied');
+        else toast("Couldn't copy. Select the text and copy it by hand.", 'error');
     };
     window.toggleLogPanel = function() {
         open = !open;
         const panel = document.getElementById('logPanel');
         const btn = document.getElementById('logBtn');
         if (open) {
+            panel.inert = false;
             panel.classList.remove('translate-y-full');
             if (btn) btn.classList.add('log-open');
             if (!es) {
                 es = new EventSource('/api/logs');
-                es.onmessage = e => appendLog(e.data);
-                es.onerror = () => appendLog('[bridge] log stream disconnected');
+                // EventSource retries by itself, so one disconnect fires onerror
+                // again and again; say it once until the stream is back.
+                let dropped = false;
+                es.onopen = () => { dropped = false; };
+                es.onmessage = e => { dropped = false; appendLog(e.data); };
+                es.onerror = () => { if (!dropped) { dropped = true; appendLog('[bridge] log stream disconnected'); } };
             }
         } else {
+            panel.inert = true;
             panel.classList.add('translate-y-full');
             if (btn) btn.classList.remove('log-open');
         }
@@ -2417,22 +2853,21 @@ async function restartForUpdate() {
 
 (async () => {
     applyTheme(currentTheme());
+    // Ask for notifications on the first click, not on load: a prompt nobody
+    // asked for gets denied.
+    if ('Notification' in window && Notification.permission === 'default') {
+        document.addEventListener('click', () => Notification.requestPermission(), { once: true });
+    }
     await loadConfig();
-    await checkForUpdate();
     renderPrinters();
     await pollStatus();
     setInterval(pollStatus, 5000);
+    checkForUpdate(); // not awaited: a slow release check must not hold up the dashboard
     await pollRelayHealth();
     setInterval(pollRelayHealth, 20000);
     await loadCloudStatus();
     setInterval(loadCloudStatus, 30000);
     await loadAISettings();
-
-    // Request notification permission after a short delay so it doesn't fire
-    // the browser prompt immediately on page load.
-    if ('Notification' in window && Notification.permission === 'default') {
-        setTimeout(() => Notification.requestPermission(), 3000);
-    }
 })();
 
 // ---------------------------------------------------------------------------
@@ -2523,16 +2958,15 @@ async function loadAIModels() {
     if (status) status.textContent = 'Asking the provider…';
     if (err) err.classList.add('hidden');
     try {
-        const res = await fetch('/api/ai/models', {
+        const data = await apiFetch('/api/ai/models', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ preset: form.preset, base_url: form.base_url, api_key: key })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'The provider would not list its models.');
+        const models = (data && data.models) || [];
         const list = document.getElementById('aiModelList');
-        if (list) list.innerHTML = (data.models || []).map(m => '<option value="' + escHtml(m) + '"></option>').join('');
-        if (status) status.textContent = (data.models || []).length + ' models available in the box above.';
+        if (list) list.innerHTML = models.map(m => '<option value="' + escHtml(m) + '"></option>').join('');
+        if (status) status.textContent = models.length === 0 ? 'No models found.'
+            : models.length + (models.length === 1 ? ' model' : ' models') + ' found. Pick one in the Model field.';
     } catch (e) {
         if (status) status.textContent = '';
         if (err) { err.textContent = e.message; err.classList.remove('hidden'); }
@@ -2553,13 +2987,7 @@ async function saveAISettings() {
     if (err) err.classList.add('hidden');
     if (status) status.textContent = 'Saving…';
     try {
-        const res = await fetch('/api/ai/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        if (!res.ok) throw new Error((await res.text()) || 'Save failed.');
-        aiSettings = await res.json();
+        aiSettings = await apiFetch('/api/ai/settings', { method: 'POST', body: JSON.stringify(body) });
         if (keyField) keyField.value = '';
         const keyHint = document.getElementById('aiKeyHint');
         // The server drops a saved key when the provider or base URL changes
@@ -2590,6 +3018,7 @@ function toggleAssistant() {
     const panel = document.getElementById('assistantPanel');
     if (!panel) return;
     panel.classList.toggle('translate-x-full', !assistantOpen);
+    panel.inert = !assistantOpen;
     if (assistantOpen) {
         if (assistantTurns.length === 0) renderAssistantWelcome();
         const input = document.getElementById('assistantInput');

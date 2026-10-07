@@ -58,7 +58,7 @@ const printerStoredName = "foxtrack-print.gcode.3mf"
 
 var (
 	errPrintCloud     = errors.New("Printing a file needs the printer in LAN Only Mode with Developer Mode on. It does not work over Bambu Cloud.")
-	errPrintNoClient  = errors.New("Bridge is not connected to this printer right now.")
+	errPrintNoClient  = errors.New("Bridge is not connected to this printer right now. Check that the printer is on and that its IP address and access code are right in Bridge.")
 	errPrintBusy      = errors.New("The printer is busy. Wait until it is idle, then try again.")
 	errPrintNoStatus  = errors.New("Bridge has not received the printer's status yet. Wait a moment and try again.")
 	errPrintPickSlots = errors.New("Pick the AMS slots in FoxTrack and try again.")
@@ -71,7 +71,7 @@ var (
 // Test seams and timings.
 var (
 	ftpsUpload             = ftps.Upload
-	publishProject         = publishProjectFile
+	publishRequestFn       = publishRequest
 	printerClientConnected = clientConnected
 	startWait              = 60 * time.Second
 	startPoll              = 250 * time.Millisecond
@@ -80,6 +80,9 @@ var (
 	// report before gcode_state moves on.
 	startErrGrace = 4 * time.Second
 	uploadCap     = 15 * time.Minute // per upload attempt
+	// After a long upload MQTT may have blipped: wait this long for it.
+	reconnectWait = 15 * time.Second
+	reconnectPoll = 500 * time.Millisecond
 )
 
 // PrintProjectFile uploads localPath to printer p and starts it. The error
@@ -153,7 +156,7 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 
 	// The upload can take minutes. The printer may have been started from its
 	// screen meanwhile, and a start while busy can cancel a running job.
-	if err := PrintPreflight(p); err != nil {
+	if err := preflightAfterUpload(ctx, p); err != nil {
 		logf("refused after upload: %v", err)
 		return err
 	}
@@ -174,9 +177,9 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 	}
 
 	baseline := lastReportedError(p.Name)
-	clearProjectFileRefusal(p.Name)
+	clearCommandRefusal(p.Name, "project_file")
 	published := time.Now()
-	if err := publishProject(p.Name, p.Serial, payload); err != nil {
+	if err := publishRequestFn(p.Name, p.Serial, payload); err != nil {
 		logf("publish failed: %v", err)
 		return errPrintNoClient
 	}
@@ -210,6 +213,23 @@ func PrintPreflight(p Printer) error {
 	return errPrintBusy
 }
 
+// preflightAfterUpload is PrintPreflight that waits up to reconnectWait for
+// MQTT to come back (no client or no status yet); any other refusal is final.
+func preflightAfterUpload(ctx context.Context, p Printer) error {
+	deadline := time.Now().Add(reconnectWait)
+	for {
+		err := PrintPreflight(p)
+		if !(errors.Is(err, errPrintNoClient) || errors.Is(err, errPrintNoStatus)) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(reconnectPoll):
+		}
+	}
+}
+
 // waitForStart returns nil as soon as the printer leaves IDLE/FINISH/FAILED
 // into a busy state (PREPARE, SLICING, RUNNING, PAUSE), even if an error code
 // also showed up on the way: a printer that is starting normally often reports
@@ -224,7 +244,7 @@ func waitForStart(ctx context.Context, name, baselineErr string) error {
 	var seenCode string
 	var seenAt time.Time
 	for {
-		if reason, refused := projectFileRefusal(name); refused {
+		if reason, refused := commandRefusal(name, "project_file"); refused {
 			if reason == "" {
 				return errors.New("The printer refused the print. Check the printer screen.")
 			}
@@ -434,9 +454,9 @@ var (
 	trayRefTable  = map[string][]trayRef{}
 	printErrMu    sync.Mutex
 	printErrTable = map[string]string{}
-	// projectFileFail: printer name -> the reason of its "fail" answer to
-	// the last project_file (may be ""). Guarded by printErrMu.
-	projectFileFail = map[string]string{}
+	// commandFail: printer name + "/" + command -> the reason of the printer's
+	// "fail" answer to the last such command (may be ""). Guarded by printErrMu.
+	commandFail = map[string]string{}
 )
 
 func setTrayRefs(name string, refs []trayRef) {
@@ -459,15 +479,17 @@ func forgetPrintFileState(name string) {
 	setTrayRefs(name, nil)
 	printErrMu.Lock()
 	delete(printErrTable, name)
-	delete(projectFileFail, name)
+	delete(commandFail, name+"/project_file")
+	delete(commandFail, name+"/ams_filament_setting")
 	printErrMu.Unlock()
 }
 
-// noteProjectFileReply logs the printer's answer to project_file in full
-// (the only trace of why a start failed) and remembers a "fail" for
-// waitForStart. It reports whether payload was such an answer.
-func noteProjectFileReply(name string, payload []byte) bool {
-	if !bytes.Contains(payload, []byte(`"project_file"`)) {
+// noteCommandReply logs the printer's answer to project_file or
+// ams_filament_setting in full (the only trace of why it refused) and
+// remembers a "fail" for the waiting caller. It reports whether payload was
+// such an answer.
+func noteCommandReply(name string, payload []byte) bool {
+	if !bytes.Contains(payload, []byte(`"project_file"`)) && !bytes.Contains(payload, []byte(`"ams_filament_setting"`)) {
 		return false
 	}
 	var probe struct {
@@ -477,32 +499,40 @@ func noteProjectFileReply(name string, payload []byte) bool {
 			Reason  any    `json:"reason"`
 		} `json:"print"`
 	}
-	if json.Unmarshal(payload, &probe) != nil || probe.Print.Command != "project_file" {
+	if json.Unmarshal(payload, &probe) != nil {
 		return false
 	}
-	log.Printf("[%s] print_file: printer answered project_file: %s", name, payload)
+	cmd := probe.Print.Command
+	switch cmd {
+	case "project_file":
+		log.Printf("[%s] print_file: printer answered project_file: %s", name, payload)
+	case "ams_filament_setting":
+		log.Printf("[%s] set_filament: printer answered ams_filament_setting: %s", name, payload)
+	default:
+		return false
+	}
 	if r := strings.ToLower(fmt.Sprint(probe.Print.Result)); r == "fail" || r == "failed" {
 		reason := ""
 		if probe.Print.Reason != nil {
 			reason = strings.TrimSpace(fmt.Sprint(probe.Print.Reason))
 		}
 		printErrMu.Lock()
-		projectFileFail[name] = reason
+		commandFail[name+"/"+cmd] = reason
 		printErrMu.Unlock()
 	}
 	return true
 }
 
-func projectFileRefusal(name string) (reason string, refused bool) {
+func commandRefusal(name, command string) (reason string, refused bool) {
 	printErrMu.Lock()
 	defer printErrMu.Unlock()
-	reason, refused = projectFileFail[name]
+	reason, refused = commandFail[name+"/"+command]
 	return
 }
 
-func clearProjectFileRefusal(name string) {
+func clearCommandRefusal(name, command string) {
 	printErrMu.Lock()
-	delete(projectFileFail, name)
+	delete(commandFail, name+"/"+command)
 	printErrMu.Unlock()
 }
 
@@ -653,9 +683,9 @@ func clientConnected(name string) bool {
 	return ok && c.IsConnected()
 }
 
-// publishProjectFile publishes on the printer's request topic, QoS 0 like the
+// publishRequest publishes on the printer's request topic, QoS 0 like the
 // other commands (the printer's broker does not PUBACK QoS 1 there).
-func publishProjectFile(name, serial string, payload []byte) error {
+func publishRequest(name, serial string, payload []byte) error {
 	clientMutex.RLock()
 	c, ok := printerClients[name]
 	clientMutex.RUnlock()

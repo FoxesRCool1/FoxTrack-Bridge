@@ -206,6 +206,8 @@ func TestSanitizeRemoteName(t *testing.T) {
 		"../../etc/passwd":                  "etcpasswd.gcode",
 		"héllo wörld.GCODE":                 "hllo_wrld.GCODE",
 		"":                                  "print.gcode",
+		"部品.gcode":                          "print.gcode",
+		"Ünïcödé.gcode":                     "ncd.gcode",
 		"vase.gcode.3mf":                    "vase.gcode.3mf.gcode",
 		strings.Repeat("a", 300) + ".gcode": strings.Repeat("a", 114) + ".gcode",
 	}
@@ -247,5 +249,17 @@ func TestPrintReady(t *testing.T) {
 	}
 	if err := c.PrintReady("nope"); err == nil {
 		t.Fatal("unknown printer accepted")
+	}
+}
+
+func TestSendKlipperCommand_StartMissingFileIsPlain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := newUploadController(t, srv.URL, "")
+	err := c.sendKlipperCommand(c.printers["voron"], nil, "start", map[string]interface{}{"file_name": "gone.gcode"})
+	if err == nil || strings.Contains(err.Error(), "HTTP") || !strings.Contains(err.Error(), "no file with that name") {
+		t.Fatalf("err = %v", err)
 	}
 }

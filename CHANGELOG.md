@@ -34,12 +34,41 @@
   instead of a wrong API key.
 - Error messages in FoxTrack are plain words; the technical detail goes to the
   Bridge log.
+- Clearer failures: an expired download link says to press Print again, a file
+  FoxTrack no longer has says so, and a full disk is no longer blamed on the
+  download.
+- If the printer connection drops for a moment during a long upload, the Bridge
+  waits up to 15 seconds for it to come back instead of failing the print.
+- The job gives up after 12 minutes (was 14), so its result always reaches
+  FoxTrack before FoxTrack's own 15-minute limit.
+- A Klipper file name made only of non-ASCII letters is sent as `print.gcode`.
+
+**Set filament (Bambu Lab, LAN Only Mode + Developer Mode)**
+- Click an AMS slot, or the new external spool dot, on a printer card to set its
+  material and color. The Bridge waits until the printer reports the change, and
+  says so if the printer refuses it (usually Developer Mode is off).
+- FoxTrack can do the same through the new `set_filament` command, and now sees
+  the external spool. A changed material or color reaches FoxTrack at once.
+- If the printer drops offline while it waits, or does not take the change, the
+  message says so. Bambu Lab spools with a tag set their own filament.
+- Not yet: AMS HT slots, and the external spools of dual-nozzle printers (H2D).
+
+**Connecting to FoxTrack**
+- Settings checks the Bridge token when you save it and shows **Connected to
+  FoxTrack.**, or what to fix: a wrong token, a plan without the Bridge, or no
+  internet. Before, a wrong token was silent until a printer reported.
+- A refused token or plan also shows the warning on the Printers page before any
+  printer has reported, and the warning clears as soon as FoxTrack accepts the
+  token again.
+- A newly saved token is tried at once. Before, the Bridge could wait up to 5
+  minutes after FoxTrack refused the old one.
+- The FoxTrack link in Settings opens the Integrations page directly (it went to
+  a page that does not exist), and the GitHub link points at the right repository.
+- The token field is called **Bridge token**. The old **FoxTrack (legacy)**
+  field only shows on installs that still use it.
+- FoxTrack's plan names are right everywhere: Pro and Farm.
 
 **Known (not fixed yet)**
-- A file name made only of non-ASCII letters is sent to a Klipper printer as
-  `gcode.gcode`.
-- The job timeout (14 minutes) is close to FoxTrack's 15-minute limit; it should
-  drop to about 12 minutes so the final result always lands first.
 - Files stay on the printer after the print: `foxtrack-print.gcode.3mf` on the
   Bambu SD card, and one file per name in the Klipper gcodes folder.
 - A Bambu print counts as started at PREPARE/SLICING. An AMS mapping error that

@@ -80,7 +80,7 @@ Replace `<asset-name>` with the file you downloaded, for example `FoxTrack-Bridg
 
 1. Run the Bridge. Download the binary for your platform (see [Supported platforms](#supported-platforms)) and launch it. On Windows and macOS, a system tray icon appears with an "Open Dashboard" menu. Linux builds are headless: run the binary from a terminal, or see [Running on Linux](#running-on-linux) for a desktop launcher and background-service setup. The startup output lists the local addresses where the dashboard is available.
 2. Open the dashboard at [http://localhost:8080](http://localhost:8080). From other devices on the same network, use the IP address shown in the startup output (for example `http://192.168.x.x:8080`). You may need to disable WiFi AP isolation on your router.
-3. Connect to FoxTrack (optional). Create a Bridge token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/settings), paste it into **FoxTrack sync** in the Bridge Settings, and click Save. See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
+3. Connect to FoxTrack (optional). Create a Bridge token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/app/settings?tab=integrations), paste it into **Bridge token** in the Bridge Settings, and click Save. See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
 4. Add a printer. In Printers, click "Add Printer", select the printer type, fill in the required fields, and click Connect.
 
 ---

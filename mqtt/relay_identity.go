@@ -16,6 +16,6 @@ func stampRelayIdentity(pr *webhook.RelayPrint, p Printer, telemetryModel string
 	}
 	pr.BridgeVersion = version.AppVersion
 	if !p.Cloud && !IsCloudSerial(p.Serial) {
-		pr.BridgeCapabilities = []string{"print_file"}
+		pr.BridgeCapabilities = []string{"print_file", "set_filament"}
 	}
 }

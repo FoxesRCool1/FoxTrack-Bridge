@@ -207,7 +207,7 @@ AMS slot display, the speed selector and the GCode console are Bambu-only. Fan c
 		Keywords: []string{"foxtrack", "api key", "token", "sync", "cloud", "remote", "relay", "rejected", "revoked", "plan", "integrations"},
 		Body: `Linking to FoxTrack is optional. The dashboard works fully offline without it.
 
-To link: in FoxTrack, open Settings > Integrations > FoxTrack Bridge and create a Bridge token (it starts with ftb_ and is shown once). In the Bridge, open Settings, paste it into the FoxTrack sync field, and click Save. The Bridge integration is a FoxTrack Pro feature, and creating a token needs the owner or admin role.
+To link: in FoxTrack, open Settings > Integrations > FoxTrack Bridge and create a Bridge token (it starts with ftb_ and is shown once). In the Bridge, open Settings, paste it into the Bridge token field, and click Save. The line under the field then says Connected to FoxTrack, or what to fix. The Bridge integration needs the FoxTrack Pro or Farm plan, and creating a token needs the owner or admin role.
 
 Once linked, the Bridge relays telemetry, print history and camera snapshots to FoxTrack so printers can be monitored remotely. Each printer then appears on the FoxTrack Printers page: in the Live view, and in the Fleet view under "Detected on your network, not linked". Pick a FoxTrack printer in its "Link to printer" menu to link them.
 
@@ -215,7 +215,7 @@ Printers that already exist in FoxTrack should be linked, not deleted. Deleting 
 
 If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the key was revoked, the key was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.
 
-A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Enterprise). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Detected on your network, not linked", and click Remove.
+A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Farm). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Detected on your network, not linked", and click Remove.
 
 Pause, resume, stop and light commands sent from FoxTrack reach the Bridge within a few seconds (up to 30 seconds right after the page is opened), and FoxTrack shows the result. A command the Bridge does not pick up within 2 minutes expires, so it never fires late.`,
 	},
