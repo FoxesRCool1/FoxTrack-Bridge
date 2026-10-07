@@ -487,6 +487,36 @@ func dirNames(t *testing.T, dir string) []string {
 
 // --- review fixes ---------------------------------------------------------
 
+// FoxTrack's limit (print_file_transfer_limit) minus 3 minutes for the ack.
+func TestPrintFile_JobTimeoutGrowsWithTheFile(t *testing.T) {
+	for _, c := range []struct {
+		size interface{}
+		want time.Duration
+	}{
+		{nil, 12 * time.Minute},
+		{float64(1000), 12 * time.Minute},
+		{float64(6 * 1024 * 1024), 12 * time.Minute},                         // 10 min + 5.1 min: just past 15
+		{float64(24 * 1024 * 1024), 27*time.Minute + 28800*time.Millisecond}, // 10 min + 20.48 min - 3
+		{float64(50 * 1024 * 1024), 49*time.Minute + 40*time.Second},         // 10 min + 42.67 min - 3
+		{float64(maxPrintFileBytes + 1), 12 * time.Minute},
+	} {
+		args := map[string]interface{}{}
+		if c.size != nil {
+			args["size_bytes"] = c.size
+		}
+		got := printJobTimeoutFor(args)
+		if c.size == float64(6*1024*1024) {
+			if got < 12*time.Minute || got > 12*time.Minute+10*time.Second {
+				t.Fatalf("size %v: got %s, want just over 12m", c.size, got)
+			}
+			continue
+		}
+		if got != c.want {
+			t.Fatalf("size %v: got %s, want %s", c.size, got, c.want)
+		}
+	}
+}
+
 func TestPrintFile_FinalAckBackoffCoversAboutThreeMinutes(t *testing.T) {
 	// The production schedule, read before any test env replaces it.
 	var total time.Duration

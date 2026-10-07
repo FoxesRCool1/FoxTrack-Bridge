@@ -40,7 +40,10 @@
 - If the printer connection drops for a moment during a long upload, the Bridge
   waits up to 15 seconds for it to come back instead of failing the print.
 - The job gives up after 12 minutes (was 14), so its result always reaches
-  FoxTrack before FoxTrack's own 15-minute limit.
+  FoxTrack before FoxTrack's own 15-minute limit. A big file gets longer, the
+  same as FoxTrack gives it: a 50 MB file about 50 minutes, enough for a slow
+  printer Wi-Fi. Uploads to the printer are no longer cut at 10 minutes
+  (Klipper) or 15 minutes (Bambu Lab); the job's own limit ends them.
 - A Klipper file name made only of non-ASCII letters is sent as `print.gcode`.
 
 **Set filament (Bambu Lab, LAN Only Mode + Developer Mode)**

@@ -79,7 +79,6 @@ var (
 	// before it counts as a refusal: some reports carry a passing code one
 	// report before gcode_state moves on.
 	startErrGrace = 4 * time.Second
-	uploadCap     = 15 * time.Minute // per upload attempt
 	// After a long upload MQTT may have blipped: wait this long for it.
 	reconnectWait = 15 * time.Second
 	reconnectPoll = 500 * time.Millisecond
@@ -87,9 +86,11 @@ var (
 
 // PrintProjectFile uploads localPath to printer p and starts it. The error
 // text is shown to the FoxTrack user as is, so it is plain English. It can
-// take as long as the upload (up to uploadCap, twice on an A1 that needs the
-// clear-text fallback) plus up to 120 s for the printer to confirm it, plus
-// startWait (60 s) for the print to begin; ctx cancels it at any point.
+// take as long as the upload (twice on an A1 that needs the clear-text
+// fallback) plus up to 120 s for the printer to confirm it, plus startWait
+// (60 s) for the print to begin; ctx cancels it at any point. The upload has
+// no cap of its own: a big file on slow Wi-Fi needs the whole job deadline
+// (printJobTimeoutFor), and a stuck one stops after ftps.Config.StallTimeout.
 func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts ProjectPrintOptions) error {
 	logf := func(format string, args ...any) {
 		log.Printf("[%s] print_file: "+format, append([]any{p.Name}, args...)...)
@@ -131,11 +132,7 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 		Host: p.IP, User: "bblp", Password: p.LANCode,
 		Logf: func(format string, args ...any) { logf("ftps: "+format, args...) },
 	}
-	uploadOnce := func() error {
-		c, cancel := context.WithTimeout(ctx, uploadCap)
-		defer cancel()
-		return ftpsUpload(c, cfg, localPath, remote)
-	}
+	uploadOnce := func() error { return ftpsUpload(ctx, cfg, localPath, remote) }
 	err = uploadOnce()
 	if err != nil && ctx.Err() == nil && (prefix == "030" || prefix == "039") && !errors.Is(err, ftps.ErrLogin) {
 		logf("upload failed (%v); A1 family, retrying once with a clear-text data channel", err)

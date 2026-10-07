@@ -50,8 +50,9 @@ func (c *Controller) PrintReady(name string) error {
 }
 
 // uploadTimeout is its own long timeout: the 6 s command client cannot
-// carry a 50 MB file over a slow Wi-Fi link.
-var uploadTimeout = 10 * time.Minute
+// carry a 50 MB file over a slow Wi-Fi link. The print job's own deadline
+// (printJobTimeoutFor, scaled to the file) ends it first.
+var uploadTimeout = time.Hour
 
 // UploadAndPrint sends the file at localPath to the Klipper printer called name
 // (Moonraker /server/files/upload with print=true) and reports whether the

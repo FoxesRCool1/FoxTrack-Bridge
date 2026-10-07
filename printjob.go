@@ -38,9 +38,26 @@ const (
 	maxErrorChars     = 500
 )
 
-// printJobTimeout: FoxTrack fails a running command after 15 minutes; 12
-// leaves room for the result ack to land first.
+// printJobTimeout: FoxTrack fails a running command after 15 minutes for a
+// small file; 12 leaves room for the result ack to land first. A big file gets
+// more (printJobTimeoutFor).
 var printJobTimeout = 12 * time.Minute
+
+// printJobTimeoutFor mirrors print_file_transfer_limit in FoxTrack (migration
+// 20261031000129; change both): FoxTrack allows 15 minutes, or 10 minutes plus
+// the file at 20 KB/s when that is longer (a slow printer Wi-Fi measured
+// 27 KB/s). Bridge stops 3 minutes before FoxTrack does.
+func printJobTimeoutFor(args map[string]interface{}) time.Duration {
+	size, ok := intArg(args["size_bytes"])
+	if !ok || size <= 0 || size > maxPrintFileBytes {
+		return printJobTimeout
+	}
+	extra := 10*time.Minute + time.Duration(size)*time.Second/20480 - 15*time.Minute
+	if extra < 0 {
+		extra = 0
+	}
+	return printJobTimeout + extra
+}
 
 var (
 	errPrintArgs        = errors.New("FoxTrack sent an incomplete print command. Update FoxTrack Bridge, then try again.")
@@ -215,7 +232,7 @@ func startPrintFile(apiKey string, cmd bridgeCommand) {
 	default:
 		// No answer at all. FoxTrack may have applied the ack,
 		// and then never hands the command out again, so the job would be lost
-		// (FoxTrack fails it as timed out after 15 minutes). Run it: the final
+		// (FoxTrack fails it as timed out after 15 minutes or more). Run it: the final
 		// done/failed ack is accepted from pending or running. The price: a
 		// workspace whose printer has no owning Bridge recorded could see
 		// another Bridge take the same command and run it twice.
@@ -249,7 +266,7 @@ func finishPrintFile(apiKey string, cmd bridgeCommand, p config.Printer, isBambu
 			return
 		}
 		defer printJobs.unlockPrinter(p.Name)
-		ctx, cancel := context.WithTimeout(context.Background(), printJobTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), printJobTimeoutFor(cmd.Args))
 		defer cancel()
 		err = runPrintJob(ctx, logf, cmd.Args, p, isBambu, mq)
 		if errors.Is(err, context.DeadlineExceeded) {
