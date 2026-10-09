@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.5.0
 
 **Print from FoxTrack**
 - FoxTrack can now send a sliced file to a printer and start it. The Bridge
