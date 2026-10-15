@@ -96,7 +96,7 @@ func (c *Controller) shouldRelay(name string, prev, curr *mqttpkg.TelemetryData,
 func (c *Controller) SyncPrinters(printers []configpkg.Printer, foxAPIKey, fox2APIKey string) {
 	keep := make(map[string]bool)
 	for _, p := range printers {
-		if isBambuPrinter(p) || strings.TrimSpace(p.MoonrakerURL) == "" {
+		if p.Kind() == configpkg.KindBambu {
 			continue
 		}
 		keep[p.Name] = true
@@ -119,7 +119,7 @@ func (c *Controller) AddOrUpdatePrinter(p configpkg.Printer, foxAPIKey, fox2APIK
 	if p.Name == "" {
 		return
 	}
-	if isBambuPrinter(p) || strings.TrimSpace(p.MoonrakerURL) == "" {
+	if p.Kind() == configpkg.KindBambu {
 		return
 	}
 
@@ -167,6 +167,12 @@ func (c *Controller) SendCommand(name, command string, args map[string]interface
 		return fmt.Errorf("printer %q not found", name)
 	}
 
+	switch p.Kind() {
+	case configpkg.KindPrusaLink:
+		return sendPrusaLinkCommand(p, command)
+	case configpkg.KindHomeAssistant:
+		return errReadOnly
+	}
 	return c.sendKlipperCommand(p, state, command, args)
 }
 
@@ -185,7 +191,9 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name st
 		if err != nil {
 			continue
 		}
-		applyMoonrakerAuth(req, p)
+		if p.Kind() == configpkg.KindKlipper {
+			applyMoonrakerAuth(req, p)
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			continue
@@ -229,7 +237,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 				}
 			}()
 
-			t, relayPayload, err := fetchKlipperTelemetry(p)
+			t, relayPayload, err := fetchTelemetry(p)
 			if err != nil {
 				t = mqttpkg.TelemetryData{Status: "disconnected", Error: err.Error()}
 			}
@@ -249,7 +257,9 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 
 			c.sessionMu.Lock()
 			sess := c.sessions[p.Name]
-			if prevStatus != "printing" && t.Status == "printing" {
+			// A pause is part of the print (mqttpkg.InPrint), so it neither ends
+			// the session nor starts a new one on resume.
+			if t.Status == "printing" && (sess == nil || !mqttpkg.InPrint(prevStatus)) {
 				now := time.Now().Unix()
 				c.sessions[p.Name] = &printSession{
 					StartTime:   now,
@@ -260,12 +270,19 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 					lastSampleT: now,
 				}
 				c.sessionMu.Unlock()
-			} else if prevStatus == "printing" && t.Status != "printing" && sess != nil {
+			} else if mqttpkg.InPrint(prevStatus) && !mqttpkg.InPrint(t.Status) && sess != nil {
 				now := time.Now().Unix()
 				result := t.Status
 				if result != "finished" && result != "error" {
 					result = "cancelled"
 				}
+				percentAtEnd := prev.Progress // the last progress while printing
+				if result == "finished" {
+					percentAtEnd = 100
+				}
+				// filament_used counts up through the job; a poll that failed
+				// (disconnected) reads 0, so keep the last value seen.
+				filamentUsedMM := max(t.FilamentUsedMM, prev.FilamentUsedMM)
 				rec := history.Record{
 					PrinterName: p.Name,
 					FileName:    sess.FileName,
@@ -285,17 +302,19 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 					}
 					if fox2APIKey != "" {
 						webhook.SendHistory(fox2APIKey, webhook.HistoryURLV2, webhook.HistoryPayload{
-							Type:        "print_complete",
-							PrinterName: p.Name,
-							Serial:      p.Name,
-							FileName:    rec.FileName,
-							NozzleTemp:  rec.NozzleTemp,
-							BedTemp:     rec.BedTemp,
-							StartTime:   time.Unix(rec.StartTime, 0).UTC().Format(time.RFC3339),
-							EndTime:     time.Unix(rec.EndTime, 0).UTC().Format(time.RFC3339),
-							Duration:    rec.Duration,
-							Result:      rec.Result,
-							Timestamp:   time.Now().UTC().Format(time.RFC3339),
+							Type:           "print_complete",
+							PrinterName:    p.Name,
+							Serial:         p.Name,
+							FileName:       rec.FileName,
+							NozzleTemp:     rec.NozzleTemp,
+							BedTemp:        rec.BedTemp,
+							StartTime:      time.Unix(rec.StartTime, 0).UTC().Format(time.RFC3339),
+							EndTime:        time.Unix(rec.EndTime, 0).UTC().Format(time.RFC3339),
+							Duration:       rec.Duration,
+							Result:         rec.Result,
+							Timestamp:      time.Now().UTC().Format(time.RFC3339),
+							PercentAtEnd:   percentAtEnd,
+							FilamentUsedMM: filamentUsedMM,
 						})
 					}
 				}()
@@ -411,10 +430,22 @@ func sendJSONRequest(client *http.Client, method, u string, headers map[string]s
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	var out map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	// An empty body (PrusaLink answers 204 No Content) is a success, not a decode error.
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil && err != io.EOF {
 		return nil, err
 	}
 	return out, nil
+}
+
+// fetchTelemetry polls one HTTP printer, whichever kind it is.
+func fetchTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.RelayPayload, error) {
+	switch p.Kind() {
+	case configpkg.KindPrusaLink:
+		return fetchPrusaLinkTelemetry(p)
+	case configpkg.KindHomeAssistant:
+		return fetchHomeAssistantTelemetry(p)
+	}
+	return fetchKlipperTelemetry(p)
 }
 
 // klipperHours caches the Moonraker lifetime print hours per printer.
@@ -523,7 +554,7 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 			PrinterKind:        "klipper",
 			PrinterModel:       "Klipper",
 			BridgeVersion:      version.AppVersion,
-			BridgeCapabilities: []string{"print_file"},
+			BridgeCapabilities: []string{"print_file", "filament_use"},
 		},
 	}
 
@@ -730,6 +761,9 @@ func cameraCandidates(p configpkg.Printer) []string {
 	if strings.TrimSpace(p.WebcamURL) != "" {
 		return []string{strings.TrimSpace(p.WebcamURL)}
 	}
+	if p.Kind() != configpkg.KindKlipper {
+		return nil // PrusaLink and Home Assistant have no stream to guess
+	}
 
 	base := strings.TrimRight(p.MoonrakerURL, "/")
 	out := []string{
@@ -818,10 +852,7 @@ func isBambuPrinter(p configpkg.Printer) bool {
 	if strings.TrimSpace(p.LANCode) == "" {
 		return false
 	}
-	if strings.TrimSpace(p.MoonrakerURL) != "" {
-		return false
-	}
-	return true
+	return p.Kind() == configpkg.KindBambu
 }
 
 func nestedMap(m map[string]interface{}, keys ...string) map[string]interface{} {

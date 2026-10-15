@@ -20,29 +20,29 @@ import (
 
 // flexInt unmarshals a JSON value that may arrive as either a number or a numeric string.
 // BambuLab firmware sends cooling_fan_speed as an int in telemetry but as a string in
-// upgrade_state messages, causing parse failures with a plain int field.
+// upgrade_state messages, causing parse failures with a plain int field; AMS
+// trays send tray_weight as a string. Anything that is not a number reads as 0
+// rather than failing the whole report.
 type flexInt int
 
 func (f *flexInt) UnmarshalJSON(b []byte) error {
-	var n int
-	if err := json.Unmarshal(b, &n); err == nil {
-		*f = flexInt(n)
-		return nil
-	}
-	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return err
-	}
-	if s == "" {
-		*f = 0
-		return nil
-	}
-	n64, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return err
-	}
-	*f = flexInt(n64)
+	var v any
+	_ = json.Unmarshal(b, &v)
+	n, _ := number(v)
+	*f = flexInt(n)
 	return nil
+}
+
+// number reads a decoded JSON number or numeric string ("1000", "98.5").
+func number(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		return f, err == nil
+	}
+	return 0, false
 }
 
 type Printer struct {
@@ -59,11 +59,18 @@ type Printer struct {
 
 // AmsSlot holds the state of a single AMS filament tray.
 type AmsSlot struct {
-	Slot      int    `json:"slot"`               // 0-indexed tray position
-	Color     string `json:"color"`              // 6-char hex, e.g. "FF0000"
-	Material  string `json:"material"`           // e.g. "PLA", "PETG"
-	Active    bool   `json:"active"`             // currently printing from this slot
-	Remaining int    `json:"remaining,omitempty"` // 0-100% filament remaining; 0 means not reported or empty
+	Slot      int    `json:"slot"`                // 0-indexed tray position
+	Color     string `json:"color"`               // 6-char hex, e.g. "FF0000"
+	Material  string `json:"material"`            // e.g. "PLA", "PETG"
+	Active    bool   `json:"active"`              // currently printing from this slot
+	Remaining int    `json:"remaining,omitempty"` // 0-100% filament remaining; 0 means not reported or empty, -1 unknown (AMS)
+
+	// Spool identity (Bambu); see webhook.RelayAmsSlot.
+	TagUID        string `json:"tag_uid,omitempty"`
+	TrayUUID      string `json:"tray_uuid,omitempty"`
+	TraySubBrands string `json:"tray_sub_brands,omitempty"`
+	TrayWeight    int    `json:"tray_weight,omitempty"`
+	TrayInfoIdx   string `json:"tray_info_idx,omitempty"`
 }
 
 type TelemetryData struct {
@@ -117,10 +124,15 @@ type BambuPrint struct {
 		AMS []struct {
 			ID   json.RawMessage `json:"id"` // raw AMS unit id: "0".."3", "128".. for an AMS HT (raw so an odd type never fails the message)
 			Tray []struct {
-				ID       string `json:"id"`
-				Color    string `json:"tray_color"` // 8-char RRGGBBAA
-				Material string `json:"tray_type"`
-				Remain   int    `json:"remain"`     // 0-100%; "remain" is training-data knowledge of Bambu's field name, unverified this session
+				ID            string  `json:"id"`
+				Color         string  `json:"tray_color"` // 8-char RRGGBBAA
+				Material      string  `json:"tray_type"`
+				Remain        flexInt `json:"remain"`      // 0-100%, -1 when the printer does not know
+				Weight        flexInt `json:"tray_weight"` // grams, a string on current firmware
+				TagUID        string  `json:"tag_uid"`
+				TrayUUID      string  `json:"tray_uuid"`
+				TraySubBrands string  `json:"tray_sub_brands"`
+				TrayInfoIdx   string  `json:"tray_info_idx"`
 			} `json:"tray"`
 		} `json:"ams"`
 		TrayNow string `json:"tray_now"` // currently loaded tray ("0"-"3"), "255" = none/external
@@ -161,8 +173,9 @@ var (
 	webhookNoKeyLogged = make(map[string]bool)
 	webhookLastSentMu  sync.Mutex
 
-	// sendRelay posts a relay payload. A variable so tests can capture payloads.
-	sendRelay = webhook.SendRelay
+	// sendRelay and sendHistory post to FoxTrack. Variables so tests can capture payloads.
+	sendRelay   = webhook.SendRelay
+	sendHistory = webhook.SendHistory
 )
 
 // A Bambu camera snapshot is taken at most every pace.SnapshotGap seconds while
@@ -199,7 +212,26 @@ type printSession struct {
 	NozzleTemp  float64
 	BedTemp     float64
 	TempSamples []history.TempSample
-	lastSampleT int64 // unix time of last temp sample
+	lastSampleT int64     // unix time of last temp sample
+	lastSeen    int64     // unix time of the last report during the print
+	Spools      []AmsSlot // every slot at the start, paired with the end for filament use
+}
+
+// sessionResumeGrace is how long a print may go unseen (a dropped MQTT
+// connection) and still carry on in its session when it is seen again.
+// ponytail: the file name is the only check, so a reprint of the same file
+// within this window joins the old session.
+const sessionResumeGrace = 10 * 60
+
+// resumes reports whether the print seen after a reconnect is the one s tracks.
+func (s *printSession) resumes(fileName string, now int64) bool {
+	return s != nil && fileName != "" && s.FileName == fileName && now-s.lastSeen <= sessionResumeGrace
+}
+
+// InPrint reports whether status belongs to a running print. A pause is part
+// of the print, not its end.
+func InPrint(status string) bool {
+	return status == "printing" || status == "paused"
 }
 
 var (
@@ -950,11 +982,16 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 							color = color[:6] // strip alpha channel
 						}
 						amsSlots = append(amsSlots, AmsSlot{
-							Slot:      globalSlot,
-							Color:     color,
-							Material:  tray.Material,
-							Active:    globalSlot == trayNow,
-							Remaining: tray.Remain,
+							Slot:          globalSlot,
+							Color:         color,
+							Material:      tray.Material,
+							Active:        globalSlot == trayNow,
+							Remaining:     int(tray.Remain),
+							TagUID:        tagID(tray.TagUID),
+							TrayUUID:      tagID(tray.TrayUUID),
+							TraySubBrands: tray.TraySubBrands,
+							TrayWeight:    int(tray.Weight),
+							TrayInfoIdx:   tray.TrayInfoIdx,
 						})
 					}
 				}
@@ -1018,10 +1055,18 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		}
 
 		// Track print sessions for history (including periodic temp samples).
+		// After a reconnect (prev is the Bridge's own connected/disconnected
+		// state) the same print carries on in its session, so its filament use
+		// counts from the real start.
 		sessionMu.Lock()
 		sess := activeSessions[p.Name]
-		if prev.Status != "printing" && status == "printing" {
-			now := time.Now().Unix()
+		now := time.Now().Unix()
+		reconnected := prev.Status == "connected" || prev.Status == "disconnected"
+		if reconnected && InPrint(status) && sess != nil && !sess.resumes(fileName, now) {
+			delete(activeSessions, p.Name) // a different print, or gone too long: start over
+			sess = nil
+		}
+		if status == "printing" && (sess == nil || !InPrint(prev.Status) && !reconnected) {
 			activeSessions[p.Name] = &printSession{
 				StartTime:   now,
 				FileName:    fileName, // use merged value; pr.SubTaskName may be absent in the state-change message
@@ -1029,14 +1074,20 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				BedTemp:     bedTemp,
 				TempSamples: []history.TempSample{{T: 0, NozzleTemp: nozzleTemp, BedTemp: bedTemp}},
 				lastSampleT: now,
+				lastSeen:    now,
+				Spools:      spoolsAt(amsSlots, extSpool),
 			}
 			sessionMu.Unlock()
-		} else if prev.Status == "printing" && status != "printing" && sess != nil {
-			now := time.Now().Unix()
+		} else if InPrint(prev.Status) && !InPrint(status) && sess != nil {
 			result := status
 			if result != "finished" && result != "error" {
 				result = "cancelled"
 			}
+			percentAtEnd := prev.Progress // progress is cleared in this report
+			if result == "finished" {
+				percentAtEnd = 100
+			}
+			filaments := pairFilaments(sess.Spools, spoolsAt(amsSlots, extSpool))
 			rec := history.Record{
 				PrinterName: p.Name,
 				FileName:    sess.FileName,
@@ -1055,28 +1106,32 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 					log.Printf("[%s] history write error: %v", p.Name, err)
 				}
 				if p.FoxTrack2APIKey != "" {
-					webhook.SendHistory(p.FoxTrack2APIKey, webhook.HistoryURLV2, webhook.HistoryPayload{
-						Type:        "print_complete",
-						PrinterName: p.Name,
-						Serial:      p.Serial,
-						FileName:    rec.FileName,
-						NozzleTemp:  rec.NozzleTemp,
-						BedTemp:     rec.BedTemp,
-						StartTime:   time.Unix(rec.StartTime, 0).UTC().Format(time.RFC3339),
-						EndTime:     time.Unix(rec.EndTime, 0).UTC().Format(time.RFC3339),
-						Duration:    rec.Duration,
-						Result:      rec.Result,
-						Timestamp:   time.Now().UTC().Format(time.RFC3339),
+					sendHistory(p.FoxTrack2APIKey, webhook.HistoryURLV2, webhook.HistoryPayload{
+						Type:         "print_complete",
+						PrinterName:  p.Name,
+						Serial:       p.Serial,
+						FileName:     rec.FileName,
+						NozzleTemp:   rec.NozzleTemp,
+						BedTemp:      rec.BedTemp,
+						StartTime:    time.Unix(rec.StartTime, 0).UTC().Format(time.RFC3339),
+						EndTime:      time.Unix(rec.EndTime, 0).UTC().Format(time.RFC3339),
+						Duration:     rec.Duration,
+						Result:       rec.Result,
+						Timestamp:    time.Now().UTC().Format(time.RFC3339),
+						PercentAtEnd: percentAtEnd,
+						Filaments:    filaments,
 					})
 				}
 			}()
 		} else {
+			if InPrint(status) && sess != nil {
+				sess.lastSeen = now
+			}
 			// Ongoing print: sample temps once per minute.
 			if status == "printing" && sess != nil {
 				if sess.FileName == "" && fileName != "" {
 					sess.FileName = fileName
 				}
-				now := time.Now().Unix()
 				if now-sess.lastSampleT >= 60 {
 					sess.TempSamples = append(sess.TempSamples, history.TempSample{
 						T:          now - sess.StartTime,
@@ -1117,18 +1172,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		webhookLastSentMu.Unlock()
 
 		if sendWebhook {
-
+			send := sendRelay // read now, not in the goroutine: tests swap it
 			go func() {
 				b := lightOn
 				var relayAms []webhook.RelayAmsSlot
 				for _, s := range amsSlots {
-					relayAms = append(relayAms, webhook.RelayAmsSlot{
-						Slot:      s.Slot,
-						Color:     s.Color,
-						Material:  s.Material,
-						Remaining: s.Remaining,
-						Active:    s.Active,
-					})
+					relayAms = append(relayAms, relaySlot(s))
 				}
 				relayPayload := webhook.RelayPayload{
 					Print: webhook.RelayPrint{
@@ -1161,12 +1210,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 					return
 				}
 				if p.APIKey != "" {
-					if err := sendRelay(p.APIKey, webhook.URL, p.Serial, p.Name, relayPayload); err != nil {
+					if err := send(p.APIKey, webhook.URL, p.Serial, p.Name, relayPayload); err != nil {
 						log.Printf("[%s] webhook error (legacy): %v", p.Name, err)
 					}
 				}
 				if p.FoxTrack2APIKey != "" {
-					if err := sendRelay(p.FoxTrack2APIKey, webhook.RelayURLV2, p.Serial, p.Name, relayPayload); err != nil {
+					if err := send(p.FoxTrack2APIKey, webhook.RelayURLV2, p.Serial, p.Name, relayPayload); err != nil {
 						log.Printf("[%s] webhook error (v2): %v", p.Name, err)
 					}
 				}

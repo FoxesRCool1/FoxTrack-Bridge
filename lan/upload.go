@@ -33,15 +33,18 @@ var (
 	errLocalFile   = errors.New("Bridge could not read the downloaded file on this computer. Try again.")
 )
 
-// PrintReady reports whether the Klipper printer called name can take a new
+// PrintReady reports whether the HTTP printer called name can take a new
 // print right now: nil, or the plain-English reason it cannot.
 func (c *Controller) PrintReady(name string) error {
 	c.mu.RLock()
-	_, ok := c.printers[name]
+	p, ok := c.printers[name]
 	state := c.states[name]
 	c.mu.RUnlock()
 	if !ok {
 		return errors.New("Bridge does not know this printer any more. Check its printer list.")
+	}
+	if p.Kind() == configpkg.KindHomeAssistant {
+		return errReadOnly
 	}
 	if state != nil && (state.Status == "printing" || state.Status == "paused") {
 		return errPrinterBusy
@@ -68,12 +71,15 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	logf := func(format string, a ...any) {
 		log.Printf("[%s] print_file: %s", name, fmt.Sprintf(format, a...))
 	}
+	if p.Kind() == configpkg.KindPrusaLink {
+		return prusaLinkUpload(ctx, p, localPath, remoteName, logf)
+	}
 	target := moonrakerURL(p, "/server/files/upload")
 	if target == "" {
 		return errNoAddress
 	}
 
-	if err := moonrakerKeyPreflight(ctx, p); err != nil {
+	if err := keyPreflight(ctx, p, moonrakerURL(p, "/server/info")); err != nil {
 		return err
 	}
 
@@ -176,14 +182,14 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	return errNotStarted
 }
 
-// moonrakerKeyPreflight makes one authenticated GET before the upload.
-// Moonraker answers a bad API key with 401 before it reads the body, which a
-// client that is still sending 50 MB sees as a broken pipe instead of a
+// keyPreflight makes one authenticated GET of u before the upload. Moonraker
+// and PrusaLink answer a bad API key with 401 before they read the body, which
+// a client that is still sending 50 MB sees as a broken pipe instead of a
 // status. A failure that is not 401/403 is left to the upload to report.
-func moonrakerKeyPreflight(ctx context.Context, p configpkg.Printer) error {
+func keyPreflight(ctx context.Context, p configpkg.Printer, u string) error {
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", moonrakerURL(p, "/server/info"), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil
 	}
