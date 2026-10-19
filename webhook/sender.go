@@ -415,7 +415,7 @@ type HistoryPayload struct {
 	Timestamp   string  `json:"timestamp"`  // RFC 3339
 
 	// Filament use. PercentAtEnd is sent even at 0 (a print cancelled while
-	// heating used none); only a Bridge older than v2.6.0 leaves it out.
+	// heating used none); only a Bridge older than v2.5.1 leaves it out.
 	PercentAtEnd   int               `json:"percent_at_end"`             // progress when the print left printing; 100 when finished
 	FilamentUsedMM float64           `json:"filament_used_mm,omitempty"` // Klipper: print_stats.filament_used at the end
 	Filaments      []HistoryFilament `json:"filaments,omitempty"`        // Bambu: every AMS slot plus the external spool (254)

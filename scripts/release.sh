@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build and publish a FoxTrack Bridge release.
 #
-#   scripts/release.sh v2.6.0            # test, build, then ask before merge + tag + push
-#   scripts/release.sh v2.6.0 --build    # test and build only, no git changes
+#   scripts/release.sh v2.5.1            # test, build, then ask before merge + tag + push
+#   scripts/release.sh v2.5.1 --build    # test and build only, no git changes
 #
 # Run it from the main checkout (not a worktree) with dev checked out and clean.
 # GitHub Actions (.github/workflows/release.yml) builds every platform when the
