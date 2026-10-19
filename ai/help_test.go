@@ -130,3 +130,15 @@ func TestBestHelpExcerpts_IncludesTopicID(t *testing.T) {
 		t.Fatalf("output does not contain topic_id: %q", got)
 	}
 }
+
+func TestSearchHelp_FindsPrusaLinkAndHomeAssistantTopics(t *testing.T) {
+	for query, want := range map[string]string{
+		"prusalink api key":       "add-prusalink",
+		"home assistant entities": "add-home-assistant",
+	} {
+		hits := SearchHelp(query)
+		if len(hits) == 0 || hits[0].ID != want {
+			t.Errorf("%q: hits = %v, want first %q", query, hits, want)
+		}
+	}
+}

@@ -313,7 +313,7 @@ func TestPrintFile_SizeMismatchFails(t *testing.T) {
 func TestPrintFile_FormatMustMatchPrinterKind(t *testing.T) {
 	cases := []struct{ printer, serialOrName, format, want string }{
 		{"klipper", "Voron", "gcode_3mf", "This file is for a Bambu Lab printer, but Voron is a Klipper printer."},
-		{"bambu", "01P00A000000001", "gcode", "This file is for a Klipper printer, but P1S Shelf is a Bambu Lab printer."},
+		{"bambu", "01P00A000000001", "gcode", "This file is a plain G-code file for a Klipper or PrusaLink printer, but P1S Shelf is a Bambu Lab printer."},
 		{"cloud", "01P00A000000002", "gcode_3mf", errPrintCloud.Error()},
 	}
 	for _, tc := range cases {

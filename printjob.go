@@ -413,9 +413,9 @@ func runPrintJob(ctx context.Context, logf func(string, ...interface{}), args ma
 	}
 	switch {
 	case a.format == "gcode_3mf" && !isBambu:
-		return fmt.Errorf("This file is for a Bambu Lab printer, but %s is a Klipper printer.", p.Name)
+		return fmt.Errorf("This file is for a Bambu Lab printer, but %s is a %s printer.", p.Name, p.KindLabel())
 	case a.format == "gcode" && isBambu:
-		return fmt.Errorf("This file is for a Klipper printer, but %s is a Bambu Lab printer.", p.Name)
+		return fmt.Errorf("This file is a plain G-code file for a Klipper or PrusaLink printer, but %s is a Bambu Lab printer.", p.Name)
 	case isBambu && p.IsCloud():
 		return errPrintCloud
 	}

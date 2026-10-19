@@ -28,6 +28,152 @@ type printSession struct {
 	BedTemp     float64
 	TempSamples []history.TempSample
 	lastSampleT int64
+	// lostSince is the first failed poll of the current outage, 0 while
+	// polls succeed. lastProgress and lastFilamentMM are the last values a
+	// successful poll saw, so an outage that outlives pollGrace still
+	// records what the print had reached.
+	lostSince      int64
+	lastProgress   int
+	lastFilamentMM float64
+}
+
+// pollGrace is how long a print survives failed polls before the Bridge gives
+// up and records it as cancelled. A short outage (Moonraker restarting, Wi-Fi
+// blinking) must not end the print: Moonraker's filament_used counts from the
+// job start, so a print split into two sessions would report the same
+// filament to FoxTrack twice. Bambu printers get the same grace in mqtt.
+const pollGrace = 10 * time.Minute
+
+// sessionEnd is what the poll loop records and sends when a print ends.
+type sessionEnd struct {
+	rec            history.Record
+	percentAtEnd   int
+	filamentUsedMM float64
+}
+
+// updateSession applies one poll to the printer's print session and returns
+// the print that this poll ended, if any. pollErr is set when the poll failed;
+// t is then a "disconnected" placeholder and is not trusted.
+func (c *Controller) updateSession(name string, t *mqttpkg.TelemetryData, pollErr error, now int64) *sessionEnd {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	sess := c.sessions[name]
+
+	if pollErr != nil {
+		if sess == nil {
+			return nil
+		}
+		if sess.lostSince == 0 {
+			sess.lostSince = now
+		}
+		if now-sess.lostSince < int64(pollGrace/time.Second) {
+			return nil
+		}
+		delete(c.sessions, name)
+		return endOf(name, sess, "cancelled", sess.lastProgress, sess.lastFilamentMM, now)
+	}
+
+	// Print A ended and print B started while the printer was unreachable:
+	// close A with what was last seen, then start B below.
+	var ended *sessionEnd
+	if sess != nil && sess.lostSince != 0 && t.Status == "printing" &&
+		sess.FileName != "" && t.FileName != "" && t.FileName != sess.FileName {
+		ended = endOf(name, sess, "cancelled", sess.lastProgress, sess.lastFilamentMM, now)
+		sess = nil
+	}
+
+	if sess == nil {
+		if t.Status == "printing" {
+			c.sessions[name] = &printSession{
+				StartTime:      now,
+				FileName:       t.FileName,
+				NozzleTemp:     t.NozzleTemp,
+				BedTemp:        t.BedTemp,
+				TempSamples:    []history.TempSample{{T: 0, NozzleTemp: t.NozzleTemp, BedTemp: t.BedTemp}},
+				lastSampleT:    now,
+				lastProgress:   t.Progress,
+				lastFilamentMM: t.FilamentUsedMM,
+			}
+		}
+		return ended
+	}
+
+	if mqttpkg.InPrint(t.Status) {
+		// Ongoing print. A pause is part of it (mqttpkg.InPrint), so it
+		// neither ends the session nor starts a new one on resume.
+		sess.lostSince = 0
+		sess.lastProgress = t.Progress
+		sess.lastFilamentMM = max(t.FilamentUsedMM, sess.lastFilamentMM)
+		if sess.FileName == "" && t.FileName != "" {
+			sess.FileName = t.FileName
+		}
+		if t.Status == "printing" && now-sess.lastSampleT >= 60 {
+			sess.TempSamples = append(sess.TempSamples, history.TempSample{
+				T:          now - sess.StartTime,
+				NozzleTemp: t.NozzleTemp,
+				BedTemp:    t.BedTemp,
+			})
+			sess.lastSampleT = now
+		}
+		return nil
+	}
+
+	// A real non-print status: the print ended.
+	delete(c.sessions, name)
+	result := t.Status
+	if result != "finished" && result != "error" {
+		result = "cancelled"
+	}
+	percent := sess.lastProgress
+	if result == "finished" {
+		percent = 100
+	}
+	// filament_used counts up through the job; keep the largest value seen.
+	return endOf(name, sess, result, percent, max(t.FilamentUsedMM, sess.lastFilamentMM), now)
+}
+
+func endOf(name string, sess *printSession, result string, percent int, filamentMM float64, now int64) *sessionEnd {
+	return &sessionEnd{
+		rec: history.Record{
+			PrinterName: name,
+			FileName:    sess.FileName,
+			NozzleTemp:  sess.NozzleTemp,
+			BedTemp:     sess.BedTemp,
+			StartTime:   sess.StartTime,
+			EndTime:     now,
+			Duration:    now - sess.StartTime,
+			Result:      result,
+			TempSamples: sess.TempSamples,
+		},
+		percentAtEnd:   percent,
+		filamentUsedMM: filamentMM,
+	}
+}
+
+// recordEnd writes an ended print to the local history and tells FoxTrack.
+func (c *Controller) recordEnd(name, fox2APIKey string, end *sessionEnd) {
+	rec := end.rec
+	if err := history.Append(rec); err != nil {
+		log.Printf("[%s] history write error: %v", name, err)
+	}
+	if fox2APIKey == "" {
+		return
+	}
+	webhook.SendHistory(fox2APIKey, webhook.HistoryURLV2, webhook.HistoryPayload{
+		Type:           "print_complete",
+		PrinterName:    name,
+		Serial:         name,
+		FileName:       rec.FileName,
+		NozzleTemp:     rec.NozzleTemp,
+		BedTemp:        rec.BedTemp,
+		StartTime:      time.Unix(rec.StartTime, 0).UTC().Format(time.RFC3339),
+		EndTime:        time.Unix(rec.EndTime, 0).UTC().Format(time.RFC3339),
+		Duration:       rec.Duration,
+		Result:         rec.Result,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		PercentAtEnd:   end.percentAtEnd,
+		FilamentUsedMM: end.filamentUsedMM,
+	})
 }
 
 type Controller struct {
@@ -248,95 +394,12 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 			// Capture previous state before overwriting, then detect print transitions.
 			c.mu.Lock()
 			prev := c.states[p.Name]
-			prevStatus := ""
-			if prev != nil {
-				prevStatus = prev.Status
-			}
 			c.states[p.Name] = &t
 			c.mu.Unlock()
 
-			c.sessionMu.Lock()
-			sess := c.sessions[p.Name]
-			// A pause is part of the print (mqttpkg.InPrint), so it neither ends
-			// the session nor starts a new one on resume.
-			if t.Status == "printing" && (sess == nil || !mqttpkg.InPrint(prevStatus)) {
-				now := time.Now().Unix()
-				c.sessions[p.Name] = &printSession{
-					StartTime:   now,
-					FileName:    t.FileName,
-					NozzleTemp:  t.NozzleTemp,
-					BedTemp:     t.BedTemp,
-					TempSamples: []history.TempSample{{T: 0, NozzleTemp: t.NozzleTemp, BedTemp: t.BedTemp}},
-					lastSampleT: now,
-				}
-				c.sessionMu.Unlock()
-			} else if mqttpkg.InPrint(prevStatus) && !mqttpkg.InPrint(t.Status) && sess != nil {
-				now := time.Now().Unix()
-				result := t.Status
-				if result != "finished" && result != "error" {
-					result = "cancelled"
-				}
-				percentAtEnd := prev.Progress // the last progress while printing
-				if result == "finished" {
-					percentAtEnd = 100
-				}
-				// filament_used counts up through the job; a poll that failed
-				// (disconnected) reads 0, so keep the last value seen.
-				filamentUsedMM := max(t.FilamentUsedMM, prev.FilamentUsedMM)
-				rec := history.Record{
-					PrinterName: p.Name,
-					FileName:    sess.FileName,
-					NozzleTemp:  sess.NozzleTemp,
-					BedTemp:     sess.BedTemp,
-					StartTime:   sess.StartTime,
-					EndTime:     now,
-					Duration:    now - sess.StartTime,
-					Result:      result,
-					TempSamples: sess.TempSamples,
-				}
-				delete(c.sessions, p.Name)
-				c.sessionMu.Unlock()
-				go func() {
-					if err := history.Append(rec); err != nil {
-						log.Printf("[%s] history write error: %v", p.Name, err)
-					}
-					if fox2APIKey != "" {
-						webhook.SendHistory(fox2APIKey, webhook.HistoryURLV2, webhook.HistoryPayload{
-							Type:           "print_complete",
-							PrinterName:    p.Name,
-							Serial:         p.Name,
-							FileName:       rec.FileName,
-							NozzleTemp:     rec.NozzleTemp,
-							BedTemp:        rec.BedTemp,
-							StartTime:      time.Unix(rec.StartTime, 0).UTC().Format(time.RFC3339),
-							EndTime:        time.Unix(rec.EndTime, 0).UTC().Format(time.RFC3339),
-							Duration:       rec.Duration,
-							Result:         rec.Result,
-							Timestamp:      time.Now().UTC().Format(time.RFC3339),
-							PercentAtEnd:   percentAtEnd,
-							FilamentUsedMM: filamentUsedMM,
-						})
-					}
-				}()
-			} else {
-				// Ongoing print: sample temps once per minute.
-				if t.Status == "printing" && sess != nil {
-					if sess.FileName == "" && t.FileName != "" {
-						sess.FileName = t.FileName
-					}
-					now := time.Now().Unix()
-					if now-sess.lastSampleT >= 60 {
-						sess.TempSamples = append(sess.TempSamples, history.TempSample{
-							T:          now - sess.StartTime,
-							NozzleTemp: t.NozzleTemp,
-							BedTemp:    t.BedTemp,
-						})
-						sess.lastSampleT = now
-					}
-				}
-				c.sessionMu.Unlock()
+			if end := c.updateSession(p.Name, &t, err, time.Now().Unix()); end != nil {
+				go c.recordEnd(p.Name, fox2APIKey, end)
 			}
-
 			if err == nil && c.shouldRelay(p.Name, prev, &t, time.Now().Unix()) {
 				if foxAPIKey != "" {
 					if err := webhook.SendRelay(foxAPIKey, webhook.URL, p.Name, p.Name, relayPayload); err != nil {

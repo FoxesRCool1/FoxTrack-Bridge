@@ -147,6 +147,19 @@ func (p Printer) Kind() string {
 	return KindBambu
 }
 
+// KindLabel is the kind in words a person reads, for messages.
+func (p Printer) KindLabel() string {
+	switch p.Kind() {
+	case KindKlipper:
+		return "Klipper"
+	case KindPrusaLink:
+		return "PrusaLink"
+	case KindHomeAssistant:
+		return "Home Assistant"
+	}
+	return "Bambu Lab"
+}
+
 // ConnectionCloud marks a Bambu printer reached through Bambu Cloud.
 const ConnectionCloud = "cloud"
 

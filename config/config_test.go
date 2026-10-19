@@ -146,3 +146,17 @@ func TestLoadConfig_BackfillSaveFailureIsLogged(t *testing.T) {
 		t.Fatalf("expected a loud warning about the failed backfill save, got log output: %s", buf.String())
 	}
 }
+
+func TestKindLabel(t *testing.T) {
+	cases := map[string]Printer{
+		"Bambu Lab":      {Name: "a", Serial: "01P00A"},
+		"Klipper":        {Name: "b", MoonrakerURL: "http://k:7125"},
+		"PrusaLink":      {Name: "c", PrusaLinkURL: "http://p"},
+		"Home Assistant": {Name: "d", HomeAssistantURL: "http://h:8123"},
+	}
+	for want, p := range cases {
+		if got := p.KindLabel(); got != want {
+			t.Errorf("%s: KindLabel = %q, want %q", p.Name, got, want)
+		}
+	}
+}

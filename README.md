@@ -24,7 +24,8 @@ Among many other tools, AI was used to develop this program. If you have a probl
 - AMS filament slot display with colors and material types (Bambu Lab only)
 - Print speed selector: Silent, Standard, Sport, Ludicrous (Bambu Lab only)
 - Fan speed control (Bambu Lab and Klipper)
-- Print a sliced file from FoxTrack: the Bridge fetches it, puts it on the printer and starts it (Bambu Lab in LAN Only Mode with Developer Mode, and Klipper)
+- Pause, resume and stop from FoxTrack (Bambu Lab in LAN mode, Klipper and PrusaLink)
+- Print a sliced file from FoxTrack: the Bridge fetches it, puts it on the printer and starts it (Bambu Lab in LAN Only Mode with Developer Mode, Klipper, and PrusaLink with a `.gcode` file)
 - GCode console for sending single commands (Bambu Lab, Advanced mode only)
 - Per-printer camera hiding, saved on the Bridge so it applies in every browser
 - Bambu Cloud sign-in for printers that are not in LAN mode (experimental)
@@ -107,6 +108,13 @@ Replace `<asset-name>` with the file you downloaded, for example `FoxTrack-Bridg
 3. PrusaLink has no camera stream. If you have a separate webcam, enter its URL.
 
 The Bridge reports status, progress, temperatures, file name and time left, and FoxTrack can pause, resume and stop a print. FoxTrack knows a PrusaLink printer by its name in the Bridge.
+
+Known limits:
+
+- The API key is the only way to sign in (the `X-Api-Key` header). HTTP Digest login with a username and password is not supported, so a printer that only offers Digest cannot be added yet.
+- Printing a file from FoxTrack takes plain `.gcode` only. Binary `.bgcode` files are not accepted.
+- FoxTrack sees the printer model as "PrusaLink" for every Prusa printer, not the exact model.
+- Fan speed control is not available.
 
 ### Home Assistant (read-only)
 
@@ -367,7 +375,8 @@ top bar. It can:
 - Answer questions about your printers from live telemetry, print history and the
   Bridge's own logs.
 - Walk you through adding a Bambu Lab printer in LAN mode or through the cloud,
-  or a Klipper printer through Moonraker.
+  a Klipper printer through Moonraker,
+  a Prusa printer through PrusaLink, or a read-only printer from Home Assistant.
 - Diagnose a printer that will not come online, and tell "not reachable on the
   network" apart from "reachable but refusing the credentials".
 - Look at a printer's camera and tell you how a print actually looks, such as whether it
