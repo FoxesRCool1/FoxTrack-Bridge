@@ -1,5 +1,49 @@
 # Changelog
 
+## v2.5.1
+
+**PrusaLink and Home Assistant printers**
+- Prusa printers with PrusaLink (MK4, XL, MINI, Core One) can be added with
+  their address and API key. The Bridge reports status, progress, temperatures,
+  file name and time left to FoxTrack, records finished prints in the history,
+  and can pause, resume and stop a print. It also accepts a `.gcode` file sent
+  from FoxTrack, puts it on the printer's USB drive and starts it.
+- Printers that Home Assistant already shows can be added read-only: enter the
+  Home Assistant address, a long-lived access token and the entity IDs that
+  hold the printer's state and, if you have them, progress, temperatures, file
+  name and time left. FoxTrack sees the status; pause, stop and printing a file
+  are not available for these printers.
+- Choose **Prusa (PrusaLink)** or **Home Assistant (read-only)** as the
+  printer type when adding a printer. Both can be edited later like any other
+  printer, and the Home Assistant token stays on this computer.
+
+**Filament use**
+- When a print ends, the Bridge tells FoxTrack how far it got: the progress when
+  it stopped, or 100 for a finished print. A cancelled or failed print no longer
+  looks like a whole one.
+- Bambu Lab: the Bridge also sends how full each AMS slot and the external spool
+  was at the start and at the end of the print, so FoxTrack can take the grams
+  used off the right spool. A slot the printer cannot measure is sent as unknown.
+- Klipper: the Bridge also sends the length of filament the print used.
+- Klipper: a short Moonraker or network outage during a print (up to ten
+  minutes) no longer ends the print early. The print reaches FoxTrack once,
+  with its whole filament length, instead of as a cancelled part plus a
+  second print that repeats the total.
+- The Bridge announces this to FoxTrack as the new `filament_use` capability.
+
+**Spool identity (Bambu Lab)**
+- For each AMS slot and the external spool, FoxTrack now gets the spool's RFID
+  tag, its Bambu filament name (for example PLA Basic), its net weight and its
+  filament profile id. FoxTrack can use them to add a Bambu Lab spool from its
+  tag. A spool without a tag sends none.
+
+**Print history**
+- Pausing a print no longer ends it in the history: a paused and resumed print is
+  one print, not a cancelled one followed by a new one.
+- Bambu Lab: if the printer connection drops for under 10 minutes during a
+  print, the print keeps its start time and its history when the connection
+  comes back.
+
 ## v2.5.0
 
 **Print from FoxTrack**

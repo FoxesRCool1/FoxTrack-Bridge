@@ -132,7 +132,7 @@ a product variant in FoxTrack and press **Print**. The Bridge does the rest:
    picks it up. FoxTrack fails a job that takes longer than 15 minutes, and so
    does the Bridge (after 14).
 2. **Checks it can run.** The file type must fit the printer: a Bambu Studio
-   `.gcode.3mf` for a Bambu Lab printer, a `.gcode` file for a Klipper printer.
+   `.gcode.3mf` for a Bambu Lab printer, a `.gcode` file for a Klipper or PrusaLink printer.
    Only one file at a time can be sent to a printer.
 3. **Downloads the file** from a link FoxTrack signs for 15 minutes, then checks
    its size and checksum (SHA-256). A file over 60 MB is refused. The link must

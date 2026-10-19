@@ -16,7 +16,7 @@ func TestStampRelayIdentity_LANBambuAnnouncesPrintFile(t *testing.T) {
 	if want := ModelFromSerial("NO-SUCH-PREFIX"); want == "" && pr.PrinterModel != "P1S" {
 		t.Fatalf("model = %q, want the telemetry model when the serial is unknown", pr.PrinterModel)
 	}
-	if strings.Join(pr.BridgeCapabilities, ",") != "print_file,set_filament" {
+	if strings.Join(pr.BridgeCapabilities, ",") != "print_file,set_filament,filament_use" {
 		t.Fatalf("capabilities = %v", pr.BridgeCapabilities)
 	}
 }

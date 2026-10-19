@@ -338,6 +338,14 @@ type RelayAmsSlot struct {
 	Material  string `json:"material"`  // e.g. "PLA", "PETG"
 	Remaining int    `json:"remaining"` // 0-100% filament remaining
 	Active    bool   `json:"active"`    // currently printing from this slot
+
+	// Spool identity, Bambu only. TagUID and TrayUUID are blank for a spool
+	// without a Bambu RFID tag.
+	TagUID        string `json:"tag_uid,omitempty"`
+	TrayUUID      string `json:"tray_uuid,omitempty"`
+	TraySubBrands string `json:"tray_sub_brands,omitempty"` // e.g. "PLA Basic"
+	TrayWeight    int    `json:"tray_weight,omitempty"`     // spool net weight in grams; 0 when unknown
+	TrayInfoIdx   string `json:"tray_info_idx,omitempty"`   // Bambu filament profile id, e.g. "GFA00"
 }
 
 type RelayPrint struct {
@@ -405,6 +413,25 @@ type HistoryPayload struct {
 	Duration    int64   `json:"duration"`   // whole seconds
 	Result      string  `json:"result"`     // "finished" | "cancelled" | "error"
 	Timestamp   string  `json:"timestamp"`  // RFC 3339
+
+	// Filament use. PercentAtEnd is sent even at 0 (a print cancelled while
+	// heating used none); only a Bridge older than v2.5.1 leaves it out.
+	PercentAtEnd   int               `json:"percent_at_end"`             // progress when the print left printing; 100 when finished
+	FilamentUsedMM float64           `json:"filament_used_mm,omitempty"` // Klipper: print_stats.filament_used at the end
+	Filaments      []HistoryFilament `json:"filaments,omitempty"`        // Bambu: every AMS slot plus the external spool (254)
+}
+
+// HistoryFilament pairs one slot's spool at the start and end of a print, so
+// FoxTrack can work out the grams used. Remain is a percent (0-100), -1 when
+// the printer does not know; both are sent even when equal.
+type HistoryFilament struct {
+	Slot        int    `json:"slot"`
+	Material    string `json:"material,omitempty"`
+	Color       string `json:"color,omitempty"`
+	TagUID      string `json:"tag_uid,omitempty"`
+	TrayWeight  int    `json:"tray_weight,omitempty"`
+	RemainStart int    `json:"remain_start"`
+	RemainEnd   int    `json:"remain_end"`
 }
 
 // historyRetryItem holds a failed SendHistory call awaiting retry.

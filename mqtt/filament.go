@@ -68,23 +68,100 @@ func mergeExternalSpool(prev *AmsSlot, reported map[string]any, trayNow string) 
 	if s.Material == "" { // an empty spool reports a black, see-through color
 		s.Color = ""
 	}
-	if r, ok := reported["remain"].(float64); ok {
+	if r, ok := number(reported["remain"]); ok {
 		s.Remaining = 0
 		if r > 0 && r <= 100 {
 			s.Remaining = int(r)
 		}
 	}
+	if w, ok := number(reported["tray_weight"]); ok {
+		s.TrayWeight = int(w)
+	}
+	for key, field := range map[string]*string{"tag_uid": &s.TagUID, "tray_uuid": &s.TrayUUID, "tray_sub_brands": &s.TraySubBrands, "tray_info_idx": &s.TrayInfoIdx} {
+		if v, ok := reported[key].(string); ok {
+			*field = v
+		}
+	}
+	s.TagUID, s.TrayUUID = tagID(s.TagUID), tagID(s.TrayUUID)
 	if trayNow != "" {
 		s.Active = trayNow == strconv.Itoa(ExternalSlot)
 	}
 	return s
 }
 
+// tagID blanks the all-zero tag_uid and tray_uuid a spool without a Bambu
+// RFID tag reports, so FoxTrack never takes them for a spool.
+func tagID(s string) string {
+	if strings.Trim(s, "0") == "" {
+		return ""
+	}
+	return s
+}
+
+func relaySlot(s AmsSlot) webhook.RelayAmsSlot {
+	return webhook.RelayAmsSlot{
+		Slot: s.Slot, Color: s.Color, Material: s.Material, Remaining: s.Remaining, Active: s.Active,
+		TagUID: s.TagUID, TrayUUID: s.TrayUUID, TraySubBrands: s.TraySubBrands, TrayWeight: s.TrayWeight, TrayInfoIdx: s.TrayInfoIdx,
+	}
+}
+
 func relayExternalSpool(s *AmsSlot) *webhook.RelayAmsSlot {
 	if s == nil {
 		return nil
 	}
-	return &webhook.RelayAmsSlot{Slot: s.Slot, Color: s.Color, Material: s.Material, Remaining: s.Remaining, Active: s.Active}
+	r := relaySlot(*s)
+	return &r
+}
+
+// spoolsAt lists every AMS slot plus the external spool: what a print
+// session records at its start and end.
+func spoolsAt(ams []AmsSlot, ext *AmsSlot) []AmsSlot {
+	out := append([]AmsSlot(nil), ams...)
+	if ext != nil {
+		out = append(out, *ext)
+	}
+	return out
+}
+
+// pairFilaments pairs each slot's remain at the start of a print with its
+// remain at the end, in slot order. A slot seen at only one end gets -1 on the
+// other. The spool named is the one loaded at the start; when a tagged spool
+// was swapped for another during the print, the end remain belongs to the new
+// spool and goes out as -1.
+func pairFilaments(start, end []AmsSlot) []webhook.HistoryFilament {
+	var out []webhook.HistoryFilament
+	at := map[int]int{} // slot -> index in out
+	add := func(s AmsSlot) int {
+		at[s.Slot] = len(out)
+		out = append(out, webhook.HistoryFilament{
+			Slot: s.Slot, Material: s.Material, Color: s.Color, TagUID: s.TagUID, TrayWeight: s.TrayWeight,
+			RemainStart: -1, RemainEnd: -1,
+		})
+		return len(out) - 1
+	}
+	for _, s := range start {
+		out[add(s)].RemainStart = historyRemain(s)
+	}
+	for _, s := range end {
+		i, ok := at[s.Slot]
+		if !ok {
+			i = add(s)
+		}
+		if f := &out[i]; f.TagUID == "" || s.TagUID == "" || f.TagUID == s.TagUID {
+			f.RemainEnd = historyRemain(s)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Slot < out[b].Slot })
+	return out
+}
+
+// historyRemain is a slot's remain for the history: 0-100, -1 when unknown.
+// The external spool's 0 means unknown too (mergeExternalSpool folds -1 into 0).
+func historyRemain(s AmsSlot) int {
+	if s.Slot == ExternalSlot && s.Remaining == 0 {
+		return -1
+	}
+	return s.Remaining
 }
 
 // filamentChanged reports a changed color or material in any slot, so an edit

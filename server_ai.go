@@ -320,6 +320,9 @@ func findPrinter(name string) (config.Printer, bool) {
 // uses, so the model's answer and the help text agree.
 func printerKind(p config.Printer) string {
 	if !isBambuPrinterConfig(p) {
+		if k := p.Kind(); k != config.KindBambu {
+			return k // klipper, prusalink or home_assistant
+		}
 		return "klipper"
 	}
 	if p.IsCloud() {
@@ -543,14 +546,14 @@ func toolTestConnection(ctx context.Context, name string) ai.ToolResult {
 	out := map[string]any{"printer_name": name, "kind": printerKind(p)}
 
 	if !isBambuPrinterConfig(p) {
-		url := strings.TrimSpace(p.MoonrakerURL)
+		url := probeURL(p)
 		if url == "" {
 			out["reachable"] = false
 			out["detail"] = "No Moonraker URL is configured for this printer."
 			return ai.ToolResult{Value: out}
 		}
-		out["tested"] = strings.TrimRight(url, "/") + "/printer/info"
-		req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(url, "/")+"/printer/info", nil)
+		out["tested"] = url
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			out["reachable"] = false
 			out["detail"] = err.Error()
@@ -566,7 +569,7 @@ func toolTestConnection(ctx context.Context, name string) ai.ToolResult {
 		out["reachable"] = resp.StatusCode < 500
 		out["http_status"] = resp.StatusCode
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
-			out["detail"] = "Moonraker answered but refused the request. It probably has authentication turned on and needs an API key."
+			out["detail"] = "The printer answered but refused the request. It needs an API key or token saved in the Bridge."
 		}
 		return ai.ToolResult{Value: out}
 	}
@@ -783,7 +786,7 @@ func toolCamera(ctx context.Context, name string) (ai.ToolResult, error) {
 		if strings.TrimSpace(p.WebcamURL) == "" {
 			return ai.ToolResult{Value: map[string]string{
 				"error":   "no_camera",
-				"message": "No webcam URL is configured for this Klipper printer, so the Bridge cannot reach its camera.",
+				"message": "No webcam URL is configured for this printer, so the Bridge cannot reach its camera.",
 			}}, nil
 		}
 		frame, err = capture.KlipperFrame(p.WebcamURL)

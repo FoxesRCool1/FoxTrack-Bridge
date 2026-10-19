@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -108,6 +109,55 @@ type Printer struct {
 	// printer's own MQTT broker (LAN mode), "cloud" is Bambu Cloud. The zero
 	// value keeps every existing config on LAN. Klipper printers ignore it.
 	Connection string `json:"connection,omitempty"`
+	// PrusaLinkURL marks a Prusa printer reached through PrusaLink (MK4, XL,
+	// MINI, Core One), e.g. http://192.168.1.50. APIKey is sent as X-Api-Key.
+	PrusaLinkURL string `json:"prusalink_url,omitempty"`
+	// Home Assistant printers are read-only: their status comes from entities
+	// the user maps. HomeAssistantToken is a long-lived access token, a secret
+	// (see redactPrinter in server.go). Only the state entity is required.
+	HomeAssistantURL   string `json:"home_assistant_url,omitempty"`
+	HomeAssistantToken string `json:"home_assistant_token,omitempty"`
+	HAStateEntity      string `json:"ha_state_entity,omitempty"`
+	HAProgressEntity   string `json:"ha_progress_entity,omitempty"`
+	HANozzleEntity     string `json:"ha_nozzle_entity,omitempty"`
+	HABedEntity        string `json:"ha_bed_entity,omitempty"`
+	HAFileEntity       string `json:"ha_file_entity,omitempty"`
+	HARemainingEntity  string `json:"ha_remaining_entity,omitempty"`
+}
+
+// Printer kinds, as sent to FoxTrack in printer_kind.
+const (
+	KindBambu         = "bambu"
+	KindKlipper       = "klipper"
+	KindPrusaLink     = "prusalink"
+	KindHomeAssistant = "home_assistant"
+)
+
+// Kind says how the printer is reached. A connection URL decides it, checked
+// in this order; a printer with none is a Bambu printer.
+func (p Printer) Kind() string {
+	switch {
+	case strings.TrimSpace(p.MoonrakerURL) != "":
+		return KindKlipper
+	case strings.TrimSpace(p.PrusaLinkURL) != "":
+		return KindPrusaLink
+	case strings.TrimSpace(p.HomeAssistantURL) != "":
+		return KindHomeAssistant
+	}
+	return KindBambu
+}
+
+// KindLabel is the kind in words a person reads, for messages.
+func (p Printer) KindLabel() string {
+	switch p.Kind() {
+	case KindKlipper:
+		return "Klipper"
+	case KindPrusaLink:
+		return "PrusaLink"
+	case KindHomeAssistant:
+		return "Home Assistant"
+	}
+	return "Bambu Lab"
 }
 
 // ConnectionCloud marks a Bambu printer reached through Bambu Cloud.

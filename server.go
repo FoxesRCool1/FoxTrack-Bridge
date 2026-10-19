@@ -775,10 +775,8 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		IP           string `json:"ip"`
-		MoonrakerURL string `json:"moonraker_url"`
-	}
+	// ip plus one of moonraker_url, prusalink_url or home_assistant_url.
+	var req config.Printer
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -787,9 +785,8 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 	reachable := false
 	detail := ""
 
-	if strings.TrimSpace(req.MoonrakerURL) != "" {
-		// Klipper: hit Moonraker's /printer/info endpoint.
-		infoURL := strings.TrimRight(req.MoonrakerURL, "/") + "/printer/info"
+	if infoURL := probeURL(req); infoURL != "" {
+		// HTTP printers: any answer below 500, even "needs a key", means reachable.
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Get(infoURL)
 		if err != nil {
@@ -817,6 +814,21 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// probeURL is the address a connection test GETs for an HTTP printer, or ""
+// for a Bambu printer.
+func probeURL(p config.Printer) string {
+	trim := func(u string) string { return strings.TrimRight(strings.TrimSpace(u), "/") }
+	switch p.Kind() {
+	case config.KindKlipper:
+		return trim(p.MoonrakerURL) + "/printer/info"
+	case config.KindPrusaLink:
+		return trim(p.PrusaLinkURL) + "/api/version"
+	case config.KindHomeAssistant:
+		return trim(p.HomeAssistantURL) + "/api/"
+	}
+	return ""
+}
+
 // redactedPrinter mirrors config.Printer for API responses, with the secret
 // fields (LAN access code, Moonraker API key) blanked and replaced by
 // "is set" flags so the UI can show that a value exists without seeing it.
@@ -833,6 +845,16 @@ type redactedPrinter struct {
 	WebcamURL    string `json:"webcam_url,omitempty"`
 	CameraHidden bool   `json:"camera_hidden"`
 	Connection   string `json:"connection,omitempty"`
+
+	PrusaLinkURL          string `json:"prusalink_url,omitempty"`
+	HomeAssistantURL      string `json:"home_assistant_url,omitempty"`
+	HomeAssistantTokenSet bool   `json:"home_assistant_token_set,omitempty"`
+	HAStateEntity         string `json:"ha_state_entity,omitempty"`
+	HAProgressEntity      string `json:"ha_progress_entity,omitempty"`
+	HANozzleEntity        string `json:"ha_nozzle_entity,omitempty"`
+	HABedEntity           string `json:"ha_bed_entity,omitempty"`
+	HAFileEntity          string `json:"ha_file_entity,omitempty"`
+	HARemainingEntity     string `json:"ha_remaining_entity,omitempty"`
 }
 
 // redactedConfig mirrors config.Config with the FoxTrack cloud tokens blanked
@@ -897,6 +919,16 @@ func redactPrinter(p config.Printer) redactedPrinter {
 		WebcamURL:    p.WebcamURL,
 		CameraHidden: p.CameraHidden,
 		Connection:   p.Connection,
+
+		PrusaLinkURL:          p.PrusaLinkURL,
+		HomeAssistantURL:      p.HomeAssistantURL,
+		HomeAssistantTokenSet: p.HomeAssistantToken != "",
+		HAStateEntity:         p.HAStateEntity,
+		HAProgressEntity:      p.HAProgressEntity,
+		HANozzleEntity:        p.HANozzleEntity,
+		HABedEntity:           p.HABedEntity,
+		HAFileEntity:          p.HAFileEntity,
+		HARemainingEntity:     p.HARemainingEntity,
 	}
 }
 
@@ -1095,6 +1127,9 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 		if p.APIKey == "" {
 			p.APIKey = prev.APIKey
 		}
+		if p.HomeAssistantToken == "" {
+			p.HomeAssistantToken = prev.HomeAssistantToken
+		}
 		// PreviousNames has no redacted-view counterpart, so a client echoing
 		// back the config it was given always omits it. Treat "absent" as "keep"
 		// rather than letting a round-trip drop the rename history.
@@ -1284,7 +1319,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 			mqttpkg.ConnectPrinter(mqttPrinter(p, cfg))
 		} else {
 			lanCtrl.AddOrUpdatePrinter(p, cfg.APIKey, cfg.FoxTrack2APIKey)
-			log.Printf("[%s] connected via Moonraker", p.Name)
+			log.Printf("[%s] connected via %s", p.Name, p.Kind())
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "printer": redactPrinter(p)})
 	default:
@@ -1432,6 +1467,16 @@ type printerEdit struct {
 	MoonrakerURL *string `json:"moonraker_url"`
 	APIKey       *string `json:"api_key"`
 	WebcamURL    *string `json:"webcam_url"`
+
+	PrusaLinkURL       *string `json:"prusalink_url"`
+	HomeAssistantURL   *string `json:"home_assistant_url"`
+	HomeAssistantToken *string `json:"home_assistant_token"`
+	HAStateEntity      *string `json:"ha_state_entity"`
+	HAProgressEntity   *string `json:"ha_progress_entity"`
+	HANozzleEntity     *string `json:"ha_nozzle_entity"`
+	HABedEntity        *string `json:"ha_bed_entity"`
+	HAFileEntity       *string `json:"ha_file_entity"`
+	HARemainingEntity  *string `json:"ha_remaining_entity"`
 }
 
 var errPrinterNotFound = errors.New("printer not found")
@@ -1526,6 +1571,51 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 		}
 		if edit.LANCode != nil && strings.TrimSpace(*edit.LANCode) != "" {
 			p.LANCode = strings.TrimSpace(*edit.LANCode)
+		}
+	case p.Kind() == config.KindPrusaLink:
+		if edit.PrusaLinkURL != nil {
+			v, err := required(edit.PrusaLinkURL, "PrusaLink URL")
+			if err != nil {
+				return nil, -1, err
+			}
+			p.PrusaLinkURL = v
+		}
+		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
+			p.APIKey = strings.TrimSpace(*edit.APIKey)
+		}
+		if edit.WebcamURL != nil {
+			p.WebcamURL = strings.TrimSpace(*edit.WebcamURL)
+		}
+	case p.Kind() == config.KindHomeAssistant:
+		for _, f := range []struct {
+			in, out *string
+			label   string
+		}{
+			{edit.HomeAssistantURL, &p.HomeAssistantURL, "Home Assistant URL"},
+			{edit.HAStateEntity, &p.HAStateEntity, "state entity"},
+		} {
+			if f.in != nil {
+				v, err := required(f.in, f.label)
+				if err != nil {
+					return nil, -1, err
+				}
+				*f.out = v
+			}
+		}
+		if edit.HomeAssistantToken != nil && strings.TrimSpace(*edit.HomeAssistantToken) != "" {
+			p.HomeAssistantToken = strings.TrimSpace(*edit.HomeAssistantToken)
+		}
+		for _, f := range []struct{ in, out *string }{
+			{edit.HAProgressEntity, &p.HAProgressEntity},
+			{edit.HANozzleEntity, &p.HANozzleEntity},
+			{edit.HABedEntity, &p.HABedEntity},
+			{edit.HAFileEntity, &p.HAFileEntity},
+			{edit.HARemainingEntity, &p.HARemainingEntity},
+			{edit.WebcamURL, &p.WebcamURL},
+		} {
+			if f.in != nil {
+				*f.out = strings.TrimSpace(*f.in)
+			}
 		}
 	default:
 		if edit.MoonrakerURL != nil {
@@ -1644,15 +1734,23 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 		}
 		mqttpkg.ConnectPrinter(mqttPrinter(after, cfg))
 	default:
-		if !renamed && before.MoonrakerURL == after.MoonrakerURL && before.APIKey == after.APIKey && before.WebcamURL == after.WebcamURL {
+		if !renamed && httpConnFields(before) == httpConnFields(after) {
 			return
 		}
 		if renamed {
 			lanCtrl.RemovePrinter(before.Name)
 		}
 		lanCtrl.AddOrUpdatePrinter(after, cfg.APIKey, cfg.FoxTrack2APIKey)
-		log.Printf("[%s] printer edited; reconnected via Moonraker", after.Name)
+		log.Printf("[%s] printer edited; reconnected via %s", after.Name, after.Kind())
 	}
+}
+
+// httpConnFields lists what an HTTP printer's poll loop reads from its config,
+// so an edit that changes none of them leaves the loop running.
+func httpConnFields(p config.Printer) [12]string {
+	return [...]string{p.MoonrakerURL, p.APIKey, p.WebcamURL, p.PrusaLinkURL,
+		p.HomeAssistantURL, p.HomeAssistantToken, p.HAStateEntity, p.HAProgressEntity,
+		p.HANozzleEntity, p.HABedEntity, p.HAFileEntity, p.HARemainingEntity}
 }
 
 // printerHistory returns the local print history for the printer named name,
@@ -1785,8 +1883,8 @@ func isBambuPrinterConfig(p config.Printer) bool {
 	if strings.TrimSpace(p.Serial) == "" {
 		return false
 	}
-	if strings.TrimSpace(p.MoonrakerURL) != "" {
-		return false // a Moonraker address always means Klipper
+	if p.Kind() != config.KindBambu {
+		return false // a Moonraker, PrusaLink or Home Assistant address decides the kind
 	}
 	if p.IsCloud() {
 		return true // the cloud reports the LAN code; its absence only disables the camera

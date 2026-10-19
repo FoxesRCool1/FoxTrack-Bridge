@@ -2,9 +2,13 @@ package mqtt
 
 import (
 	"encoding/json"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"foxtrack-bridge/webhook"
 )
 
 // The external spool comes from vt_tray, survives partial reports, follows
@@ -176,5 +180,166 @@ func TestSetFilament_RefusedBeforeSending(t *testing.T) {
 	}
 	if len(*sent) != 0 {
 		t.Fatalf("sent %v", *sent)
+	}
+}
+
+// Spool identity comes from each AMS tray and the external spool. remain and
+// tray_weight arrive as numbers or strings, an odd value reads as 0 without
+// costing the report, and an all-zero tag means the spool has none.
+func TestHandler_TrayIdentity(t *testing.T) {
+	const name = "tray-id-test"
+	RemovePrinterState(name)
+	t.Cleanup(func() { RemovePrinterState(name) })
+	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
+
+	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","bed_temper":30,"ams":{"tray_now":"0","ams":[{"id":"0","tray":[
+		{"id":"0","tray_type":"PLA","tray_color":"FF8800FF","remain":87,"tag_uid":"A1B2C3D4E5F60708","tray_uuid":"0123456789ABCDEF0123456789ABCDEF","tray_sub_brands":"PLA Basic","tray_weight":"1000","tray_info_idx":"GFA00"},
+		{"id":"1","tray_type":"PETG","tray_color":"000000FF","remain":"-1","tag_uid":"0000000000000000","tray_uuid":"00000000000000000000000000000000","tray_weight":"1000.0","tray_info_idx":"GFG99"},
+		{"id":"2","tray_type":"PLA","tray_color":"FFFFFFFF","remain":50,"tray_weight":"heavy"},
+		{"id":"3"}]}]},
+		"vt_tray":{"id":"254","tray_type":"TPU","tray_color":"112233FF","remain":"40","tray_weight":250,"tag_uid":"0000000000000000","tray_sub_brands":"TPU 95A","tray_info_idx":"GFU01"}}}`})
+
+	st := GetPrinterState(name)
+	if st.BedTemp != 30 {
+		t.Fatalf("report lost: %+v", st)
+	}
+	want := []AmsSlot{
+		{Slot: 0, Color: "FF8800", Material: "PLA", Active: true, Remaining: 87, TagUID: "A1B2C3D4E5F60708", TrayUUID: "0123456789ABCDEF0123456789ABCDEF", TraySubBrands: "PLA Basic", TrayWeight: 1000, TrayInfoIdx: "GFA00"},
+		{Slot: 1, Color: "000000", Material: "PETG", Remaining: -1, TrayWeight: 1000, TrayInfoIdx: "GFG99"},
+		{Slot: 2, Color: "FFFFFF", Material: "PLA", Remaining: 50},
+		{Slot: 3},
+	}
+	if !reflect.DeepEqual(st.AMS, want) {
+		t.Fatalf("ams\n got %+v\nwant %+v", st.AMS, want)
+	}
+	if ext := st.ExternalSpool; ext == nil || *ext != (AmsSlot{Slot: 254, Color: "112233", Material: "TPU", Remaining: 40, TraySubBrands: "TPU 95A", TrayWeight: 250, TrayInfoIdx: "GFU01"}) {
+		t.Fatalf("external spool = %+v", ext)
+	}
+
+	for slot, wantJSON := range map[int]string{
+		0: `{"slot":0,"color":"FF8800","material":"PLA","remaining":87,"active":true,"tag_uid":"A1B2C3D4E5F60708","tray_uuid":"0123456789ABCDEF0123456789ABCDEF","tray_sub_brands":"PLA Basic","tray_weight":1000,"tray_info_idx":"GFA00"}`,
+		3: `{"slot":3,"color":"","material":"","remaining":0,"active":false}`,
+	} {
+		if b, _ := json.Marshal(relaySlot(st.AMS[slot])); string(b) != wantJSON {
+			t.Fatalf("relay slot %d\n got %s\nwant %s", slot, b, wantJSON)
+		}
+	}
+}
+
+func TestPairFilaments(t *testing.T) {
+	pla := AmsSlot{Slot: 0, Material: "PLA", Color: "FF8800", TagUID: "AA", TrayWeight: 1000, Remaining: 80}
+	remain := func(s AmsSlot, r int) AmsSlot { s.Remaining = r; return s }
+	plaUse := func(start, end int) webhook.HistoryFilament {
+		return webhook.HistoryFilament{Slot: 0, Material: "PLA", Color: "FF8800", TagUID: "AA", TrayWeight: 1000, RemainStart: start, RemainEnd: end}
+	}
+	swapped := remain(pla, 100)
+	swapped.TagUID = "BB"
+	ext := AmsSlot{Slot: ExternalSlot, Material: "TPU"}
+	unknown := AmsSlot{Slot: 1, Material: "PETG", Remaining: -1}
+
+	cases := []struct {
+		name       string
+		start, end []AmsSlot
+		want       []webhook.HistoryFilament
+	}{
+		{"used", []AmsSlot{pla}, []AmsSlot{remain(pla, 72)}, []webhook.HistoryFilament{plaUse(80, 72)}},
+		{"unchanged is still sent", []AmsSlot{pla}, []AmsSlot{pla}, []webhook.HistoryFilament{plaUse(80, 80)}},
+		{"gone at the end", []AmsSlot{pla}, nil, []webhook.HistoryFilament{plaUse(80, -1)}},
+		{"new at the end", nil, []AmsSlot{pla}, []webhook.HistoryFilament{plaUse(-1, 80)}},
+		{"tagged spool swapped", []AmsSlot{pla}, []AmsSlot{swapped}, []webhook.HistoryFilament{plaUse(80, -1)}},
+		{"unknown remain, external spool, slot order", []AmsSlot{ext, unknown}, []AmsSlot{unknown, ext},
+			[]webhook.HistoryFilament{
+				{Slot: 1, Material: "PETG", RemainStart: -1, RemainEnd: -1},
+				{Slot: ExternalSlot, Material: "TPU", RemainStart: -1, RemainEnd: -1},
+			}},
+	}
+	for _, c := range cases {
+		if got := pairFilaments(c.start, c.end); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s\n got %+v\nwant %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// A print's history pairs each spool at the start with the same spool at the
+// end. A pause and a short reconnect stay inside the print; a different file
+// after a reconnect starts over.
+func TestHandler_FilamentUseHistory(t *testing.T) {
+	const name = "filament-use-test"
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // history.Append writes here
+	RemovePrinterState(name)
+	t.Cleanup(func() { RemovePrinterState(name) })
+	snapLastTMu.Lock()
+	snapLastT[name] = time.Now().Unix() + 3600 // no camera snapshot
+	snapLastTMu.Unlock()
+
+	got := make(chan webhook.HistoryPayload, 4)
+	prevHistory, prevRelay := sendHistory, sendRelay
+	sendHistory = func(_, _ string, p webhook.HistoryPayload) { got <- p }
+	sendRelay = func(_, _, _, _ string, _ webhook.RelayPayload) error { return nil }
+	t.Cleanup(func() { sendHistory, sendRelay = prevHistory, prevRelay })
+
+	handle := makeHandler(Printer{Name: name, Serial: "TEST", FoxTrack2APIKey: "key"})
+	send := func(payload string) { handle(nil, fakeMessage{payload}) }
+	ams := func(remain int) string {
+		return `"ams":{"tray_now":"0","ams":[{"id":"0","tray":[{"id":"0","tray_type":"PLA","tray_color":"FF8800FF","remain":` +
+			strconv.Itoa(remain) + `,"tag_uid":"AA00000000000001","tray_weight":"1000"},{"id":"1","tray_type":"PETG","tray_color":"000000FF","remain":-1}]}]}`
+	}
+	session := func() *printSession {
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
+		return activeSessions[name]
+	}
+	history := func() webhook.HistoryPayload {
+		t.Helper()
+		select {
+		case p := <-got:
+			return p
+		case <-time.After(2 * time.Second):
+			t.Fatal("no history sent")
+			return webhook.HistoryPayload{}
+		}
+	}
+
+	send(`{"print":{"gcode_state":"IDLE",` + ams(80) + `,"vt_tray":{"id":"254","tray_type":"TPU","tray_color":"112233FF","remain":0}}}`)
+	send(`{"print":{"gcode_state":"RUNNING","subtask_name":"cube","mc_percent":1}}`)
+	start := session()
+	if start == nil || len(start.Spools) != 3 || start.Spools[0].Remaining != 80 {
+		t.Fatalf("start snapshot = %+v", start)
+	}
+	send(`{"print":{"mc_percent":40,` + ams(76) + `}}`)
+	send(`{"print":{"gcode_state":"PAUSE"}}`)
+	send(`{"print":{"gcode_state":"RUNNING"}}`)
+	UpdatePrinterState(name, TelemetryData{Status: "connected"}) // the MQTT connection dropped and came back
+	send(`{"print":{"gcode_state":"RUNNING","subtask_name":"cube","mc_percent":60,` + ams(74) + `}}`)
+	if session() != start {
+		t.Fatal("pause or reconnect started a new session")
+	}
+	send(`{"print":{"gcode_state":"FINISH","mc_percent":100}}`)
+
+	h := history()
+	wantFil := []webhook.HistoryFilament{
+		{Slot: 0, Material: "PLA", Color: "FF8800", TagUID: "AA00000000000001", TrayWeight: 1000, RemainStart: 80, RemainEnd: 74},
+		{Slot: 1, Material: "PETG", Color: "000000", RemainStart: -1, RemainEnd: -1},
+		{Slot: ExternalSlot, Material: "TPU", Color: "112233", RemainStart: -1, RemainEnd: -1},
+	}
+	if h.Result != "finished" || h.FileName != "cube" || h.PercentAtEnd != 100 || !reflect.DeepEqual(h.Filaments, wantFil) {
+		t.Fatalf("history = %+v", h)
+	}
+
+	send(`{"print":{"gcode_state":"RUNNING","subtask_name":"plate","mc_percent":5}}`)
+	first := session()
+	UpdatePrinterState(name, TelemetryData{Status: "connected"})
+	send(`{"print":{"gcode_state":"RUNNING","subtask_name":"other","mc_percent":40,` + ams(70) + `}}`)
+	if s := session(); s == nil || s == first || s.FileName != "other" {
+		t.Fatalf("a different file after a reconnect kept the old session: %+v", s)
+	}
+	send(`{"print":{"gcode_state":"IDLE"}}`)
+	if h := history(); h.Result != "cancelled" || h.PercentAtEnd != 40 || h.FileName != "other" || len(h.Filaments) != 2 || h.Filaments[0].RemainStart != 70 {
+		t.Fatalf("cancelled history = %+v", h)
+	}
+	select {
+	case p := <-got:
+		t.Fatalf("extra history sent: %+v", p)
+	default:
 	}
 }

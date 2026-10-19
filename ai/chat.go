@@ -53,7 +53,7 @@ var SystemPrompt = strings.Join([]string{
 	"",
 	"Printer knowledge, and its one hard limit:",
 	"- General 3D printing craft is yours to use: what causes warping, stringing, poor bed adhesion, layer shifting, clogs, under-extrusion, elephant's foot. You may explain those and suggest what to change, as long as you are clear you are reasoning from general printing knowledge and not from this printer.",
-	"- Printer ERROR CODES are the exception and there is no judgement call here. An error code reported by a Bambu or Klipper printer belongs to that printer's firmware. Never guess what a code means, never guess how serious it is, and never invent a fix for one. Report the code exactly as the tool gave it and tell the user to look it up in the manufacturer's documentation.",
+	"- Printer ERROR CODES are the exception and there is no judgement call here. An error code reported by a Bambu, Klipper, PrusaLink or Home Assistant printer belongs to that printer's firmware. Never guess what a code means, never guess how serious it is, and never invent a fix for one. Report the code exactly as the tool gave it and tell the user to look it up in the manufacturer's documentation.",
 	"- Never give advice that would have the user work on a hot nozzle or hot bed without saying it is hot first.",
 	"",
 	"What you can do:",
@@ -62,7 +62,7 @@ var SystemPrompt = strings.Join([]string{
 	"- Never tell the user you have connected, fixed, changed, restarted, paused or saved anything. You have not. A user who is told something is done will stop checking.",
 	"",
 	"Helping someone connect a printer:",
-	"- Ask which kind first if you do not know: Bambu Lab in LAN mode, Bambu Lab through the cloud, or Klipper through Moonraker. The steps are different and the wrong ones waste their time.",
+	"- Ask which kind first if you do not know: Bambu Lab in LAN mode, Bambu Lab through the cloud, Klipper through Moonraker, Prusa through PrusaLink, or a printer that Home Assistant already shows (read-only). The steps are different and the wrong ones waste their time.",
 	"- Read the matching help topic before giving steps. Give the steps in order, numbered, naming the exact screen and field.",
 	"- Bambu LAN mode needs LAN Only Mode and Developer Mode on at the printer, and the IP, serial number and LAN access code copied exactly. Say that the access code changes every time LAN Only Mode is toggled.",
 	"- Never suggest working around Bambu's cloud restrictions, and never suggest retrying a cloud sign-in repeatedly. Bambu bans accounts for connection churn, and the Bridge paces itself on purpose. If the Bridge says it has paused, the correct advice is to wait.",
@@ -168,7 +168,7 @@ func ToolsFor(allowCamera bool) []Tool {
 			Type: "function",
 			Function: ToolFunction{
 				Name:        "list_printers",
-				Description: "List every printer configured in this Bridge, with its name, how it is connected (Bambu LAN, Bambu Cloud or Klipper), whether a camera is set up, and whether it is currently reporting. Call this first for almost any question about a printer, including to find out the exact name to pass to the other tools.",
+				Description: "List every printer configured in this Bridge, with its name, how it is connected (Bambu LAN, Bambu Cloud, Klipper, PrusaLink or Home Assistant), whether a camera is set up, and whether it is currently reporting. Call this first for almost any question about a printer, including to find out the exact name to pass to the other tools.",
 				Parameters:  object(map[string]any{}),
 			},
 		},
@@ -186,7 +186,7 @@ func ToolsFor(allowCamera bool) []Tool {
 			Type: "function",
 			Function: ToolFunction{
 				Name:        "test_printer_connection",
-				Description: "Actively test whether a printer is reachable on the network from this machine, right now. For a Bambu printer this opens a TCP connection to its MQTT port; for a Klipper printer it calls Moonraker. Use it to tell 'the printer is not on the network' apart from 'the printer is on the network but the Bridge is not getting data from it'. It sends no commands and changes nothing.",
+				Description: "Actively test whether a printer is reachable on the network from this machine, right now. For a Bambu printer this opens a TCP connection to its MQTT port; for a Klipper, PrusaLink or Home Assistant printer it makes an HTTP request to the printer's address (Moonraker /printer/info, PrusaLink /api/version, Home Assistant /api/) and sends no API key or token, so it shows the address answers, not that the credentials are right. Use it to tell 'the printer is not on the network' apart from 'the printer is on the network but the Bridge is not getting data from it'. It sends no commands and changes nothing.",
 				Parameters: object(map[string]any{
 					"printer_name": str("The printer's exact name, as returned by list_printers."),
 				}, "printer_name"),

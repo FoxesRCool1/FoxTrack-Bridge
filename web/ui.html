@@ -265,6 +265,8 @@
                         <option value="bambu">Bambu Lab (LAN mode)</option>
                         <option value="bambu_cloud">Bambu Lab (cloud, experimental)</option>
                         <option value="klipper">Klipper / Moonraker</option>
+                        <option value="prusalink">Prusa (PrusaLink)</option>
+                        <option value="home_assistant">Home Assistant (read-only)</option>
                     </select>
                     <i class="fas fa-chevron-down"></i>
                 </div>
@@ -281,7 +283,7 @@
                 <div>
                     <label for="pName" class="field-label">Printer name</label>
                     <input type="text" id="pName" autocomplete="off" class="field" placeholder="e.g. Studio P1S">
-                    <p id="pNameHint" class="hidden text-xs text-text-2 mt-1.5">FoxTrack knows Klipper printers by name. If you rename this printer, link it again in FoxTrack.</p>
+                    <p id="pNameHint" class="hidden text-xs text-text-2 mt-1.5">FoxTrack knows this printer by its name. If you rename it, link it again in FoxTrack.</p>
                 </div>
                 <div id="fieldIp">
                     <label for="pIp" id="labelIp" class="field-label">IP address</label>
@@ -290,6 +292,45 @@
                 <div id="fieldMoonrakerUrl" class="hidden">
                     <label for="pMoonrakerUrl" class="field-label">Moonraker URL</label>
                     <input type="text" id="pMoonrakerUrl" autocomplete="off" class="field" placeholder="http://192.168.1.120:7125">
+                </div>
+                <div id="fieldPrusaLinkUrl" class="hidden">
+                    <label for="pPrusaLinkUrl" class="field-label">PrusaLink URL</label>
+                    <input type="text" id="pPrusaLinkUrl" autocomplete="off" class="field" placeholder="http://192.168.1.50">
+                </div>
+                <div id="fieldHomeAssistant" class="hidden space-y-3">
+                    <div>
+                        <label for="pHaUrl" class="field-label">Home Assistant URL</label>
+                        <input type="text" id="pHaUrl" autocomplete="off" class="field" placeholder="http://homeassistant.local:8123">
+                    </div>
+                    <div>
+                        <label for="pHaToken" class="field-label">Long-lived access token</label>
+                        <input type="password" id="pHaToken" autocomplete="off" class="field field-mono" placeholder="Access token">
+                    </div>
+                    <div>
+                        <label for="pHaState" class="field-label">Printer state entity</label>
+                        <input type="text" id="pHaState" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_printer_state">
+                    </div>
+                    <div>
+                        <label for="pHaProgress" class="field-label">Progress entity <span class="font-normal">(optional)</span></label>
+                        <input type="text" id="pHaProgress" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_progress">
+                    </div>
+                    <div>
+                        <label for="pHaNozzle" class="field-label">Nozzle temperature entity <span class="font-normal">(optional)</span></label>
+                        <input type="text" id="pHaNozzle" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_nozzle_temperature">
+                    </div>
+                    <div>
+                        <label for="pHaBed" class="field-label">Bed temperature entity <span class="font-normal">(optional)</span></label>
+                        <input type="text" id="pHaBed" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_heatbed_temperature">
+                    </div>
+                    <div>
+                        <label for="pHaFile" class="field-label">File name entity <span class="font-normal">(optional)</span></label>
+                        <input type="text" id="pHaFile" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_filename">
+                    </div>
+                    <div>
+                        <label for="pHaRemaining" class="field-label">Time left entity <span class="font-normal">(optional)</span></label>
+                        <input type="text" id="pHaRemaining" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_print_finish">
+                        <p class="text-xs text-text-2 mt-1.5">Seconds, minutes or hours (read from the entity's unit), or a finish time.</p>
+                    </div>
                 </div>
                 <div id="fieldSerial">
                     <label for="pSerial" class="field-label">Serial number</label>
@@ -300,13 +341,13 @@
                     <input type="password" id="pLanCode" autocomplete="off" class="field field-mono" placeholder="8-character code">
                 </div>
                 <div id="fieldKlipperKey" class="hidden">
-                    <label for="pKlipperKey" class="field-label">Moonraker API key <span class="font-normal">(optional)</span></label>
+                    <label for="pKlipperKey" id="labelKlipperKey" class="field-label">Moonraker API key <span class="font-normal">(optional)</span></label>
                     <input type="password" id="pKlipperKey" autocomplete="off" class="field field-mono" placeholder="Moonraker API key">
                 </div>
                 <div id="fieldWebcamUrl" class="hidden">
                     <label for="pWebcamUrl" class="field-label">Webcam URL <span class="font-normal">(optional)</span></label>
                     <input type="text" id="pWebcamUrl" autocomplete="off" class="field" placeholder="http://192.168.1.120/webcam/?action=stream">
-                    <p class="text-xs text-text-2 mt-1.5">Leave blank to auto-detect. Set this if the camera button doesn't work.</p>
+                    <p id="webcamHint" class="text-xs text-text-2 mt-1.5">Leave blank to auto-detect. Set this if the camera button doesn't work.</p>
                 </div>
                 <div class="flex items-center gap-2 pt-1 flex-wrap">
                     <button onclick="testConnection()" id="testBtn" class="btn-outline btn-lg">Test connection</button>
@@ -720,8 +761,20 @@ const brands = {
     klipper: {
         instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Use your Moonraker endpoint (usually http://printer-ip:7125). API key is only needed if Moonraker auth is enabled.</div>',
         fields: { ip: false, serial: false, lanCode: false, moonrakerUrl: true, klipperKey: true, webcamUrl: true }
+    },
+    prusalink: {
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">For Prusa MK4, XL, MINI and Core One. Turn on PrusaLink on the printer, then enter the address and API key shown on its PrusaLink settings screen.</div>',
+        fields: { prusaLinkUrl: true, klipperKey: true, webcamUrl: true },
+        keyLabel: 'PrusaLink API key', keyPlaceholder: 'PrusaLink API key'
+    },
+    home_assistant: {
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Read-only: FoxTrack sees the status but cannot pause, stop or start a print. Create a long-lived access token on your Home Assistant profile page, then enter the entity IDs of your printer\'s sensors.</div>',
+        fields: { homeAssistant: true, webcamUrl: true }
     }
 };
+
+// Printer kinds the Bridge reaches over HTTP and FoxTrack knows by name.
+const NAME_KEYED_BRANDS = ['klipper', 'prusalink', 'home_assistant'];
 
 function escHtml(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -776,10 +829,17 @@ function detectStatusTransitions() {
 
 function isCloudPrinter(p) { return !!(p && p.connection === 'cloud'); }
 
-function printerTypeLabel(p) {
-    if (isCloudPrinter(p)) return 'Bambu cloud';
-    return (p && p.serial && (p.lan_code || p.lan_code_set) && !p.moonraker_url) ? 'Bambu' : 'Klipper';
+// Mirrors config.Printer.Kind: a connection URL decides, in this order.
+function printerBrand(p) {
+    if (isCloudPrinter(p)) return 'bambu_cloud';
+    if (p && p.moonraker_url) return 'klipper';
+    if (p && p.prusalink_url) return 'prusalink';
+    if (p && p.home_assistant_url) return 'home_assistant';
+    return (p && p.serial && (p.lan_code || p.lan_code_set)) ? 'bambu' : 'klipper';
 }
+
+const BRAND_LABELS = { bambu_cloud: 'Bambu cloud', bambu: 'Bambu', klipper: 'Klipper', prusalink: 'PrusaLink', home_assistant: 'Home Assistant' };
+function printerTypeLabel(p) { return BRAND_LABELS[printerBrand(p)]; }
 
 let toastTimer = null;
 function toast(msg, type = 'success') {
@@ -890,6 +950,7 @@ function statusMeta(status) {
         disconnected: { label:'Offline',    dot:'bg-text-2',        badge:'badge-muted' },
         connected:    { label:'Connected',  dot:'bg-text-2',        badge:'badge-muted' },
         idle:         { label:'Idle',       dot:'bg-brand',         badge:'badge-muted' },
+        busy:         { label:'Busy',       dot:'bg-text-2',        badge:'badge-muted' },
     };
     return map[status] || { label:'Connecting', dot:'bg-text-2 pulse', badge:'badge-muted' };
 }
@@ -1300,7 +1361,10 @@ function openAddPrinterModal() {
 // dashboard never receives them) and a blank secret keeps the saved one.
 let editingPrinterId = null;
 
-const SECRET_PLACEHOLDERS = { pLanCode: '8-character code', pKlipperKey: 'Moonraker API key' };
+const SECRET_PLACEHOLDERS = { pLanCode: '8-character code', pKlipperKey: 'Moonraker API key', pHaToken: 'Access token' };
+
+// Home Assistant entity inputs and the printer fields they edit.
+const HA_FIELDS = { pHaState: 'ha_state_entity', pHaProgress: 'ha_progress_entity', pHaNozzle: 'ha_nozzle_entity', pHaBed: 'ha_bed_entity', pHaFile: 'ha_file_entity', pHaRemaining: 'ha_remaining_entity' };
 
 function openEditPrinterModalEncoded(enc) { openEditPrinterModal(decodePrinterId(enc)); }
 
@@ -1309,22 +1373,26 @@ function openEditPrinterModal(id) {
     if (!printer) return;
     closeAddPrinterModal();
     editingPrinterId = id;
-    const brand = isCloudPrinter(printer) ? 'bambu_cloud' : (printerTypeLabel(printer) === 'Bambu' ? 'bambu' : 'klipper');
+    const brand = printerBrand(printer);
     document.getElementById('printerModalTitle').textContent = 'Edit printer';
     document.getElementById('printerModalSubtitle').textContent = 'Change the details of ' + printer.name + '. Saving reconnects the printer if its connection details changed.';
     document.getElementById('fieldBrand').classList.add('hidden');
     document.getElementById('pBrand').value = brand;
     onBrandChange();
     document.getElementById('pName').value = printer.name || '';
-    // The Bridge reports a Klipper printer to FoxTrack under its name, so a
+    // The Bridge reports these printers to FoxTrack under their name, so a
     // rename shows up there as a new device.
-    document.getElementById('pNameHint').classList.toggle('hidden', brand !== 'klipper');
+    document.getElementById('pNameHint').classList.toggle('hidden', !NAME_KEYED_BRANDS.includes(brand));
     document.getElementById('pIp').value = printer.ip || '';
     document.getElementById('pSerial').value = printer.serial || '';
     document.getElementById('pMoonrakerUrl').value = printer.moonraker_url || '';
     document.getElementById('pWebcamUrl').value = printer.webcam_url || '';
+    document.getElementById('pPrusaLinkUrl').value = printer.prusalink_url || '';
+    document.getElementById('pHaUrl').value = printer.home_assistant_url || '';
+    Object.entries(HA_FIELDS).forEach(([id, key]) => { document.getElementById(id).value = printer[key] || ''; });
     if (printer.lan_code_set) document.getElementById('pLanCode').placeholder = 'Saved. Leave blank to keep it';
     if (printer.api_key_set) document.getElementById('pKlipperKey').placeholder = 'Saved. Leave blank to keep it';
+    if (printer.home_assistant_token_set) document.getElementById('pHaToken').placeholder = 'Saved. Leave blank to keep it';
     const btn = document.getElementById('connectBtn');
     if (btn) btn.textContent = 'Save';
     openModal('addPrinterModal');
@@ -1338,7 +1406,7 @@ function closeAddPrinterModal() {
     document.getElementById('fieldBrand').classList.remove('hidden');
     document.getElementById('pNameHint').classList.add('hidden');
     Object.entries(SECRET_PLACEHOLDERS).forEach(([id, text]) => { const el=document.getElementById(id); if(el) el.placeholder=text; });
-    ['pName','pIp','pMoonrakerUrl','pSerial','pLanCode','pKlipperKey','pWebcamUrl'].forEach(id => { const el=document.getElementById(id); if(el) { el.value=''; el.classList.remove(FIELD_ERROR_CLASS); } });
+    ['pName','pIp','pMoonrakerUrl','pSerial','pLanCode','pKlipperKey','pWebcamUrl','pPrusaLinkUrl','pHaUrl','pHaToken',...Object.keys(HA_FIELDS)].forEach(id => { const el=document.getElementById(id); if(el) { el.value=''; el.classList.remove(FIELD_ERROR_CLASS); } });
     document.getElementById('pBrand').value = '';
     document.getElementById('brandInstructions').classList.add('hidden');
     document.getElementById('printerFields').classList.add('hidden');
@@ -1374,6 +1442,12 @@ function onBrandChange() {
     cfg.fields.klipperKey ? (kk.classList.remove('hidden'), kk.style.display='') : (kk.classList.add('hidden'), kk.style.display='none');
     const wc = document.getElementById('fieldWebcamUrl');
     cfg.fields.webcamUrl ? (wc.classList.remove('hidden'), wc.style.display='') : (wc.classList.add('hidden'), wc.style.display='none');
+    document.getElementById('fieldPrusaLinkUrl').classList.toggle('hidden', !cfg.fields.prusaLinkUrl);
+    document.getElementById('fieldHomeAssistant').classList.toggle('hidden', !cfg.fields.homeAssistant);
+    // Only Moonraker has webcam paths to guess.
+    document.getElementById('webcamHint').classList.toggle('hidden', brand !== 'klipper');
+    document.getElementById('labelKlipperKey').innerHTML = cfg.keyLabel ? escHtml(cfg.keyLabel) : 'Moonraker API key <span class="font-normal">(optional)</span>';
+    if (cfg.fields.klipperKey) document.getElementById('pKlipperKey').placeholder = cfg.keyPlaceholder || SECRET_PLACEHOLDERS.pKlipperKey;
     const pn = document.getElementById('pName');
     if (pn) pn.placeholder = cfg.fields.moonrakerUrl ? 'e.g. Creality K1' : 'e.g. Studio P1S';
     const isCloud = !!cfg.fields.cloudDevices;
@@ -1425,12 +1499,18 @@ async function testConnection() {
     const moonrakerUrl = document.getElementById('pMoonrakerUrl').value.trim();
     const result = document.getElementById('testResult');
     const btn = document.getElementById('testBtn');
-    const target = brand === 'klipper' ? moonrakerUrl : ip;
-    if (!target) { showAddPrinterError(brand==='klipper' ? 'Enter a Moonraker URL first' : 'Enter an IP address first'); return; }
+    // Send only this type's address: the server tests the first URL it finds.
+    const http = {
+        klipper: ['moonraker_url', moonrakerUrl, 'Enter a Moonraker URL first'],
+        prusalink: ['prusalink_url', document.getElementById('pPrusaLinkUrl').value.trim(), 'Enter a PrusaLink URL first'],
+        home_assistant: ['home_assistant_url', document.getElementById('pHaUrl').value.trim(), 'Enter a Home Assistant URL first'],
+    }[brand];
+    const target = http ? http[1] : ip;
+    if (!target) { showAddPrinterError(http ? http[2] : 'Enter an IP address first'); return; }
     if (btn) { btn.disabled=true; btn.textContent='Testing…'; }
     result.className = 'text-xs text-text-2'; result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing…'; result.title = ''; result.classList.remove('hidden');
     try {
-        const data = await apiFetch('/api/test', { method:'POST', body:JSON.stringify({ ip, moonraker_url:moonrakerUrl }) });
+        const data = await apiFetch('/api/test', { method:'POST', body:JSON.stringify(http ? { [http[0]]: target } : { ip }) });
         if (data && data.reachable) {
             result.className='text-xs text-brand'; result.innerHTML='<i class="fas fa-check-circle mr-1"></i> Reachable';
         } else {
@@ -1473,6 +1553,9 @@ async function addPrinter() {
     const lanCode = document.getElementById('pLanCode').value.trim();
     const klipperKey = document.getElementById('pKlipperKey').value.trim();
     const webcamUrl = document.getElementById('pWebcamUrl').value.trim();
+    const prusaLinkUrl = document.getElementById('pPrusaLinkUrl').value.trim();
+    const ha = { home_assistant_url: document.getElementById('pHaUrl').value.trim(), home_assistant_token: document.getElementById('pHaToken').value.trim() };
+    Object.entries(HA_FIELDS).forEach(([id, key]) => { ha[key] = document.getElementById(id).value.trim(); });
     const errEl = document.getElementById('addPrinterError');
     if (errEl) { errEl.textContent=''; errEl.classList.add('hidden'); }
 
@@ -1489,12 +1572,26 @@ async function addPrinter() {
     if (brand === 'klipper') {
         markField('pMoonrakerUrl', !moonrakerUrl); if (!moonrakerUrl) invalid = true;
     }
+    if (brand === 'prusalink') {
+        markField('pPrusaLinkUrl', !prusaLinkUrl); if (!prusaLinkUrl) invalid = true;
+        // An edit may leave the key blank to keep the saved one.
+        if (!editingPrinterId) { markField('pKlipperKey', !klipperKey); if (!klipperKey) invalid = true; }
+    }
+    if (brand === 'home_assistant') {
+        markField('pHaUrl', !ha.home_assistant_url); if (!ha.home_assistant_url) invalid = true;
+        markField('pHaState', !ha.ha_state_entity); if (!ha.ha_state_entity) invalid = true;
+        if (!editingPrinterId) { markField('pHaToken', !ha.home_assistant_token); if (!ha.home_assistant_token) invalid = true; }
+    }
     if (editingPrinterId) {
         if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return; }
-        await savePrinterEdit(editingPrinterId, brand, { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl });
+        await savePrinterEdit(editingPrinterId, brand, { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl, prusalink_url:prusaLinkUrl, ...ha });
         return;
     }
     let payload = { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl };
+    // The newer types send only their own fields, so a URL typed under another
+    // type before switching can never decide what kind of printer this is.
+    if (brand === 'prusalink') payload = { name, prusalink_url: prusaLinkUrl, api_key: klipperKey, webcam_url: webcamUrl };
+    if (brand === 'home_assistant') payload = { name, webcam_url: webcamUrl, ...ha };
     if (brand === 'bambu_cloud') {
         const picked = document.querySelector('input[name="cloudDevice"]:checked');
         if (!picked) { showAddPrinterError('Pick a printer from your Bambu account'); return; }
@@ -1521,6 +1618,13 @@ async function savePrinterEdit(id, brand, fields) {
     const payload = { name: fields.name };
     if (brand === 'bambu') Object.assign(payload, { ip: fields.ip, serial: fields.serial, lan_code: fields.lan_code });
     else if (brand === 'bambu_cloud') payload.ip = fields.ip;
+    else if (brand === 'prusalink') Object.assign(payload, { prusalink_url: fields.prusalink_url, api_key: fields.api_key, webcam_url: fields.webcam_url });
+    else if (brand === 'home_assistant') {
+        payload.webcam_url = fields.webcam_url;
+        payload.home_assistant_url = fields.home_assistant_url;
+        payload.home_assistant_token = fields.home_assistant_token;
+        Object.values(HA_FIELDS).forEach(key => { payload[key] = fields[key]; });
+    }
     else Object.assign(payload, { moonraker_url: fields.moonraker_url, api_key: fields.api_key, webcam_url: fields.webcam_url });
     const btn = document.getElementById('connectBtn');
     if (btn) { btn.textContent='Saving…'; btn.disabled=true; }
@@ -1783,7 +1887,7 @@ function emptyPrintersHtml() {
         + '<div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">'
         + '<div class="rounded-md border border-border p-4 flex flex-col items-start">'
         + '<p class="text-sm font-medium">1. Add a printer</p>'
-        + '<p class="mt-1 mb-3 text-xs leading-relaxed text-text-2">Bambu Lab or Klipper, on the same network as the Bridge.</p>'
+        + '<p class="mt-1 mb-3 text-xs leading-relaxed text-text-2">Bambu Lab, Klipper or PrusaLink on the same network as the Bridge, or a printer in Home Assistant.</p>'
         + '<button onclick="openAddPrinterModal()" class="btn-outline">Add printer</button>'
         + '</div>'
         + '<div class="rounded-md border border-border p-4 flex flex-col items-start">'
@@ -2129,6 +2233,10 @@ function cardInnerHTML(printer, live) {
     const isCloud = isCloudPrinter(printer);
     const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
     const typeLabel = printerTypeLabel(printer);
+    // PrusaLink: pause, resume and stop only. Home Assistant: read-only.
+    const brand = printerBrand(printer);
+    const noExtras = brand === 'prusalink' || brand === 'home_assistant';
+    const readOnly = brand === 'home_assistant';
 
     const sel = removeMode && selectedForRemoval.has(printer.id);
     const checkbox = removeMode
@@ -2193,7 +2301,7 @@ function cardInnerHTML(printer, live) {
     // Fan speed panel: collapsible, works for both Bambu and Klipper
     const fanPending = printer.id in pendingFanTarget;
     const fanTargetPct = pendingFanTarget[printer.id];
-    const fanPanel = (!removeMode && !isCloud) ?
+    const fanPanel = (!removeMode && !isCloud && !noExtras) ?
         '<div id="fan-' + enc + '" class="fan-panel hidden border-t border-border px-4 py-3">'
         + '<div class="flex items-center gap-1.5">'
         + '<span class="text-[11px] text-text-2 mr-1">Part fan</span>'
@@ -2217,13 +2325,13 @@ function cardInnerHTML(printer, live) {
         + '<div class="flex flex-wrap gap-1.5">'
         // Cloud printers: current Bambu firmware only honours the light over the
         // cloud, so pause/stop/fan/speed/GCode are LAN-only buttons.
-        + (isCloud ? '' :
+        + ((isCloud || readOnly) ? '' :
             '<button ' + (status === 'printing' ? '' : 'disabled ') + 'onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline">Pause</button>'
             + '<button ' + (status === 'paused' ? '' : 'disabled ') + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
             + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger">Stop</button>')
-        + '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '">' + lightHtml + '</button>'
+        + (noExtras ? '' : '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '">' + lightHtml + '</button>')
         + camControls
-        + (isCloud ? '' :
+        + ((isCloud || noExtras) ? '' :
             '<button onclick="toggleFan(\'' + enc + '\')" class="btn-outline"><i class="fas fa-fan mr-1"></i>Fan</button>'
             + (isBambu
                 ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'

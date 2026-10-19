@@ -111,20 +111,50 @@ The URL must include the scheme (http:// or https://) and the port. The Bridge c
 A common clash: the Bridge listens on port 8080 by default, and 8080 is also the default webcam port for mjpg-streamer on Mainsail and Fluidd. Running both on the same machine collides unless one is moved. Change the Bridge with --port 9000 or the FOXTRACK_BRIDGE_PORT environment variable; if both are set, --port wins.`,
 	},
 	{
+		ID:       "add-prusalink",
+		Title:    "Adding a Prusa printer through PrusaLink",
+		Keywords: []string{"prusa", "prusalink", "mk4", "xl", "mini", "core one", "usb drive", "api key", "add", "connect"},
+		Body: `Prusa printers with PrusaLink (MK4, XL, MINI and Core One) connect over PrusaLink's HTTP API.
+
+1. On the printer, turn on PrusaLink in the network settings. Write down the printer's IP address and the API key shown on its PrusaLink settings screen.
+2. In the dashboard go to Printers, click "Add Printer" and choose Prusa (PrusaLink).
+3. Enter the URL (for example http://192.168.1.50) and the API key, then click Connect.
+4. PrusaLink has no camera stream. If there is a separate webcam, enter its URL.
+
+The Bridge reads status, progress, temperatures, file name and time left, and it records finished prints in the history. FoxTrack can pause, resume and stop a print. FoxTrack can also send a .gcode file: the Bridge puts it on the printer's USB drive and starts it. FoxTrack knows a PrusaLink printer by its name in the Bridge.
+
+The Bridge checks reachability by calling /api/version on that URL.`,
+	},
+	{
+		ID:       "add-home-assistant",
+		Title:    "Adding a printer through Home Assistant (read-only)",
+		Keywords: []string{"home assistant", "homeassistant", "entity", "entities", "entity id", "access token", "long-lived", "read-only", "read only", "8123", "add", "connect"},
+		Body: `A Home Assistant printer is read-only. If Home Assistant already shows the printer (for example through its PrusaLink, OctoPrint or Bambu Lab integration), the Bridge can read the printer's status from Home Assistant. FoxTrack then sees the status but cannot pause, stop or start a print.
+
+1. In Home Assistant, open your profile, then Security, and create a long-lived access token.
+2. Find the printer's entity IDs under Settings > Devices & services > Entities. The entity that holds the printer's state is required. Progress, nozzle temperature, bed temperature, file name and time left are optional.
+3. In the dashboard go to Printers, click "Add Printer" and choose Home Assistant (read-only).
+4. Enter the Home Assistant URL (usually http://homeassistant.local:8123), the token and the entity IDs, then click Connect.
+
+The state entity can read idle, printing, paused, finished or error (running, standby, complete and failed work too). Unavailable or unknown shows the printer as offline. A time left entity can count seconds, minutes or hours (the Bridge reads its unit), or hold the time the print will finish.
+
+The Bridge checks reachability by calling /api/ on the Home Assistant URL. That call carries no token, so it shows that Home Assistant answers, not that the token is right. FoxTrack knows a Home Assistant printer by its name in the Bridge.`,
+	},
+	{
 		ID:       "edit-printer",
 		Title:    "Changing a saved printer (new IP address, rename, new access code)",
 		Keywords: []string{"edit", "change", "rename", "new ip", "ip changed", "update", "pencil", "modify", "access code changed", "wrong serial", "moved"},
 		Body: `A saved printer can be changed without removing it. Click the pencil icon on the printer's card, change the details, and click Save.
 
-What can be changed depends on the type. Bambu LAN mode: name, IP address, serial number and LAN access code. Bambu Cloud: name, and the IP address used for the camera. Klipper: name, Moonraker URL, Moonraker API key and webcam URL. The printer type itself cannot be changed; remove the printer and add it again for that.
+What can be changed depends on the type. Bambu LAN mode: name, IP address, serial number and LAN access code. Bambu Cloud: name, and the IP address used for the camera. Klipper: name, Moonraker URL, Moonraker API key and webcam URL. PrusaLink: name, PrusaLink URL, API key and webcam URL. Home Assistant: name, Home Assistant URL, token, the state entity ID, the optional entity IDs (progress, nozzle temperature, bed temperature, file name, time left) and webcam URL. The printer type itself cannot be changed; remove the printer and add it again for that.
 
-The access code and API key fields start blank because the dashboard never receives saved secrets. Leaving them blank keeps the saved value.
+The access code, API key and Home Assistant token fields start blank because the dashboard never receives saved secrets. Leaving them blank keeps the saved value.
 
 Saving reconnects only that printer, and only if a connection detail changed. Other printers keep running.
 
 A printer cannot be renamed during a print, because the running print is tracked under its name and its history record would be lost. The IP address can be changed during a print. Local print history from before a rename stays with the printer.
 
-In FoxTrack, a renamed Bambu printer keeps its link because FoxTrack follows the serial number. A renamed Klipper printer shows up in FoxTrack as a new device, because FoxTrack knows Klipper printers by name. Changing a Bambu serial number has the same effect. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays under "Detected on your network, not linked" and shows as offline. A FoxTrack owner or admin can clear it with its Remove button, which appears once the device is offline.`,
+In FoxTrack, a renamed Bambu printer keeps its link because FoxTrack follows the serial number. A renamed Klipper, PrusaLink or Home Assistant printer shows up in FoxTrack as a new device, because FoxTrack knows those printers by name. Changing a Bambu serial number has the same effect. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays under "Detected on your network, not linked" and shows as offline. A FoxTrack owner or admin can clear it with its Remove button, which appears once the device is offline.`,
 	},
 	{
 		ID:       "connection-problems",
@@ -146,6 +176,10 @@ Bambu Cloud: check Settings > Bambu Cloud. A token lasts about 90 days and canno
 
 Klipper: open the Moonraker URL in a browser on the same machine as the Bridge. If it does not answer there, the problem is Moonraker or the network, not the Bridge. If Moonraker has authentication on, the API key must be filled in.
 
+PrusaLink: open the printer's URL in a browser on the same machine as the Bridge. If it does not answer there, the problem is the printer or the network, not the Bridge. Check that the API key matches the one on the printer's PrusaLink settings screen.
+
+Home Assistant: open the Home Assistant URL in a browser on the same machine as the Bridge. Then check that the long-lived access token is still valid and that the entity IDs match what Home Assistant shows under Settings > Devices & services > Entities. A state entity that reads unavailable or unknown shows the printer as offline.
+
 The Bridge writes a line to its log for each connection attempt and failure, prefixed with the printer's name. The log is the fastest way to tell "wrong credentials" from "no route to host".`,
 	},
 	{
@@ -162,11 +196,13 @@ Bambu Cloud: the camera works only when the printer is on the same network as th
 
 Klipper: the Bridge proxies the webcam URL configured for that printer.
 
+PrusaLink and Home Assistant: neither has a camera stream of its own. The Bridge proxies the webcam URL only if one is set on the printer; without one there is no feed.
+
 A camera can be hidden per printer. That setting is saved on the Bridge, so it applies in every browser, and it only affects the dashboard; snapshot sending to FoxTrack is unaffected.
 
-If a feed is black or blank: confirm the printer's own interface shows the camera, check the printer is reachable at all (an offline printer has no camera either), and for Klipper confirm the webcam URL is right and reachable from the Bridge's machine rather than only from your laptop.
+If a feed is black or blank: confirm the printer's own interface shows the camera, check the printer is reachable at all (an offline printer has no camera either), and for Klipper, PrusaLink and Home Assistant confirm the webcam URL is right and reachable from the Bridge's machine rather than only from your laptop.
 
-In FoxTrack, the live picture only loads when the browser runs on the same computer as the Bridge. Everywhere else FoxTrack shows the latest snapshot. While a print is running or paused, the Bridge sends a snapshot about every 30 seconds when a FoxTrack page with the printers is open, and about every 10 minutes otherwise. An idle printer's snapshot does not update. Klipper printers send snapshots only when a webcam URL is set on the printer.`,
+In FoxTrack, the live picture only loads when the browser runs on the same computer as the Bridge. Everywhere else FoxTrack shows the latest snapshot. While a print is running or paused, the Bridge sends a snapshot about every 30 seconds when a FoxTrack page with the printers is open, and about every 10 minutes otherwise. An idle printer's snapshot does not update. Klipper, PrusaLink and Home Assistant printers send snapshots only when a webcam URL is set on the printer.`,
 	},
 	{
 		ID:       "print-problems",
@@ -185,7 +221,7 @@ What the Bridge cannot tell you: it does not see the print. Nothing in the telem
 
 A paused Bambu print is usually one of: filament runout, an AMS slot change, a user pause, or the printer detecting a problem itself. The status and error fields distinguish them.
 
-The Bridge never controls a print on its own. It can pause, stop, set speed and set fan for LAN-mode Bambu printers and Klipper printers, only when a person presses the button.`,
+The Bridge never controls a print on its own. It can pause, stop, set speed and set fan for LAN-mode Bambu printers and Klipper printers, and pause, resume and stop for PrusaLink printers, only when a person presses the button. Home Assistant printers are read-only.`,
 	},
 	{
 		ID:       "controls",
@@ -199,6 +235,10 @@ Bambu Lab over the cloud: the light toggle only. Pause, stop, speed, fan and GCo
 
 Klipper / Moonraker: pause, stop and fan speed.
 
+Prusa (PrusaLink): pause, resume and stop.
+
+Home Assistant (read-only): no controls. The Bridge only reads the status.
+
 AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.`,
 	},
 	{
@@ -211,13 +251,13 @@ To link: in FoxTrack, open Settings > Integrations > FoxTrack Bridge and create 
 
 Once linked, the Bridge relays telemetry, print history and camera snapshots to FoxTrack so printers can be monitored remotely. Each printer then appears on the FoxTrack Printers page: in the Live view, and in the Fleet view under "Detected on your network, not linked". Pick a FoxTrack printer in its "Link to printer" menu to link them.
 
-Printers that already exist in FoxTrack should be linked, not deleted. Deleting a printer in FoxTrack also deletes its maintenance schedules, maintenance log and installed hardware. FoxTrack recognizes a Bambu printer by its serial number and a Klipper printer by its name in the Bridge, so the names do not have to match.
+Printers that already exist in FoxTrack should be linked, not deleted. Deleting a printer in FoxTrack also deletes its maintenance schedules, maintenance log and installed hardware. FoxTrack recognizes a Bambu printer by its serial number and a Klipper, PrusaLink or Home Assistant printer by its name in the Bridge, so the names do not have to match.
 
 If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the key was revoked, the key was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.
 
 A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Farm). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Detected on your network, not linked", and click Remove.
 
-Pause, resume, stop and light commands sent from FoxTrack reach the Bridge within a few seconds (up to 30 seconds right after the page is opened), and FoxTrack shows the result. A command the Bridge does not pick up within 2 minutes expires, so it never fires late.`,
+Pause, resume, stop and light commands sent from FoxTrack reach the Bridge within a few seconds (up to 30 seconds right after the page is opened), and FoxTrack shows the result. Home Assistant printers are read-only, so FoxTrack cannot send them commands. A command the Bridge does not pick up within 2 minutes expires, so it never fires late.`,
 	},
 	{
 		ID:       "config-files",
@@ -283,7 +323,7 @@ The Bridge dashboard has no login. Anyone who can reach it on your network can u
 		Keywords: []string{"help", "support", "bug", "report", "issue", "github", "contact", "broken", "stuck", "feature request"},
 		Body: `When the Bridge itself is at fault, or nothing in this help covers the problem, report it on GitHub: https://github.com/FoxesRCool1/FoxTrack-Bridge/issues
 
-A useful report includes the Bridge version shown in the dashboard footer, the operating system, how the printer is connected (Bambu LAN, Bambu Cloud, or Klipper), what was expected, what happened, and the Bridge's log output from around the time it happened.
+A useful report includes the Bridge version shown in the dashboard footer, the operating system, how the printer is connected (Bambu LAN, Bambu Cloud, Klipper, PrusaLink, or Home Assistant), what was expected, what happened, and the Bridge's log output from around the time it happened.
 
 Questions about the FoxTrack web app, billing or a workspace plan belong in FoxTrack, not here.
 

@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"math/big"
@@ -495,5 +496,27 @@ func TestProxyBambuCamera_StreamsJPEGAfterAuth(t *testing.T) {
 	}
 	if bytes.Contains(rec.Body.Bytes(), []byte{0x00, 0x01, 0x02, 0x03}) {
 		t.Fatalf("body contains non-JPEG metadata frame, want it skipped")
+	}
+}
+
+// The Home Assistant token never leaves the server, survives a round-trip of
+// the redacted config and a blank edit, and the state entity cannot be blanked.
+func TestHomeAssistantTokenStaysServerSide(t *testing.T) {
+	old := &config.Config{Printers: []config.Printer{{ID: "h", Name: "HA", HomeAssistantURL: "http://ha:8123",
+		HomeAssistantToken: "ha-secret", HAStateEntity: "sensor.mk4_state"}}}
+	view, _ := json.Marshal(redactConfig(old))
+	if bytes.Contains(view, []byte("ha-secret")) || !bytes.Contains(view, []byte(`"home_assistant_token_set":true`)) {
+		t.Fatalf("redacted view = %s", view)
+	}
+	got, err := resolveConfigUpdate(old, view)
+	if err != nil || got.Printers[0].HomeAssistantToken != "ha-secret" || got.Printers[0].HAStateEntity != "sensor.mk4_state" {
+		t.Fatalf("round-trip = %+v, %v", got, err)
+	}
+	if _, _, err := applyPrinterEdit(old, "h", printerEdit{HAStateEntity: strp(" ")}, notBusy); !errors.Is(err, errInvalidPrinterEdit) {
+		t.Fatalf("blank state entity: err = %v, want errInvalidPrinterEdit", err)
+	}
+	got, _, err = applyPrinterEdit(old, "h", printerEdit{HomeAssistantToken: strp(""), HAFileEntity: strp(" sensor.mk4_file ")}, notBusy)
+	if err != nil || got.Printers[0].HomeAssistantToken != "ha-secret" || got.Printers[0].HAFileEntity != "sensor.mk4_file" {
+		t.Fatalf("edit = %+v, %v", got.Printers[0], err)
 	}
 }
