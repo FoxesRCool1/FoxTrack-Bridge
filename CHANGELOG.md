@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.6.0
+## v2.5.1
 
 **PrusaLink and Home Assistant printers**
 - Prusa printers with PrusaLink (MK4, XL, MINI, Core One) can be added with
@@ -25,6 +25,10 @@
   was at the start and at the end of the print, so FoxTrack can take the grams
   used off the right spool. A slot the printer cannot measure is sent as unknown.
 - Klipper: the Bridge also sends the length of filament the print used.
+- Klipper: a short Moonraker or network outage during a print (up to ten
+  minutes) no longer ends the print early. The print reaches FoxTrack once,
+  with its whole filament length, instead of as a cancelled part plus a
+  second print that repeats the total.
 - The Bridge announces this to FoxTrack as the new `filament_use` capability.
 
 **Spool identity (Bambu Lab)**
