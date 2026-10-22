@@ -5,6 +5,8 @@
 **Easier setup**
 - A first-run welcome finds printers on your network; click Add and type the
   access code or API key. FoxTrack is optional: connect it or skip it.
+  Bambu printers are found on the first scan, even on weak Wi-Fi or with
+  Bambu Studio open on the same computer.
 - The Bridge checks the connection before saving a printer and tells you what
   to fix (wrong access code, wrong API key, unreachable address).
 - A header chip shows whether FoxTrack is connected or the Bridge is

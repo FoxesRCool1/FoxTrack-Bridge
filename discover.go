@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,8 +24,8 @@ import (
 
 // Printer discovery on the local network, read-only: nothing here saves config,
 // sends credentials or POSTs. Bambu printers announce themselves over a
-// SSDP-like exchange on UDP 2021; Klipper (Moonraker) and PrusaLink printers
-// are found by probing the host's own /24 over TCP.
+// SSDP-like exchange on UDP 2021; they, Klipper (Moonraker) and PrusaLink
+// printers are also found by probing the host's own /24 over TCP.
 
 const (
 	bambuSSDPPort    = 2021
@@ -120,24 +123,33 @@ func runDiscovery(ctx context.Context, d time.Duration) discoverResult {
 	go func() { defer wg.Done(); lanFound = scanLAN(ctx) }()
 	wg.Wait()
 
-	bambu.printers = rememberBambu(bambu.printers, time.Now())
+	found := bambu.printers
+	for _, p := range lanFound {
+		if p.Type == "bambu" {
+			found = append(found, p)
+		}
+	}
+	bambu.printers = rememberBambu(found, time.Now())
 	res := discoverResult{
 		Printers: dedupeSort(append(bambu.printers, lanFound...)),
 		Notes:    []string{},
 	}
 	if bambu.noSocket {
 		res.Notes = append(res.Notes, "Couldn't listen for Bambu printers on this computer (UDP port 2021).")
-	} else if bambu.bindFailed && len(bambu.printers) == 0 {
+	}
+	noBambu := !slices.ContainsFunc(res.Printers, func(p discoveredPrinter) bool { return p.Type == "bambu" })
+	if !bambu.noSocket && bambu.bindFailed && noBambu {
 		res.Notes = append(res.Notes, "Bambu Studio may be holding UDP port 2021 on this computer; if your Bambu printer is missing, close Bambu Studio and scan again.")
 	}
-	if inDocker() && len(bambu.printers) == 0 {
+	if inDocker() && noBambu {
 		res.Notes = append(res.Notes, "Running in Docker: printer discovery needs host networking (network_mode: host).")
 	}
 	return res
 }
 
-// bambuSeen remembers Bambu printers from earlier scans, by serial. Printers
-// answer M-SEARCH unreliably, so a short scan can miss one the last scan saw.
+// bambuSeen remembers Bambu printers from earlier scans, by serial. P1 printers
+// never answer M-SEARCH; they announce about every 10 s and Wi-Fi drops some
+// announcements, so a short scan can miss one the last scan saw.
 // Guarded by discoverMu.
 var bambuSeen = map[string]bambuSighting{}
 
@@ -148,13 +160,18 @@ type bambuSighting struct {
 
 const bambuSeenFor = 10 * time.Minute
 
-// rememberBambu records this scan's Bambu printers and returns them followed by
-// those seen in the last bambuSeenFor; dedupeSort keeps the fresh copy.
+// rememberBambu records this scan's Bambu printers and returns every one seen
+// in the last bambuSeenFor. A TCP find has no name or connect mode, so it keeps
+// those an earlier announcement gave.
 func rememberBambu(found []discoveredPrinter, now time.Time) []discoveredPrinter {
 	for _, p := range found {
-		bambuSeen[strings.ToLower(p.Serial)] = bambuSighting{p, now}
+		key := strings.ToLower(p.Serial)
+		if old, ok := bambuSeen[key]; ok && p.Name == "" {
+			p.Name, p.Connect = old.printer.Name, old.printer.Connect
+		}
+		bambuSeen[key] = bambuSighting{p, now}
 	}
-	out := append([]discoveredPrinter(nil), found...)
+	var out []discoveredPrinter
 	for serial, s := range bambuSeen {
 		if now.Sub(s.at) > bambuSeenFor {
 			delete(bambuSeen, serial)
@@ -420,8 +437,13 @@ func scanTargets(nets []*net.IPNet, limit int) []string {
 	return out
 }
 
-// discoverHost checks one host's open ports for a Moonraker or PrusaLink printer.
+// discoverHost checks one host's open ports for a Bambu, Moonraker or PrusaLink printer.
 func discoverHost(ctx context.Context, c *http.Client, ip string, open func(port int) bool) (discoveredPrinter, bool) {
+	if open(8883) {
+		if serial, ok := discoverBambuTLS(ctx, ip); ok {
+			return discoveredPrinter{Type: "bambu", Model: bambuSerialModel(serial), IP: ip, Serial: serial}, true
+		}
+	}
 	if open(7125) {
 		base := "http://" + ip + ":7125"
 		if host, ok := discoverKlipper(ctx, c, base); ok {
@@ -438,6 +460,39 @@ func discoverHost(ctx context.Context, c *http.Client, ip string, open func(port
 		}
 	}
 	return discoveredPrinter{}, false
+}
+
+// discoverBambuTLS finds a Bambu printer whose announcements Wi-Fi keeps
+// dropping: its MQTT certificate carries the serial. Only the TLS handshake
+// runs; nothing is sent after it.
+func discoverBambuTLS(ctx context.Context, ip string) (string, bool) {
+	// No timeout of its own: a printer's handshake can take over 1.5 s on Wi-Fi,
+	// so only the scan's deadline ends it.
+	d := tls.Dialer{Config: &tls.Config{InsecureSkipVerify: true}} // signed by BBL CA; read, not trusted
+	c, err := d.DialContext(ctx, "tcp", net.JoinHostPort(ip, "8883"))
+	if err != nil {
+		return "", false
+	}
+	defer c.Close()
+	certs := c.(*tls.Conn).ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return "", false
+	}
+	return bambuCertSerial(certs[0])
+}
+
+// bambuCertSerial returns the serial a Bambu printer's certificate carries as its CN.
+func bambuCertSerial(cert *x509.Certificate) (string, bool) {
+	bbl := slices.ContainsFunc(cert.Issuer.Organization, func(o string) bool { return strings.HasPrefix(o, "BBL") })
+	if !bbl || len(cert.Subject.CommonName) < 8 {
+		return "", false
+	}
+	return cert.Subject.CommonName, true
+}
+
+// bambuSerialModel names the model from the serial's first three characters.
+func bambuSerialModel(serial string) string {
+	return map[string]string{"00M": "X1 Carbon", "01S": "P1P", "01P": "P1S", "030": "A1 mini", "039": "A1"}[serial[:3]]
 }
 
 func klipperPrinter(ip, base, hostname string) discoveredPrinter {

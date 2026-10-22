@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -42,6 +44,14 @@ func TestRememberBambu(t *testing.T) {
 	got := dedupeSort(rememberBambu(nil, t0.Add(bambuSeenFor+30*time.Second)))
 	if len(got) != 1 || got[0].Serial != "B" {
 		t.Errorf("after %v only the newer sighting stays: got %+v", bambuSeenFor, got)
+	}
+
+	// An unnamed TCP find keeps the name and mode the announcement gave.
+	named := discoveredPrinter{Type: "bambu", Name: "Garage", Connect: "lan", IP: "192.168.1.11", Serial: "B"}
+	rememberBambu([]discoveredPrinter{named, b}, t0.Add(bambuSeenFor+time.Minute))
+	got = rememberBambu(nil, t0.Add(bambuSeenFor+2*time.Minute))
+	if len(got) != 1 || got[0].Name != "Garage" || got[0].Connect != "lan" {
+		t.Errorf("TCP find dropped the announced name: got %+v", got)
 	}
 }
 
@@ -235,6 +245,18 @@ func TestDiscoverPrusaLink(t *testing.T) {
 		if ok != tc.wantOK || name2 != tc.wantName {
 			t.Errorf("%s: got %q, %v; want %q, %v", name, name2, ok, tc.wantName, tc.wantOK)
 		}
+	}
+}
+
+func TestBambuCertSerial(t *testing.T) {
+	cert := func(issuerOrg, cn string) *x509.Certificate {
+		return &x509.Certificate{Issuer: pkix.Name{Organization: []string{issuerOrg}}, Subject: pkix.Name{CommonName: cn}}
+	}
+	if s, ok := bambuCertSerial(cert("BBL Technologies Co., Ltd", "01P00C580801716")); !ok || s != "01P00C580801716" || bambuSerialModel(s) != "P1S" {
+		t.Errorf("Bambu cert: got %q, %v", s, ok)
+	}
+	if s, ok := bambuCertSerial(cert("Mosquitto", "01P00C580801716")); ok {
+		t.Errorf("accepted a non-Bambu broker: %q", s)
 	}
 }
 
