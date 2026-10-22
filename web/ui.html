@@ -162,6 +162,17 @@
         .border-danger-50 { border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
         .pcard-sel { border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent); }
 
+        /* Printers found on the network (first-run welcome and the add dialog).
+           A picked row takes the accent border; hover is the panel fill. */
+        .disc-row { cursor: pointer; }
+        .disc-row:hover { background: var(--panel); }
+        .disc-row[aria-pressed="true"] { border-color: var(--accent); }
+        /* The FoxTrack status chip in the top bar. On a phone it shrinks to its dot. */
+        .ft-chip { display: inline-flex; align-items: center; gap: .375rem; height: 1.75rem; padding: 0 .625rem; border-radius: 9999px; border: 1px solid var(--border); background: transparent; color: var(--text-2); font-size: .75rem; line-height: 1; white-space: nowrap; cursor: pointer; }
+        .ft-chip:hover { background: var(--panel); color: var(--text); }
+        .ft-chip.ft-attention { border-color: color-mix(in srgb, var(--warning) 60%, transparent); color: var(--warning); }
+        @media (max-width: 640px) { .ft-chip { width: 1.75rem; padding: 0; justify-content: center; } .ft-chip-label { display: none; } }
+
         /* Text that must wrap inside its card, even an unbroken URL. */
         .wrap-any { overflow-wrap: anywhere; min-width: 0; }
         /* Phones: the top bar keeps the page name, status and buttons. */
@@ -256,6 +267,14 @@
             </button>
         </div>
         <p id="printerModalSubtitle" class="text-sm leading-relaxed text-text-2 mb-4">Connect a printer to FoxTrack Bridge.</p>
+        <!-- Add mode only: printers the network scan found. Picking one fills the form. -->
+        <div id="modalDiscover" class="mb-4">
+            <div class="flex items-center justify-between mb-1.5 min-h-[2rem]">
+                <span class="field-label mb-0">Found on your network</span>
+                <button type="button" id="modalScanBtn" onclick="runDiscovery(true)" class="btn-icon -mr-2" title="Scan again" aria-label="Scan the network again"><i class="fas fa-refresh-cw"></i></button>
+            </div>
+            <div id="modalDiscoverList" role="status" aria-live="polite"></div>
+        </div>
         <div class="space-y-3">
             <div id="fieldBrand">
                 <label for="pBrand" class="field-label">Printer type</label>
@@ -272,7 +291,7 @@
                 </div>
             </div>
             <div id="brandInstructions" class="hidden"></div>
-            <div id="printerFields" class="hidden space-y-3">
+            <div id="printerFields" class="hidden space-y-3" onkeydown="if(event.key==='Enter'&&event.target.tagName==='INPUT'){event.preventDefault();document.getElementById('connectBtn').click()}">
                 <div id="fieldCloudDevices" class="hidden">
                     <div class="flex items-center justify-between mb-1.5">
                         <span class="field-label mb-0">Printer on your Bambu account</span>
@@ -352,8 +371,10 @@
                 <div class="flex items-center gap-2 pt-1 flex-wrap">
                     <button onclick="testConnection()" id="testBtn" class="btn-outline btn-lg">Test connection</button>
                     <button onclick="addPrinter()" id="connectBtn" class="btn-primary btn-lg">Connect</button>
-                    <span id="testResult" class="text-xs hidden"></span>
+                    <button onclick="addPrinter(true)" id="saveAnywayBtn" class="btn-outline btn-lg hidden">Save anyway</button>
                 </div>
+                <!-- The connection check: what the test found and where to look. -->
+                <div id="checkResult" role="status" aria-live="polite" class="hidden rounded-md border px-3 py-2.5 flex items-start gap-2.5"></div>
                 <p id="addPrinterError" class="hidden text-xs text-danger mt-2"></p>
             </div>
         </div>
@@ -426,6 +447,9 @@
             <span id="breadcrumb" class="text-text">Printers</span>
         </nav>
         <div class="ml-auto flex items-center gap-3">
+            <button type="button" id="foxtrackChip" onclick="goToSettingsCard('foxtrackCard','foxtrack2ApiKey')" class="ft-chip hidden">
+                <span id="foxtrackChipDot" class="w-1.5 h-1.5 rounded-full shrink-0 bg-text-2"></span><span id="foxtrackChipLabel" class="ft-chip-label"></span>
+            </button>
             <span id="bridgeStatus" class="flex items-center gap-1.5 text-xs text-text-2">
                 <span class="w-1.5 h-1.5 rounded-full bg-text-2 pulse"></span> Connecting…
             </span>
@@ -496,7 +520,7 @@
                     <button onclick="openAddPrinterModal()" class="btn-primary">
                         <i class="fas fa-plus"></i> Add printer
                     </button>
-                    <button onclick="enterRemoveMode()" class="btn-outline">Remove</button>
+                    <button id="removeBtn" onclick="enterRemoveMode()" class="btn-outline">Remove</button>
                 </div>
                 <div id="removeModeButtons" class="hidden flex items-center gap-2">
                     <button id="confirmRemoveBtn" onclick="confirmBulkRemove()" class="btn-danger" disabled>Remove selected</button>
@@ -504,6 +528,8 @@
                 </div>
             </div>
         </div>
+        <!-- Shown once, after the first printer is added from the welcome. -->
+        <div id="firstPrinterCard" class="hidden mb-3 rounded-lg border border-border bg-panel px-4 py-3 flex items-start gap-3"></div>
         <div id="printersList" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
     </div>
 
@@ -524,16 +550,19 @@
     <!-- View: Settings -->
     <div id="view-settings" class="hidden px-5 pt-5 pb-5">
         <div class="max-w-2xl space-y-3">
-            <section class="rounded-lg border border-border bg-panel p-5">
+            <section id="foxtrackCard" class="rounded-lg border border-border bg-panel p-5">
                 <div class="flex items-start justify-between gap-3 mb-1">
                     <h2 class="font-heading text-xl font-medium leading-tight">FoxTrack <span class="font-sans text-xs text-text-2">optional</span></h2>
-                    <a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0 mt-1">
-                        Open FoxTrack <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
+                </div>
+                <p class="text-sm leading-relaxed text-text-2 mb-2">The Bridge works fully on its own, with no FoxTrack account. Connecting adds live status from anywhere, print history, and starting prints from FoxTrack. It needs a FoxTrack Pro or Farm plan.</p>
+                <p class="text-sm leading-relaxed text-text-2 mb-4">In FoxTrack, open Settings &gt; Integrations &gt; FoxTrack Bridge, click Generate token, copy it, and paste it here. It saves and checks itself. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Setup guide</a></p>
+                <div class="flex items-center justify-between gap-3 mb-1.5">
+                    <label for="foxtrack2ApiKey" class="field-label mb-0">Bridge token</label>
+                    <a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0">
+                        Get a token <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
                     </a>
                 </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">Send live status, print history and snapshots to FoxTrack, and print from FoxTrack. Needs a FoxTrack Pro or Farm plan. In FoxTrack, open Settings &gt; Integrations &gt; FoxTrack Bridge, click Generate token, copy it, and paste it here. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Setup guide</a></p>
-                <label for="foxtrack2ApiKey" class="field-label">Bridge token</label>
-                <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field" placeholder="Paste the token (starts with ftb_)">
+                <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field" placeholder="Paste the token (starts with ftb_)" oninput="onTokenInput(event, this, saveApiKeys)">
                 <p id="foxtrackStatus" class="hidden mt-2 text-xs flex items-center gap-1.5" role="status" aria-live="polite">
                     <span id="foxtrackStatusDot" class="w-1.5 h-1.5 rounded-full shrink-0"></span>
                     <span id="foxtrackStatusText" class="min-w-0"></span>
@@ -600,6 +629,13 @@
                         <button onclick="cloudUnlink()" class="btn-danger">Unlink</button>
                     </div>
                 </div>
+            </section>
+            <!-- Hidden until /api/network reports at least one address. -->
+            <section id="deviceCard" class="hidden rounded-lg border border-border bg-panel p-5">
+                <h2 class="font-heading text-xl font-medium leading-tight">Open on another device</h2>
+                <p class="mt-1 mb-4 text-sm leading-relaxed text-text-2">Type one of these addresses into a phone, tablet or another computer on the same network to open this dashboard there. Anyone on your network can open it, because it has no login.</p>
+                <ul id="deviceUrls" class="space-y-2"></ul>
+                <p id="deviceDocker" class="hidden mt-3 text-xs leading-relaxed text-text-2">Running in Docker. Use the host's address and the mapped port.</p>
             </section>
             <section id="assistantCard" class="rounded-lg border border-border bg-panel p-5">
                 <div class="flex items-start justify-between gap-3 mb-1">
@@ -751,7 +787,7 @@ let forceFullCardRefresh = false; // set true to force a full content rebuild of
 
 const brands = {
     bambu: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Enable LAN Only and Developer Mode on the printer, then copy the Serial Number and LAN Access Code from the printer settings.</div>',
+        instructions: '<div class="space-y-1.5 rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2"><p>On the printer, open Settings, then Network (WLAN on the P1 and A1) and turn on LAN Only mode. The access code is shown there. The serial number is on the printer\'s label and under Settings, Device.</p><p>Pause, stop and start also need Developer mode: next to LAN Only mode on 2025 and later firmware, under About on older firmware.</p></div>',
         fields: { ip: true, serial: true, lanCode: true, moonrakerUrl: false, klipperKey: false, webcamUrl: false }
     },
     bambu_cloud: {
@@ -759,11 +795,11 @@ const brands = {
         fields: { ip: true, serial: false, lanCode: false, moonrakerUrl: false, klipperKey: false, webcamUrl: false, cloudDevices: true }
     },
     klipper: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Use your Moonraker endpoint (usually http://printer-ip:7125). API key is only needed if Moonraker auth is enabled.</div>',
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Use your Moonraker address, usually http://printer-ip:7125 (Moonraker listens on port 7125). Add an API key only if Moonraker authorization is on.</div>',
         fields: { ip: false, serial: false, lanCode: false, moonrakerUrl: true, klipperKey: true, webcamUrl: true }
     },
     prusalink: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">For Prusa MK4, XL, MINI and Core One. Turn on PrusaLink on the printer, then enter the address and API key shown on its PrusaLink settings screen.</div>',
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">For Prusa MK4, XL, MINI and Core One. Turn on PrusaLink in the printer\'s network settings, then enter its address and the API key shown on its PrusaLink screen.</div>',
         fields: { prusaLinkUrl: true, klipperKey: true, webcamUrl: true },
         keyLabel: 'PrusaLink API key', keyPlaceholder: 'PrusaLink API key'
     },
@@ -987,13 +1023,15 @@ function showView(view) {
         if (v === view) btn.classList.add('active'); else btn.classList.remove('active');
     });
     document.getElementById('breadcrumb').textContent = { printers:'Printers', history:'History', settings:'Settings' }[view] || view;
-    const statRow = document.getElementById('statCardsRow');
-    if (statRow) statRow.classList.toggle('hidden', view === 'settings');
     currentView = view;
+    syncStatRow();
     if (removeMode) exitRemoveMode();
     if (view === 'history') refreshGlobalHistory();
     if (view === 'printers') renderPrinters(); // the empty state depends on Settings
-    if (view === 'settings') { if (foxtrackTokenSet) checkFoxTrack(); else setFoxTrackStatus('', '', ''); }
+    if (view === 'settings') {
+        if (foxtrackTokenSet) checkFoxTrack(); else setFoxTrackStatus('', '', '');
+        loadNetwork();
+    }
 }
 
 function toggleAdvancedMode() {
@@ -1110,6 +1148,7 @@ async function loadConfig() {
         configLoadFailed = false;
         setBridgeStatus(true);
     } catch (_) { configLoadFailed = true; setBridgeStatus(false); }
+    refreshFoxTrackUi();
 }
 
 async function retryLoadConfig() {
@@ -1138,6 +1177,8 @@ function buildSettingsPayload({ includeAutoUpdate = configEverLoaded } = {}) {
 // Shows the result of GET /api/foxtrack/check under the token field. Empty text hides it.
 let foxtrackCheckSeq = 0;
 function setFoxTrackStatus(dotCls, textCls, text) {
+    lastFtStatus = { dotCls, textCls, text };   // the welcome shows the same line
+    mirrorWelcomeFtStatus();
     const wrap = document.getElementById('foxtrackStatus');
     if (!wrap) return;
     wrap.classList.toggle('hidden', !text);
@@ -1161,10 +1202,16 @@ async function checkFoxTrack() {
         const warn = state === 'offline';
         setFoxTrackStatus(warn ? 'bg-warning' : 'bg-danger', warn ? 'text-warning' : 'text-danger', r.message || "Couldn't check the FoxTrack connection.");
     } else setFoxTrackStatus('', '', '');
+    // The top-bar chip reads this; a check that gave no verdict is not a problem.
+    foxtrackCheckState = state && state !== 'not_set' ? state : 'unknown';
+    refreshFoxTrackUi();
     return state && state !== 'not_set' ? state : null;
 }
 
+let savingKeys = false;
 async function saveApiKeys() {
+    if (savingKeys) return;
+    savingKeys = true;
     const btn = document.getElementById('saveApiKeysBtn');
     const typedToken = document.getElementById('foxtrack2ApiKey').value.trim();
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Save'; }
@@ -1183,6 +1230,7 @@ async function saveApiKeys() {
         // A bad token is explained by the status line, not celebrated by a toast.
         if (!typedToken || state === 'ok' || state === null) toast('Saved');
     } finally {
+        savingKeys = false;
         if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
     }
 }
@@ -1350,10 +1398,462 @@ async function cloudRetry() {
     } catch (e) { toast(e.message, 'error'); }
 }
 
+// ── Onboarding ────────────────────────────────────────────────────────────────
+// The first-run welcome, the network scan behind it and the add dialog, the
+// FoxTrack status chip, and the "open on another device" addresses. Nothing here
+// sends a config POST: token saves go through saveApiKeys and printers through
+// the printer endpoints, so a printer list is never part of a settings save.
+
+// Browser-side flags. Storage can be blocked, so every flag also lives in memory.
+const FLAG_WELCOME_SEEN = 'foxtrack.bridge.welcomeSeen';
+const FLAG_FT_SKIPPED = 'foxtrack.bridge.skipFoxTrack';
+const FLAG_FIRST_DISMISSED = 'foxtrack.bridge.firstPrinterDismissed';
+const memFlags = {};
+function flagGet(k) { if (memFlags[k]) return true; try { return localStorage.getItem(k) === '1'; } catch (_) { return false; } }
+function flagSet(k) { memFlags[k] = true; try { localStorage.setItem(k, '1'); } catch (_) {} }
+function flagClear(k) { delete memFlags[k]; try { localStorage.removeItem(k); } catch (_) {} }
+
+function prefersReducedMotion() { return !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
+
+// Copies text. Without the clipboard API (plain http from another machine) it
+// selects fallbackEl and tries the old copy command; false means copy by hand.
+async function copyText(text, fallbackEl) {
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; } } catch (_) {}
+    if (fallbackEl) {
+        const range = document.createRange();
+        range.selectNodeContents(fallbackEl);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        try { if (document.execCommand('copy')) return true; } catch (_) {}
+    }
+    return false;
+}
+
+// Send the user to a Settings card and put the cursor in its first field.
+function goToSettingsCard(cardId, focusId) {
+    showView('settings');
+    const card = document.getElementById(cardId);
+    if (card) card.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+    const field = focusId && document.getElementById(focusId);
+    if (field) { try { field.focus({ preventScroll: true }); } catch (_) { field.focus(); } }
+}
+
+// ── Network scan (GET /api/discover) ──
+
+const DISCOVERY_TTL_MS = 60000;
+const DISCOVERY_TYPES = ['bambu', 'klipper', 'prusalink'];
+const discovery = { printers: [], notes: [], at: 0, loading: false, failed: false, promise: null };
+let pickedDisc = null;     // the found printer that filled the add form
+let pickedDiscKey = '';    // ...and its key, to highlight the row
+
+function discoveryFresh() { return discovery.at > 0 && Date.now() - discovery.at < DISCOVERY_TTL_MS; }
+
+// Scans (about five seconds). A result under a minute old is reused unless
+// forced, and a scan already running is shared, never doubled.
+function runDiscovery(force) {
+    if (discovery.promise) return discovery.promise;
+    if (!force && discoveryFresh()) return Promise.resolve();
+    // Bambu printers answer a scan unreliably and the Bridge remembers what each
+    // scan saw, so the page's first scan runs twice, showing rows as they come.
+    const passes = discovery.at === 0 ? 2 : 1;
+    discovery.loading = true;
+    renderDiscovery();
+    discovery.promise = (async () => {
+        let got = false;
+        try {
+            for (let pass = 1; pass <= passes; pass++) {
+                const d = await apiFetch('/api/discover?seconds=5');
+                if (!d || typeof d !== 'object') throw new Error('no scan');   // an older Bridge answers with a page, not JSON
+                discovery.printers = (Array.isArray(d.printers) ? d.printers : []).filter(r => r && DISCOVERY_TYPES.includes(r.type));
+                discovery.notes = (Array.isArray(d.notes) ? d.notes : []).filter(n => typeof n === 'string' && n);
+                discovery.failed = false;
+                got = true;
+                if (pass < passes) renderDiscovery();
+            }
+        } catch (_) {
+            if (!got) {
+                discovery.printers = [];
+                discovery.notes = [];
+                discovery.failed = true;
+            }
+        }
+        discovery.at = Date.now();
+        discovery.loading = false;
+        discovery.promise = null;
+        renderDiscovery();
+    })();
+    return discovery.promise;
+}
+
+function discHost(row) { try { return new URL(row.url).host; } catch (_) { return row.ip || ''; } }
+function discKey(row) { return row.type + ':' + (row.serial || row.url || row.ip || row.name || ''); }
+function discName(row) { return row.name || [BRAND_LABELS[row.type], row.model].filter(Boolean).join(' ') || 'Printer'; }
+function discSub(row) {
+    const kind = (BRAND_LABELS[row.type] || row.type) + (row.model ? ' ' + row.model : '');
+    return [kind, row.type === 'bambu' ? row.ip : discHost(row)].filter(Boolean).join(' · ');
+}
+// Added already: the scan said so, or a saved printer has the same serial or address.
+function discAdded(row) {
+    if (row.added) return true;
+    return configuredPrinters.some(p => (row.serial && p.serial === row.serial) || (row.url && (p.moonraker_url === row.url || p.prusalink_url === row.url)));
+}
+function discIsCloud(row) { return row.type === 'bambu' && row.connect === 'cloud'; }
+
+function renderDiscovery() { renderWelcomeScan(); renderModalScan(); }
+
+function renderWelcomeScan() {
+    const list = document.getElementById('wScanList');
+    if (!list) return;
+    const d = discovery;
+    const rows = d.printers;
+    const status = document.getElementById('wScanStatus');
+    document.getElementById('wScanAgain').querySelector('i').className = 'fas fa-refresh-cw' + (d.loading ? ' fa-spin' : '');
+    if (d.loading) status.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Looking for printers on your network…';
+    else if (d.failed) status.textContent = 'Could not search your network. You can still add a printer by hand.';
+    else if (!rows.length) status.textContent = 'No printers found.';
+    else {
+        const n = rows.filter(r => !discAdded(r)).length;
+        status.textContent = n === 0 ? 'Every printer found is already added.' : (n === 1 ? 'Found 1 printer.' : 'Found ' + n + ' printers.');
+    }
+    let html = rows.map((r, i) => {
+        const name = escHtml(discName(r));
+        return '<div class="flex items-center gap-3 rounded-md border border-border px-3 py-2.5">'
+            + '<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-text-2 max-sm:hidden"><i class="fas fa-print"></i></div>'
+            + '<div class="min-w-0 flex-1">'
+            + '<p class="wrap-any text-sm font-medium">' + name + '</p>'
+            + '<p class="wrap-any text-xs text-text-2">' + escHtml(discSub(r)) + '</p>'
+            + (discIsCloud(r) ? '<p class="mt-1 text-xs leading-relaxed text-text-2">Turn on LAN-only mode on the printer to connect over your network, or use Bambu Cloud.</p>' : '')
+            + '</div>'
+            + (discAdded(r)
+                ? '<span class="badge-muted inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"><i class="fas fa-check-circle"></i> Added</span>'
+                : '<button type="button" onclick="addDiscovered(' + i + ')" class="btn-outline shrink-0" aria-label="Add ' + name + '">Add</button>')
+            + '</div>';
+    }).join('');
+    if (!d.loading && !d.failed && !rows.length) {
+        html += '<div class="text-xs leading-relaxed text-text-2"><p>Common reasons:</p>'
+            + '<ul class="mt-1 list-disc space-y-0.5 pl-5">'
+            + '<li>The printer is on another network or VLAN than this computer.</li>'
+            + '<li>A Bambu printer does not have LAN-only mode turned on.</li>'
+            + '<li>The Bridge runs in Docker without host networking.</li>'
+            + '</ul></div>';
+    }
+    list.innerHTML = html;
+    document.getElementById('wScanNotes').innerHTML = d.notes.map(n => '<p class="text-xs leading-relaxed text-text-2">' + escHtml(n) + '</p>').join('');
+}
+
+function renderModalScan() {
+    const list = document.getElementById('modalDiscoverList');
+    if (!list) return;
+    const d = discovery;
+    document.getElementById('modalScanBtn').querySelector('i').className = 'fas fa-refresh-cw' + (d.loading ? ' fa-spin' : '');
+    const rows = d.printers.map((r, i) => ({ r, i })).filter(x => !discAdded(x.r));
+    if (rows.length) {
+        list.innerHTML = '<div class="max-h-44 space-y-1.5 overflow-y-auto">' + rows.map(({ r, i }) =>
+            '<button type="button" onclick="pickDiscovered(' + i + ')" aria-pressed="' + (discKey(r) === pickedDiscKey) + '" class="disc-row flex w-full items-center gap-2.5 rounded-md border border-border px-3 py-2 text-left">'
+            + '<i class="fas fa-print shrink-0 text-text-2"></i>'
+            + '<span class="min-w-0 flex-1"><span class="block truncate text-sm">' + escHtml(discName(r)) + ' <span class="text-xs text-text-2">' + escHtml(discSub(r)) + '</span></span>'
+            + (discIsCloud(r) ? '<span class="block text-xs leading-relaxed text-text-2">Needs LAN-only mode on the printer.</span>' : '')
+            + '</span></button>').join('') + '</div>'
+            + (d.loading ? '<p class="mt-1.5 flex items-center gap-2 text-xs text-text-2"><i class="fas fa-circle-notch fa-spin"></i> Scanning again…</p>' : '');
+    } else if (d.loading) {
+        list.innerHTML = '<p class="flex items-center gap-2 text-xs text-text-2"><i class="fas fa-circle-notch fa-spin"></i> Looking for printers on your network…</p>';
+    } else if (d.failed) {
+        list.innerHTML = '<p class="text-xs text-text-2">Could not search your network. Fill in the details below.</p>';
+    } else if (d.at) {
+        list.innerHTML = '<p class="text-xs text-text-2">No new printers found on your network. Fill in the details below.</p>';
+    } else {
+        list.innerHTML = '';
+    }
+}
+
+// Fill the add form from a found printer: set the type (so the fields and the
+// instructions follow), then put the cursor on the first thing left to type.
+function applyDiscovered(row) {
+    pickedDisc = row;
+    pickedDiscKey = discKey(row);
+    document.getElementById('pBrand').value = row.type;
+    onBrandChange();
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v || ''; el.classList.remove(FIELD_ERROR_CLASS); };
+    set('pName', discName(row));
+    set('pLanCode', '');
+    set('pKlipperKey', '');
+    if (row.type === 'bambu') { set('pIp', row.ip); set('pSerial', row.serial); }
+    else if (row.type === 'klipper') set('pMoonrakerUrl', row.url || (row.ip ? 'http://' + row.ip + ':7125' : ''));
+    else set('pPrusaLinkUrl', row.url || (row.ip ? 'http://' + row.ip : ''));
+    const required = { bambu: ['pName', 'pIp', 'pSerial', 'pLanCode'], klipper: ['pName', 'pMoonrakerUrl'], prusalink: ['pName', 'pPrusaLinkUrl', 'pKlipperKey'] }[row.type];
+    const next = required.find(id => !document.getElementById(id).value.trim());
+    document.getElementById(next || 'connectBtn').focus();
+    renderModalScan();
+}
+function pickDiscovered(i) { const r = discovery.printers[i]; if (r) applyDiscovered(r); }
+function addDiscovered(i) { const r = discovery.printers[i]; if (r) openAddPrinterModal(r); }
+
+// ── First-run welcome ──
+
+const WELCOME_HTML =
+    '<div class="col-span-full mx-auto w-full max-w-2xl py-2 sm:py-6">'
+    + '<h2 class="font-heading text-2xl font-medium leading-tight sm:text-3xl">Welcome to FoxTrack Bridge</h2>'
+    + '<p class="mt-2 text-sm leading-relaxed text-text-2">Connect your printers in a couple of minutes. Everything runs on this computer; FoxTrack is optional.</p>'
+    + '<ol class="mt-6 space-y-3">'
+    // Step 1: find printers
+    + '<li class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
+    + '<div class="flex items-center gap-3">'
+    + '<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-xs tabular-nums text-text-2" aria-hidden="true">1</span>'
+    + '<h3 class="font-heading text-xl font-medium leading-tight"><span class="sr-only">Step 1: </span>Find your printers</h3>'
+    + '</div>'
+    + '<div class="mt-4">'
+    + '<p id="wScanStatus" class="flex items-center gap-2 text-sm text-text-2" role="status" aria-live="polite"></p>'
+    + '<div id="wScanList" class="mt-3 space-y-2"></div>'
+    + '<div id="wScanNotes" class="mt-3 space-y-1"></div>'
+    + '<div class="mt-4 flex flex-wrap items-center gap-2">'
+    + '<button type="button" id="wScanAgain" onclick="runDiscovery(true)" class="btn-outline"><i class="fas fa-refresh-cw"></i> Scan again</button>'
+    + '<button type="button" onclick="openAddPrinterModal()" class="btn-outline">Add manually</button>'
+    + '</div>'
+    + '<p class="mt-4 text-xs leading-relaxed text-text-2">Using Bambu Cloud? <button type="button" onclick="goToSettingsCard(\'cloudCard\',\'cloudEmail\')" class="text-link underline-offset-4 hover:underline">Sign in under Settings → Bambu Cloud</button></p>'
+    + '</div>'
+    + '</li>'
+    // Step 2: FoxTrack, optional
+    + '<li class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
+    + '<div class="flex flex-wrap items-center gap-x-3 gap-y-1">'
+    + '<span id="wFtPill" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-xs tabular-nums text-text-2" aria-hidden="true">2</span>'
+    + '<h3 class="font-heading text-xl font-medium leading-tight"><span class="sr-only">Step 2: </span>Connect FoxTrack</h3>'
+    + '<span class="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-2">Optional</span>'
+    + '</div>'
+    + '<div id="wFtOpen" class="mt-4">'
+    + '<p class="text-sm leading-relaxed text-text-2">FoxTrack adds your printer status from anywhere, a print history, and starting prints from FoxTrack. It needs a Pro or Farm plan, and the Bridge works fully without it.</p>'
+    + '<div class="mb-1.5 mt-4 flex items-center justify-between gap-3">'
+    + '<label for="wFtToken" class="field-label mb-0">Bridge token</label>'
+    + '<a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="flex shrink-0 items-center gap-1 text-xs text-link underline-offset-4 hover:underline">Get a token <i class="fas fa-arrow-up-right-from-square text-[10px]"></i></a>'
+    + '</div>'
+    + '<div class="flex gap-2">'
+    + '<input type="password" id="wFtToken" autocomplete="off" class="field" placeholder="Paste the token (starts with ftb_)" oninput="onTokenInput(event, this, connectFoxTrackFromWelcome)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();connectFoxTrackFromWelcome()}">'
+    + '<button type="button" id="wFtSave" onclick="connectFoxTrackFromWelcome()" class="btn-outline btn-lg shrink-0">Connect</button>'
+    + '</div>'
+    + '<p id="wFtStatus" class="mt-2 hidden items-center gap-1.5 text-xs" role="status" aria-live="polite"><span id="wFtDot" class="h-1.5 w-1.5 shrink-0 rounded-full"></span><span id="wFtText" class="min-w-0"></span></p>'
+    + '<div class="mt-3"><button type="button" onclick="skipFoxTrack()" class="btn-ghost -ml-3">Skip and use Bridge on its own</button></div>'
+    + '</div>'
+    + '<div id="wFtDone" class="mt-4 hidden flex-wrap items-center justify-between gap-2">'
+    + '<p class="flex items-center gap-2 text-sm"><span id="wFtDoneDot" class="h-1.5 w-1.5 shrink-0 rounded-full"></span><span id="wFtDoneText" class="min-w-0"></span></p>'
+    + '<button type="button" onclick="goToSettingsCard(\'foxtrackCard\')" class="btn-ghost">Settings</button>'
+    + '</div>'
+    + '<div id="wFtSkipped" class="mt-4 hidden flex-wrap items-center justify-between gap-2">'
+    + '<p class="text-sm text-text-2">Using the Bridge on its own. You can connect FoxTrack later in Settings.</p>'
+    + '<button type="button" onclick="unskipFoxTrack()" class="btn-ghost">Connect FoxTrack</button>'
+    + '</div>'
+    + '</li>'
+    + '</ol>'
+    + '</div>';
+
+let welcomeActive = false;   // the welcome is what the printer list shows right now
+
+// Runs once each time the welcome is put on screen: remember that it was shown
+// (the first-printer card keys off that), paint, and start the first scan.
+function startWelcome() {
+    flagSet(FLAG_WELCOME_SEEN);
+    renderDiscovery();
+    renderWelcomeFt();
+    runDiscovery(false);
+}
+
+function syncStatRow() {
+    const row = document.getElementById('statCardsRow');
+    if (row) row.classList.toggle('hidden', currentView === 'settings' || (currentView === 'printers' && welcomeActive));
+}
+
+function skipFoxTrack() { flagSet(FLAG_FT_SKIPPED); renderWelcomeFt(); }
+function unskipFoxTrack() {
+    flagClear(FLAG_FT_SKIPPED);
+    renderWelcomeFt();
+    const input = document.getElementById('wFtToken');
+    if (input) input.focus();
+}
+
+// Step 2 of the welcome: the token form, the connected state, or the skipped line.
+function renderWelcomeFt() {
+    const open = document.getElementById('wFtOpen');
+    if (!open) return;
+    const linked = foxtrackLinked();
+    const mode = foxtrackMode();
+    // A token FoxTrack rejects leaves the form open, with the reason under it.
+    const showDone = linked && mode !== 'attention';
+    const skipped = !linked && flagGet(FLAG_FT_SKIPPED);
+    open.classList.toggle('hidden', showDone || skipped);
+    const done = document.getElementById('wFtDone');
+    done.classList.toggle('hidden', !showDone);
+    done.classList.toggle('flex', showDone);
+    const skip = document.getElementById('wFtSkipped');
+    skip.classList.toggle('hidden', !skipped);
+    skip.classList.toggle('flex', skipped);
+    document.getElementById('wFtPill').innerHTML = showDone && mode === 'connected' ? '<i class="fas fa-check-circle text-brand"></i>' : '2';
+    if (showDone) {
+        document.getElementById('wFtDoneDot').className = 'h-1.5 w-1.5 shrink-0 rounded-full ' + (mode === 'connected' ? 'bg-brand' : 'bg-text-2 pulse');
+        document.getElementById('wFtDoneText').textContent = mode === 'connected' ? 'Connected to FoxTrack.' : 'Token saved. Checking the connection…';
+    }
+    mirrorWelcomeFtStatus();
+}
+
+function mirrorWelcomeFtStatus() {
+    const wrap = document.getElementById('wFtStatus');
+    if (!wrap) return;
+    let s = lastFtStatus;
+    if (!s.text && foxtrackMode() === 'attention') s = { dotCls: 'bg-warning', textCls: 'text-warning', text: 'FoxTrack is not accepting this Bridge right now. Paste a new token to try again.' };
+    wrap.classList.toggle('hidden', !s.text);
+    wrap.classList.toggle('flex', !!s.text);
+    document.getElementById('wFtDot').className = 'h-1.5 w-1.5 shrink-0 rounded-full ' + s.dotCls;
+    const t = document.getElementById('wFtText');
+    t.className = 'min-w-0 ' + s.textCls;
+    t.textContent = s.text;
+}
+
+// Same save path as Settings: copy the token into the Settings field and let
+// saveApiKeys post it (a partial update that never carries printers).
+async function connectFoxTrackFromWelcome() {
+    const input = document.getElementById('wFtToken');
+    if (!input) return;
+    const token = input.value.trim();
+    if (!token) { input.focus(); return; }
+    const btn = document.getElementById('wFtSave');
+    document.getElementById('foxtrack2ApiKey').value = token;
+    if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
+    try { await saveApiKeys(); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Connect'; } }
+    if (foxtrackTokenSet) input.value = '';
+    refreshFoxTrackUi();
+}
+
+// A pasted token saves itself shortly after; typing never does, so a half-typed
+// token is never sent. Autofill counts as a paste.
+let tokenPasteTimer = null;
+function onTokenInput(e, el, save) {
+    if (!/^insertFrom|^insertReplacement/.test(e.inputType || '')) return;
+    clearTimeout(tokenPasteTimer);
+    tokenPasteTimer = setTimeout(() => {
+        const v = el.value.trim();
+        if (v.startsWith('ftb_') && v.length > 8) save();
+    }, 400);
+}
+
+// ── FoxTrack at a glance ──
+
+let foxtrackCheckState = null;   // last /api/foxtrack/check state; 'unknown' when it gave no verdict; null before the first check
+let relayProblem = false;        // /api/relay-health says FoxTrack is refusing the Bridge's data
+let lastFtStatus = { dotCls: '', textCls: '', text: '' };
+
+function foxtrackLinked() { return foxtrackTokenSet || legacyKeySet; }
+
+function foxtrackMode() {
+    if (!foxtrackLinked()) return 'standalone';
+    if (relayProblem || (foxtrackCheckState && foxtrackCheckState !== 'ok' && foxtrackCheckState !== 'unknown')) return 'attention';
+    if (foxtrackCheckState === null) return 'checking';
+    return 'connected';
+}
+
+const FT_CHIP = {
+    connected:  ['bg-brand', 'FoxTrack connected', 'Connected to FoxTrack. Open the FoxTrack settings.'],
+    standalone: ['bg-text-2', 'Standalone', 'The Bridge is running on its own. Open Settings to connect FoxTrack.'],
+    attention:  ['bg-warning', 'FoxTrack needs attention', 'FoxTrack is not accepting this Bridge. Open the FoxTrack settings.'],
+    checking:   ['bg-text-2 pulse', 'Checking FoxTrack…', 'Checking the FoxTrack connection.'],
+};
+
+function renderFoxTrackChip() {
+    const chip = document.getElementById('foxtrackChip');
+    if (!chip) return;
+    // Until the config has loaded the Bridge cannot say which mode it is in.
+    if (!configEverLoaded) { chip.classList.add('hidden'); return; }
+    const mode = foxtrackMode();
+    const [dot, label, title] = FT_CHIP[mode];
+    chip.classList.remove('hidden');
+    chip.classList.toggle('ft-attention', mode === 'attention');
+    document.getElementById('foxtrackChipDot').className = 'w-1.5 h-1.5 rounded-full shrink-0 ' + dot;
+    document.getElementById('foxtrackChipLabel').textContent = label;
+    chip.title = title;
+    chip.setAttribute('aria-label', label);
+}
+
+function refreshFoxTrackUi() {
+    renderFoxTrackChip();
+    renderWelcomeFt();
+    renderFirstPrinterCard();
+}
+
+// ── After the first printer ──
+
+function isLocalPage() { return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(location.hostname); }
+
+// One dismissible card, only for someone who saw the welcome in this browser and
+// has now got a printer. An existing user never saw the welcome, so never sees it.
+function renderFirstPrinterCard() {
+    const el = document.getElementById('firstPrinterCard');
+    if (!el) return;
+    if (!(configuredPrinters.length > 0 && flagGet(FLAG_WELCOME_SEEN) && !flagGet(FLAG_FIRST_DISMISSED))) {
+        el.classList.add('hidden');
+        el._html = null;
+        return;
+    }
+    const lines = [];
+    if (!foxtrackLinked()) lines.push('<p class="mt-1 text-xs leading-relaxed text-text-2">Want it in FoxTrack too? <button type="button" onclick="goToSettingsCard(\'foxtrackCard\',\'foxtrack2ApiKey\')" class="text-link underline-offset-4 hover:underline">Connect FoxTrack in Settings</button>. The Bridge works fully without it.</p>');
+    const url = networkUrls()[0];
+    if (url && isLocalPage()) lines.push('<p class="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs leading-relaxed text-text-2"><i class="fas fa-smartphone"></i> Open on your phone: <code class="code-inline wrap-any">' + escHtml(url) + '</code></p>');
+    const html = '<i class="fas fa-check-circle mt-0.5 shrink-0 text-brand"></i>'
+        + '<div class="min-w-0 flex-1"><p class="text-sm font-medium leading-tight">' + (configuredPrinters.length > 1 ? 'Your printers are connected.' : 'Your printer is connected.') + '</p>' + lines.join('') + '</div>'
+        + '<button type="button" onclick="dismissFirstPrinterCard()" class="btn-icon -mr-2 -mt-1.5 shrink-0" title="Dismiss" aria-label="Dismiss"><i class="fas fa-times"></i></button>';
+    if (el._html !== html) { el.innerHTML = html; el._html = html; }
+    el.classList.remove('hidden');
+}
+function dismissFirstPrinterCard() { flagSet(FLAG_FIRST_DISMISSED); renderFirstPrinterCard(); }
+
+// ── Open on another device (GET /api/network) ──
+
+let networkInfo = null;
+
+async function loadNetwork() {
+    try {
+        const n = await apiFetch('/api/network');
+        networkInfo = n && typeof n === 'object' ? n : null;
+    } catch (_) { networkInfo = null; }
+    renderDeviceCard();
+    renderFirstPrinterCard();
+}
+
+function networkUrls() {
+    return networkInfo && Array.isArray(networkInfo.urls) ? networkInfo.urls.filter(u => typeof u === 'string' && u) : [];
+}
+
+function renderDeviceCard() {
+    const card = document.getElementById('deviceCard');
+    if (!card) return;
+    const urls = networkUrls();
+    card.classList.toggle('hidden', urls.length === 0);
+    document.getElementById('deviceUrls').innerHTML = urls.map((u, i) =>
+        '<li class="flex items-center gap-2">'
+        + '<div class="min-w-0 flex-1 rounded-md border border-border bg-panel-2 px-3 py-1.5"><code id="devUrl' + i + '" class="field-mono wrap-any">' + escHtml(u) + '</code></div>'
+        + '<button type="button" onclick="copyDeviceUrl(' + i + ', this)" class="btn-outline shrink-0"><i class="fas fa-copy"></i> Copy</button>'
+        + '</li>').join('');
+    document.getElementById('deviceDocker').classList.toggle('hidden', !(networkInfo && networkInfo.in_docker));
+}
+
+async function copyDeviceUrl(i, btn) {
+    const el = document.getElementById('devUrl' + i);
+    if (!el) return;
+    if (await copyText(el.textContent, el)) {
+        if (!btn) return;
+        btn.innerHTML = '<i class="fas fa-check-circle"></i> Copied';
+        setTimeout(() => { if (btn.isConnected) btn.innerHTML = '<i class="fas fa-copy"></i> Copy'; }, 1500);
+    } else {
+        toast('Select the address and press Ctrl+C to copy it.', 'info');
+    }
+}
+
 // ── Add Printer Modal ─────────────────────────────────────────────────────────
 
-function openAddPrinterModal() {
+// Opens the dialog in add mode. A found printer (from the welcome) pre-fills it.
+function openAddPrinterModal(prefill) {
+    document.getElementById('modalDiscover').classList.remove('hidden');
     openModal('addPrinterModal');
+    renderModalScan();
+    runDiscovery(false);   // a scan under a minute old is reused
+    if (prefill) applyDiscovered(prefill);
 }
 
 // Id of the printer the modal is editing, or null when it is adding one. Edit
@@ -1373,6 +1873,7 @@ function openEditPrinterModal(id) {
     if (!printer) return;
     closeAddPrinterModal();
     editingPrinterId = id;
+    document.getElementById('modalDiscover').classList.add('hidden');   // finding printers is for adding
     const brand = printerBrand(printer);
     document.getElementById('printerModalTitle').textContent = 'Edit printer';
     document.getElementById('printerModalSubtitle').textContent = 'Change the details of ' + printer.name + '. Saving reconnects the printer if its connection details changed.';
@@ -1410,11 +1911,11 @@ function closeAddPrinterModal() {
     document.getElementById('pBrand').value = '';
     document.getElementById('brandInstructions').classList.add('hidden');
     document.getElementById('printerFields').classList.add('hidden');
-    document.getElementById('testResult').classList.add('hidden');
+    pickedDisc = null;
+    pickedDiscKey = '';
+    resetCheckUi();
     const errEl = document.getElementById('addPrinterError');
     if (errEl) { errEl.textContent=''; errEl.classList.add('hidden'); }
-    const btn = document.getElementById('connectBtn');
-    if (btn) { btn.textContent='Connect'; btn.disabled=false; }
     const cd = document.getElementById('fieldCloudDevices');
     if (cd) cd.classList.add('hidden');
     const cl = document.getElementById('cloudDeviceList');
@@ -1427,7 +1928,7 @@ function onBrandChange() {
     const brand = document.getElementById('pBrand').value;
     const ins = document.getElementById('brandInstructions');
     const fields = document.getElementById('printerFields');
-    document.getElementById('testResult').classList.add('hidden');
+    resetCheckUi();
     if (!brand) { ins.classList.add('hidden'); fields.classList.add('hidden'); return; }
     const cfg = brands[brand];
     // Setup instructions are for adding a printer; an edit only changes details.
@@ -1493,40 +1994,6 @@ function onCloudDeviceChange(el) {
     if (pn && !pn.value.trim()) pn.value = el.dataset.name || '';
 }
 
-async function testConnection() {
-    const brand = document.getElementById('pBrand').value;
-    const ip = document.getElementById('pIp').value.trim();
-    const moonrakerUrl = document.getElementById('pMoonrakerUrl').value.trim();
-    const result = document.getElementById('testResult');
-    const btn = document.getElementById('testBtn');
-    // Send only this type's address: the server tests the first URL it finds.
-    const http = {
-        klipper: ['moonraker_url', moonrakerUrl, 'Enter a Moonraker URL first'],
-        prusalink: ['prusalink_url', document.getElementById('pPrusaLinkUrl').value.trim(), 'Enter a PrusaLink URL first'],
-        home_assistant: ['home_assistant_url', document.getElementById('pHaUrl').value.trim(), 'Enter a Home Assistant URL first'],
-    }[brand];
-    const target = http ? http[1] : ip;
-    if (!target) { showAddPrinterError(http ? http[2] : 'Enter an IP address first'); return; }
-    if (btn) { btn.disabled=true; btn.textContent='Testing…'; }
-    result.className = 'text-xs text-text-2'; result.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Testing…'; result.title = ''; result.classList.remove('hidden');
-    try {
-        const data = await apiFetch('/api/test', { method:'POST', body:JSON.stringify(http ? { [http[0]]: target } : { ip }) });
-        if (data && data.reachable) {
-            result.className='text-xs text-brand'; result.innerHTML='<i class="fas fa-check-circle mr-1"></i> Reachable';
-        } else {
-            // detail is a raw Go error; show the plain version and keep the raw one in the tooltip.
-            const raw = data && data.detail ? data.detail : '';
-            let msg = friendlyError(raw);
-            if (!raw || msg === raw) msg = "Can't reach the printer. Check that it is on and that the address is right.";
-            result.className='text-xs text-danger'; result.title = raw; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> ' + escHtml(msg);
-        }
-    } catch (e) {
-        result.className='text-xs text-danger'; result.title=''; result.innerHTML='<i class="fas fa-times-circle mr-1"></i> ' + escHtml(friendlyError(e.message));
-    } finally {
-        if (btn) { btn.disabled=false; btn.textContent='Test connection'; }
-    }
-}
-
 function showAddPrinterError(msg) {
     const el = document.getElementById('addPrinterError');
     if (!el) { toast(msg, 'error'); return; }
@@ -1544,25 +2011,30 @@ function markField(id, invalid) {
     el.addEventListener('input', () => el.classList.remove(FIELD_ERROR_CLASS), { once: true });
 }
 
-async function addPrinter() {
-    const brand = document.getElementById('pBrand').value;
-    const name = document.getElementById('pName').value.trim();
-    const ip = document.getElementById('pIp').value.trim();
-    const moonrakerUrl = document.getElementById('pMoonrakerUrl').value.trim();
-    const serial = document.getElementById('pSerial').value.trim();
-    const lanCode = document.getElementById('pLanCode').value.trim();
-    const klipperKey = document.getElementById('pKlipperKey').value.trim();
-    const webcamUrl = document.getElementById('pWebcamUrl').value.trim();
-    const prusaLinkUrl = document.getElementById('pPrusaLinkUrl').value.trim();
-    const ha = { home_assistant_url: document.getElementById('pHaUrl').value.trim(), home_assistant_token: document.getElementById('pHaToken').value.trim() };
-    Object.entries(HA_FIELDS).forEach(([id, key]) => { ha[key] = document.getElementById(id).value.trim(); });
+// Reads and validates the add/edit form. Returns { brand, name, payload }, or
+// null when something is missing (the fields are marked and the reason is on
+// screen). forTest leaves the name out: a connection test needs only the
+// connection details.
+function readPrinterForm({ forTest = false } = {}) {
+    const val = id => document.getElementById(id).value.trim();
+    const brand = val('pBrand');
+    const name = val('pName');
+    const ip = val('pIp');
+    const moonrakerUrl = val('pMoonrakerUrl');
+    const serial = val('pSerial');
+    const lanCode = val('pLanCode');
+    const klipperKey = val('pKlipperKey');
+    const webcamUrl = val('pWebcamUrl');
+    const prusaLinkUrl = val('pPrusaLinkUrl');
+    const ha = { home_assistant_url: val('pHaUrl'), home_assistant_token: val('pHaToken') };
+    Object.entries(HA_FIELDS).forEach(([id, key]) => { ha[key] = val(id); });
     const errEl = document.getElementById('addPrinterError');
     if (errEl) { errEl.textContent=''; errEl.classList.add('hidden'); }
 
     // Highlight every missing required field, then bail if any are empty.
     let invalid = false;
-    if (!brand) { showAddPrinterError('Select a printer type'); return; }
-    markField('pName', !name); if (!name) invalid = true;
+    if (!brand) { showAddPrinterError('Select a printer type'); return null; }
+    if (!forTest) { markField('pName', !name); if (!name) invalid = true; }
     if (brand === 'bambu') {
         markField('pIp', !ip);       if (!ip)     invalid = true;
         markField('pSerial', !serial); if (!serial) invalid = true;
@@ -1582,64 +2054,180 @@ async function addPrinter() {
         markField('pHaState', !ha.ha_state_entity); if (!ha.ha_state_entity) invalid = true;
         if (!editingPrinterId) { markField('pHaToken', !ha.home_assistant_token); if (!ha.home_assistant_token) invalid = true; }
     }
+
+    let payload;
     if (editingPrinterId) {
-        if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return; }
-        await savePrinterEdit(editingPrinterId, brand, { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl, prusalink_url:prusaLinkUrl, ...ha });
-        return;
+        if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return null; }
+        // Only the fields the printer's type uses (PUT /api/printers/{id}). The
+        // server keeps the saved access code or API key when the field is blank.
+        payload = { name };
+        if (brand === 'bambu') Object.assign(payload, { ip, serial, lan_code: lanCode });
+        else if (brand === 'bambu_cloud') payload.ip = ip;
+        else if (brand === 'prusalink') Object.assign(payload, { prusalink_url: prusaLinkUrl, api_key: klipperKey, webcam_url: webcamUrl });
+        else if (brand === 'home_assistant') Object.assign(payload, { webcam_url: webcamUrl }, ha);
+        else Object.assign(payload, { moonraker_url: moonrakerUrl, api_key: klipperKey, webcam_url: webcamUrl });
+    } else {
+        payload = { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl };
+        // The newer types send only their own fields, so a URL typed under another
+        // type before switching can never decide what kind of printer this is.
+        if (brand === 'prusalink') payload = { name, prusalink_url: prusaLinkUrl, api_key: klipperKey, webcam_url: webcamUrl };
+        if (brand === 'home_assistant') payload = { name, webcam_url: webcamUrl, ...ha };
+        if (brand === 'bambu_cloud') {
+            const picked = document.querySelector('input[name="cloudDevice"]:checked');
+            if (!picked) { showAddPrinterError('Pick a printer from your Bambu account'); return null; }
+            payload = { name, serial: picked.value, connection: 'cloud', ip };
+        }
+        if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return null; }
     }
-    let payload = { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl };
-    // The newer types send only their own fields, so a URL typed under another
-    // type before switching can never decide what kind of printer this is.
-    if (brand === 'prusalink') payload = { name, prusalink_url: prusaLinkUrl, api_key: klipperKey, webcam_url: webcamUrl };
-    if (brand === 'home_assistant') payload = { name, webcam_url: webcamUrl, ...ha };
-    if (brand === 'bambu_cloud') {
-        const picked = document.querySelector('input[name="cloudDevice"]:checked');
-        if (!picked) { showAddPrinterError('Pick a printer from your Bambu account'); return; }
-        payload = { name, serial: picked.value, connection: 'cloud', ip };
-    }
-    if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return; }
-    const btn = document.getElementById('connectBtn');
-    if (btn) { btn.textContent='Connecting…'; btn.disabled=true; }
-    try {
-        await apiFetch('/api/printers', { method:'POST', body:JSON.stringify(payload) });
-        closeAddPrinterModal();
-        toast('Connecting to ' + name + '…', 'info');
-        await loadConfig();
-        await pollStatus();
-    } catch (e) {
-        showAddPrinterError("Couldn't add the printer: " + e.message);
-        if (btn) { btn.textContent='Connect'; btn.disabled=false; }
-    }
+    if (forTest && !payload.name) payload.name = 'Test printer';
+    return { brand, name, payload };
 }
 
-// Sends only the fields the printer's type uses (PUT /api/printers/{id}). The
-// server keeps the saved access code or API key when the field is blank.
-async function savePrinterEdit(id, brand, fields) {
-    const payload = { name: fields.name };
-    if (brand === 'bambu') Object.assign(payload, { ip: fields.ip, serial: fields.serial, lan_code: fields.lan_code });
-    else if (brand === 'bambu_cloud') payload.ip = fields.ip;
-    else if (brand === 'prusalink') Object.assign(payload, { prusalink_url: fields.prusalink_url, api_key: fields.api_key, webcam_url: fields.webcam_url });
-    else if (brand === 'home_assistant') {
-        payload.webcam_url = fields.webcam_url;
-        payload.home_assistant_url = fields.home_assistant_url;
-        payload.home_assistant_token = fields.home_assistant_token;
-        Object.values(HA_FIELDS).forEach(key => { payload[key] = fields[key]; });
+// ── Check before save (POST /api/test) ──
+
+let checkSeq = 0;   // bumped to drop a check still in flight (dialog closed, type changed)
+
+function primaryLabel() { return editingPrinterId ? 'Save' : 'Connect'; }
+
+// The result panel under the buttons. null hides it; { pending: text } shows a
+// spinner line; otherwise { ok, code, message, hint } from the server.
+function showCheckResult(r) {
+    const el = document.getElementById('checkResult');
+    if (!el) return;
+    if (!r) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    if (r.pending) {
+        el.className = 'rounded-md border border-border px-3 py-2.5 flex items-start gap-2.5';
+        el.innerHTML = '<i class="fas fa-circle-notch fa-spin mt-0.5 shrink-0 text-text-2"></i><p class="text-xs leading-relaxed text-text-2">' + escHtml(r.pending) + '</p>';
+    } else {
+        // A printer that is switched off is a warning; a wrong code or serial is an error.
+        const tone = r.ok ? 'brand' : (r.code === 'unreachable' ? 'warning' : 'danger');
+        el.className = 'rounded-md border px-3 py-2.5 flex items-start gap-2.5 badge-' + tone;
+        el.innerHTML = '<i class="fas ' + (r.ok ? 'fa-check-circle' : 'fa-circle-exclamation') + ' mt-0.5 shrink-0 text-' + tone + '"></i>'
+            + '<div class="min-w-0"><p class="text-sm leading-snug text-text">' + escHtml(r.message || (r.ok ? 'The connection works.' : 'Could not connect.')) + '</p>'
+            + (r.hint ? '<p class="mt-0.5 text-xs leading-relaxed text-text-2">' + escHtml(r.hint) + '</p>' : '') + '</div>';
     }
-    else Object.assign(payload, { moonraker_url: fields.moonraker_url, api_key: fields.api_key, webcam_url: fields.webcam_url });
+    // The panel sits under the buttons, which can be below the fold of a long form.
+    el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+}
+
+// Back to a clean dialog: no result, no Save anyway, buttons idle. Also drops
+// any check still running, so a late answer never lands on a different form.
+function resetCheckUi() {
+    checkSeq++;
+    showCheckResult(null);
+    const sa = document.getElementById('saveAnywayBtn');
+    if (sa) sa.classList.add('hidden');
     const btn = document.getElementById('connectBtn');
-    if (btn) { btn.textContent='Saving…'; btn.disabled=true; }
+    if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; }
+    const tb = document.getElementById('testBtn');
+    if (tb) { tb.textContent = 'Test connection'; tb.disabled = false; }
+}
+
+// Asks the Bridge to try the printer with the details that would be saved (and,
+// when editing, the saved printer's id so blank secrets are filled in server
+// side). Resolves to { ok, code, message, hint }, or null when there is no
+// usable answer. An older Bridge, or a dropped connection, gives null and the
+// caller carries on as it always did.
+async function runPrinterCheck(payload) {
+    let data;
+    try { data = await apiFetch('/api/test', { method:'POST', body:JSON.stringify(editingPrinterId ? { ...payload, id: editingPrinterId } : payload) }); }
+    catch (_) { return null; }
+    if (!data || typeof data !== 'object') return null;
+    if (typeof data.ok === 'boolean') return data;
+    if (typeof data.reachable === 'boolean') {
+        // The old reply says only whether the printer answered: good enough to
+        // show on Test connection, not a reason to refuse a save.
+        const raw = data.detail || '';
+        let msg = friendlyError(raw);
+        if (!raw || msg === raw) msg = "Can't reach the printer. Check that it is on and that the address is right.";
+        return data.reachable ? { ok: true, code: 'ok', message: 'The printer answered.', legacy: true } : { ok: false, code: 'unreachable', message: msg, legacy: true };
+    }
+    return null;
+}
+
+// A wrong code or serial: put the cursor on the field to fix.
+function focusCheckField(r, brand) {
+    const byCode = {
+        auth: { bambu: 'pLanCode', klipper: 'pKlipperKey', prusalink: 'pKlipperKey', home_assistant: 'pHaToken' },
+        serial: { bambu: 'pSerial' },
+        not_found: { home_assistant: 'pHaState' },
+    };
+    const id = (byCode[r.code] || {})[brand];
+    if (!id) return;
+    markField(id, true);
+    document.getElementById(id).focus({ preventScroll: true });   // the result panel decides the scroll
+}
+
+async function testConnection() {
+    const built = readPrinterForm({ forTest: true });
+    if (!built) return;
+    const btn = document.getElementById('testBtn');
+    const seq = ++checkSeq;
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+    showCheckResult({ pending: 'Testing the connection…' });
+    const r = await runPrinterCheck(built.payload);
+    if (seq !== checkSeq) return;
+    if (btn) { btn.disabled = false; btn.textContent = 'Test connection'; }
+    if (r && !r.ok) focusCheckField(r, built.brand);
+    showCheckResult(r || { ok: false, code: 'unreachable', message: 'Could not run the test.', hint: 'Check that the Bridge is still running, then try again.' });
+}
+
+// Connect (add) or Save (edit). The primary button first checks the connection
+// with exactly what it would save. A failed check stays in the dialog with what
+// to fix, the button becomes Try again, and Save anyway skips the check.
+async function addPrinter(skipCheck) {
+    const built = readPrinterForm();
+    if (!built) return;
+    const btn = document.getElementById('connectBtn');
+    const sa = document.getElementById('saveAnywayBtn');
+    // A cloud printer has no connection to try; the account lists it already.
+    if (skipCheck !== true && built.brand !== 'bambu_cloud') {
+        const seq = ++checkSeq;
+        const tb = document.getElementById('testBtn');
+        sa.classList.add('hidden');
+        if (btn) { btn.textContent = 'Checking connection…'; btn.disabled = true; }
+        if (tb) tb.disabled = true;
+        showCheckResult({ pending: 'Checking the connection before saving…' });
+        const r = await runPrinterCheck(built.payload);
+        if (seq !== checkSeq) return;
+        if (tb) tb.disabled = false;
+        // "unsupported" means the Bridge cannot check this kind of printer: save as before.
+        if (r && !r.legacy && !r.ok && r.code !== 'unsupported') {
+            if (btn) { btn.textContent = 'Try again'; btn.disabled = false; }
+            sa.classList.remove('hidden');
+            focusCheckField(r, built.brand);
+            showCheckResult(r);
+            return;
+        }
+        showCheckResult(null);
+    }
+    await savePrinter(built);
+}
+
+async function savePrinter({ name, payload }) {
+    const editing = editingPrinterId;
+    const btn = document.getElementById('connectBtn');
+    document.getElementById('saveAnywayBtn').classList.add('hidden');
+    if (btn) { btn.textContent = editing ? 'Saving…' : 'Connecting…'; btn.disabled = true; }
     try {
-        await apiFetch('/api/printers/' + encodeURIComponent(id), { method:'PUT', body:JSON.stringify(payload) });
-        closeAddPrinterModal();
-        toast('Saved ' + fields.name, 'info');
-        // Rebuild the card so an open camera stream closes: its URL uses the
-        // old name, and the old connection details.
-        forceFullCardRefresh = true;
+        if (editing) {
+            await apiFetch('/api/printers/' + encodeURIComponent(editing), { method:'PUT', body:JSON.stringify(payload) });
+            closeAddPrinterModal();
+            toast('Saved ' + name, 'info');
+            // Rebuild the card so an open camera stream closes: its URL uses the
+            // old name, and the old connection details.
+            forceFullCardRefresh = true;
+        } else {
+            await apiFetch('/api/printers', { method:'POST', body:JSON.stringify(payload) });
+            if (pickedDisc) pickedDisc.added = true;
+            closeAddPrinterModal();
+            toast('Connecting to ' + name + '…', 'info');
+        }
         await loadConfig();
         await pollStatus();
     } catch (e) {
-        showAddPrinterError("Couldn't save the printer: " + e.message);
-        if (btn) { btn.textContent='Save'; btn.disabled=false; }
+        showAddPrinterError((editing ? "Couldn't save the printer: " : "Couldn't add the printer: ") + e.message);
+        if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; }
     }
 }
 
@@ -1865,10 +2453,10 @@ async function saveFilament() {
 
 
 // What the printer list shows when it has no cards: a failed or pending config
-// load (never offer Add printer then, see CLAUDE.md), a first-run guide, or the
-// plain empty state.
+// load (never offer Add printer or the welcome then, see CLAUDE.md), or the
+// first-run welcome. The welcome is only for a config that loaded and is empty.
 function emptyPrintersHtml() {
-    if (!configEverLoaded) {
+    if (!configEverLoaded || configLoadFailed) {
         return configLoadFailed
             ? '<div class="col-span-full rounded-lg border border-dashed border-border p-8 text-center">'
               + '<p class="text-text-2 text-sm">Can\'t load your printers. The Bridge may still be starting.</p>'
@@ -1876,27 +2464,7 @@ function emptyPrintersHtml() {
               + '</div>'
             : '<div class="col-span-full p-8 text-center"><p class="text-text-2 text-sm">Loading…</p></div>';
     }
-    if (foxtrackTokenSet || legacyKeySet) {
-        return '<div class="col-span-full rounded-lg border border-dashed border-border p-8 text-center">'
-            + '<p class="text-text-2 text-sm">No printers connected.</p>'
-            + '<button onclick="openAddPrinterModal()" class="mt-3 btn-outline">Add printer</button>'
-            + '</div>';
-    }
-    return '<div class="col-span-full rounded-lg border border-border bg-panel p-5">'
-        + '<h3 class="font-heading text-xl font-medium leading-tight">Get started</h3>'
-        + '<div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">'
-        + '<div class="rounded-md border border-border p-4 flex flex-col items-start">'
-        + '<p class="text-sm font-medium">1. Add a printer</p>'
-        + '<p class="mt-1 mb-3 text-xs leading-relaxed text-text-2">Bambu Lab, Klipper or PrusaLink on the same network as the Bridge, or a printer in Home Assistant.</p>'
-        + '<button onclick="openAddPrinterModal()" class="btn-outline">Add printer</button>'
-        + '</div>'
-        + '<div class="rounded-md border border-border p-4 flex flex-col items-start">'
-        + '<p class="text-sm font-medium">2. Connect FoxTrack (optional)</p>'
-        + '<p class="mt-1 mb-3 text-xs leading-relaxed text-text-2">See your printers in FoxTrack and print from it. Needs a Pro or Farm plan.</p>'
-        + '<button onclick="showView(\'settings\')" class="btn-outline">Connect FoxTrack</button>'
-        + '</div>'
-        + '</div>'
-        + '</div>';
+    return WELCOME_HTML;
 }
 
 function renderPrinters() {
@@ -1923,15 +2491,27 @@ function renderPrinters() {
     const nm = document.getElementById('normalModeButtons');
     if (!configEverLoaded) nm.classList.add('hidden');
     else if (!removeMode) nm.classList.remove('hidden');
+    // Nothing to remove yet (the welcome is showing): leave Add printer alone.
+    document.getElementById('removeBtn').classList.toggle('hidden', configuredPrinters.length === 0);
 
     if (!configEverLoaded || configuredPrinters.length === 0) {
         printerCardEls.clear();
         const html = emptyPrintersHtml();
-        // Skip identical rewrites so a focused button keeps focus across polls.
-        if (list._emptyHtml !== html) { list.innerHTML = html; list._emptyHtml = html; }
+        welcomeActive = html === WELCOME_HTML;
+        // Skip identical rewrites so a focused button (or a half-typed token) survives polls.
+        if (list._emptyHtml !== html) {
+            list.innerHTML = html;
+            list._emptyHtml = html;
+            if (welcomeActive) startWelcome();
+        }
+        syncStatRow();
+        renderFirstPrinterCard();
         return;
     }
     list._emptyHtml = null;
+    welcomeActive = false;
+    syncStatRow();
+    renderFirstPrinterCard();
 
     // Drop cards for printers no longer configured.
     const currentIds = new Set(configuredPrinters.map(p => p.id));
@@ -2429,6 +3009,8 @@ async function pollRelayHealth() {
     try {
         const data = await apiFetch('/api/relay-health');
         const problem = data && data.problem;
+        relayProblem = !!problem;
+        refreshFoxTrackUi();
         if (!problem) { wrap.classList.add('hidden'); return; }
         document.getElementById('relayHealthMsg').textContent = problem.message || '';
         const since = document.getElementById('relayHealthSince');
@@ -2444,6 +3026,8 @@ async function pollRelayHealth() {
     } catch (_) {
         // The bridge itself is unreachable; the header status dot already says so.
         wrap.classList.add('hidden');
+        relayProblem = false;
+        refreshFoxTrackUi();
     }
 }
 
@@ -2968,6 +3552,9 @@ async function restartForUpdate() {
     }
     await loadConfig();
     renderPrinters();
+    loadNetwork();   // not awaited: the addresses only matter to Settings and one card
+    if (foxtrackLinked()) checkFoxTrack();   // feeds the top-bar FoxTrack chip
+    setInterval(() => { if (foxtrackLinked()) checkFoxTrack(); }, 300000);
     await pollStatus();
     setInterval(pollStatus, 5000);
     checkForUpdate(); // not awaited: a slow release check must not hold up the dashboard

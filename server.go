@@ -144,6 +144,8 @@ func StartServer(port int) {
 	http.HandleFunc("/api/ai/settings", handleAISettings)    // GET/POST: assistant provider settings
 	http.HandleFunc("/api/ai/models", handleAIModels)        // POST: list a provider's models
 	http.HandleFunc("/api/ai/chat", handleAIChat)            // POST: answer one message
+	http.HandleFunc("/api/discover", handleDiscover)         // GET: find printers on the local network
+	http.HandleFunc("/api/network", handleNetwork)           // GET: this computer's dashboard URLs
 
 	printStartupBanner(port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
@@ -167,30 +169,11 @@ func isPrivateIP(ip net.IP) bool {
 }
 
 func printStartupBanner(port int) {
-	log.Println("FoxTrack Bridge is running. Open in your browser:")
-	log.Printf("  http://localhost:%d", port)
-	ifaces, err := net.Interfaces()
-	if err == nil {
-		for _, iface := range ifaces {
-			if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-				continue
-			}
-			addrs, _ := iface.Addrs()
-			for _, addr := range addrs {
-				var ip net.IP
-				switch v := addr.(type) {
-				case *net.IPNet:
-					ip = v.IP
-				case *net.IPAddr:
-					ip = v.IP
-				}
-				if ip == nil || ip.IsLoopback() || ip.To4() == nil || !isPrivateIP(ip) {
-					continue
-				}
-				log.Printf("  http://%s:%d", ip.String(), port)
-			}
-		}
+	line := fmt.Sprintf("Dashboard: http://localhost:%d", port)
+	if urls := lanURLs(port); len(urls) > 0 {
+		line += " (on your network: " + strings.Join(urls, ", ") + ")"
 	}
+	log.Print(line)
 }
 
 // handleLogs streams log lines to the browser as SSE (Server-Sent Events).
@@ -766,67 +749,6 @@ func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) 
 			return
 		}
 	}
-}
-
-func handleTest(w http.ResponseWriter, r *http.Request) {
-	jsonHeaders(w)
-	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// ip plus one of moonraker_url, prusalink_url or home_assistant_url.
-	var req config.Printer
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	reachable := false
-	detail := ""
-
-	if infoURL := probeURL(req); infoURL != "" {
-		// HTTP printers: any answer below 500, even "needs a key", means reachable.
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Get(infoURL)
-		if err != nil {
-			detail = err.Error()
-		} else {
-			resp.Body.Close()
-			reachable = resp.StatusCode < 500
-		}
-	} else {
-		// Bambu: TCP reachability on MQTT port.
-		address := net.JoinHostPort(strings.TrimSpace(req.IP), "8883")
-		conn, err := net.DialTimeout("tcp", address, 5*time.Second)
-		if err != nil {
-			detail = err.Error()
-		} else {
-			conn.Close()
-			reachable = true
-		}
-	}
-
-	resp := map[string]interface{}{"reachable": reachable}
-	if detail != "" {
-		resp["detail"] = detail
-	}
-	json.NewEncoder(w).Encode(resp)
-}
-
-// probeURL is the address a connection test GETs for an HTTP printer, or ""
-// for a Bambu printer.
-func probeURL(p config.Printer) string {
-	trim := func(u string) string { return strings.TrimRight(strings.TrimSpace(u), "/") }
-	switch p.Kind() {
-	case config.KindKlipper:
-		return trim(p.MoonrakerURL) + "/printer/info"
-	case config.KindPrusaLink:
-		return trim(p.PrusaLinkURL) + "/api/version"
-	case config.KindHomeAssistant:
-		return trim(p.HomeAssistantURL) + "/api/"
-	}
-	return ""
 }
 
 // redactedPrinter mirrors config.Printer for API responses, with the secret

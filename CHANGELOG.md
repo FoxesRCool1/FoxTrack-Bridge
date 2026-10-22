@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+**Easier setup**
+- A first-run welcome finds printers on your network; click Add and type the
+  access code or API key. FoxTrack is optional: connect it or skip it.
+- The Bridge checks the connection before saving a printer and tells you what
+  to fix (wrong access code, wrong API key, unreachable address).
+- A header chip shows whether FoxTrack is connected or the Bridge is
+  standalone, and you can paste an `ftb_` token to connect.
+- A Settings card, "Open on another device", lists the addresses to use from
+  your phone or another computer.
+- The startup log shows the dashboard address on your network too.
+- `docker-compose.yml` runs the published image with host networking, so
+  printers can be found from Docker.
+- The Linux installer can start the service for you and open the dashboard
+  (`--yes` skips the question).
+
 ## v2.5.1
 
 **PrusaLink and Home Assistant printers**

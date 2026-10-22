@@ -27,13 +27,15 @@ docker build \
 ```bash
 docker run -d \
   --name foxtrack-bridge \
-  -p 8080:8080 \
+  --network host \
   -v foxtrack-bridge-data:/data \
   --restart unless-stopped \
   foxtrack-bridge
 ```
 
 Open the dashboard at [http://localhost:8080](http://localhost:8080).
+
+`--network host` lets the Bridge find Bambu printers: their SSDP broadcasts do not cross Docker's default bridge network. It is Linux-only and makes `-p` unnecessary; change the port with `-e FOXTRACK_BRIDGE_PORT=9000`. Without it (for example `-p 8080:8080`) the dashboard works, but printers must be added by address. The repository's `docker-compose.yml` sets this up for you.
 
 ## Build from a fork or branch
 
@@ -69,7 +71,7 @@ Run a published image with:
 ```bash
 docker run -d \
   --name foxtrack-bridge \
-  -p 8080:8080 \
+  --network host \
   -v foxtrack-bridge-data:/data \
   --restart unless-stopped \
   ghcr.io/jonathanq/foxtrack-bridge:latest

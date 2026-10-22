@@ -79,14 +79,20 @@ Replace `<asset-name>` with the file you downloaded, for example `FoxTrack-Bridg
 
 ## Quick start
 
-1. Run the Bridge. Download the binary for your platform (see [Supported platforms](#supported-platforms)) and launch it. On Windows and macOS, a system tray icon appears with an "Open Dashboard" menu. Linux builds are headless: run the binary from a terminal, or see [Running on Linux](#running-on-linux) for a desktop launcher and background-service setup. The startup output lists the local addresses where the dashboard is available.
-2. Open the dashboard at [http://localhost:8080](http://localhost:8080). From other devices on the same network, use the IP address shown in the startup output (for example `http://192.168.x.x:8080`). You may need to disable WiFi AP isolation on your router.
-3. Connect to FoxTrack (optional). Create a Bridge token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/app/settings?tab=integrations), paste it into **Bridge token** in the Bridge Settings, and click Save. See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
-4. Add a printer. In Printers, click "Add Printer", select the printer type, fill in the required fields, and click Connect.
+1. Download the binary for your platform from the [releases page](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest) (see [Supported platforms](#supported-platforms)) and run it. On Windows and macOS the dashboard opens in your browser and a tray icon appears.
+2. On Linux (headless) or in Docker, open the address printed in the log, for example `http://localhost:8080`. From another device on your network use the "on your network" address from the same line (you may need to disable WiFi AP isolation on your router). Linux users can instead run the [scripted installer](#scripted-install-linuxinstallsh), which offers to start Bridge for you.
+3. The welcome screen looks for printers on your network. Click **Add** next to yours and type the access code (Bambu Lab) or API key (Klipper with authentication, PrusaLink).
+4. Optional: connect to FoxTrack by pasting your `ftb_` token, or click **Skip** to use Bridge on its own. Create a token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/app/settings?tab=integrations). See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
+
+Before a printer is saved, Bridge checks the connection and tells you what to fix if it cannot sign in. You can also add printers by hand at any time (see below).
 
 ---
 
 ## Adding printers
+
+The first-run welcome and **Printers > Add printer** scan your network for Bambu Lab printers (SSDP broadcast), Klipper/Moonraker and PrusaLink printers (a quick scan of your local /24 subnet). Pick one, enter its access code or API key, and click Connect. Bridge checks the connection before saving and explains what to fix: a wrong Bambu access code, a wrong API key, an unreachable address, or a rejected Home Assistant token.
+
+Printers on another subnet or VLAN, and anything the scan misses, can be added by hand as below.
 
 ### Bambu Lab
 
@@ -129,6 +135,21 @@ The state entity can read idle, printing, paused, finished or error (running, st
 ### Changing a printer later
 
 To change a saved printer, for example after its IP address changes, click the pencil icon on its card, edit the details, and click Save. Leave the access code, API key or Home Assistant token blank to keep the saved one. See [Change a printer later](docs/foxtrack.md#change-a-printer-later).
+
+---
+
+## Running with Docker
+
+The repository's [docker-compose.yml](docker-compose.yml) runs the published image (`ghcr.io/foxesrcool1/foxtrack-bridge`). Download it and start it:
+
+```bash
+docker compose up -d
+docker compose logs foxtrack-bridge   # shows the dashboard address
+```
+
+Settings and print history live in the `foxtrack-bridge-data` volume. The compose file uses `network_mode: host` on purpose: Bambu printers are found by SSDP broadcasts, which do not cross Docker's default bridge network, so without host networking discovery finds nothing (adding printers by address still works). Because of that, `ports:` is ignored; to change the port set `FOXTRACK_BRIDGE_PORT` in the file. Host networking is for Linux hosts; on Docker Desktop (Windows, macOS), add printers by address if discovery finds nothing.
+
+Self-update does not run inside Docker because the binary is not writable. To update, run `docker compose pull && docker compose up -d`. See [Docker documentation](docs/docker.md) for building your own image.
 
 ---
 
@@ -198,7 +219,7 @@ Run it without a checkout and it downloads those same three files from the match
 curl -fsSL https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/linux/install.sh | sh
 ```
 
-This installs the service but does not enable it; it prints the `systemctl --user enable --now` and `loginctl enable-linger` commands to run afterward (also covered below). It also installs a desktop launcher entry named "FoxTrack Bridge" that opens the dashboard in your browser; the launcher assumes the default port 8080. See [Uninstalling](#uninstalling) for `linux/install.sh --uninstall`.
+When it finishes it asks "Start FoxTrack Bridge now and at login? [Y/n]"; answer yes (or pass `--yes` to skip the question) and it enables the service, prints the dashboard address and opens it if you have a desktop session. If you answer no, or there is no terminal to ask, it prints the `systemctl --user enable --now` and `loginctl enable-linger` commands to run yourself (also covered below). On a headless box, run `loginctl enable-linger "$(whoami)"` so the service keeps running after you log out. It also installs a desktop launcher entry named "FoxTrack Bridge" that opens the dashboard in your browser; the launcher assumes the default port 8080. See [Uninstalling](#uninstalling) for `linux/install.sh --uninstall`.
 
 ### Systemd user service (recommended for desktop Linux)
 
@@ -326,7 +347,7 @@ Docker:
 
 ```bash
 docker build --build-arg APP_VERSION=v2.3.0 -t foxtrack-bridge .
-docker run -d --name foxtrack-bridge -p 8080:8080 -v foxtrack-bridge-data:/data --restart unless-stopped foxtrack-bridge
+docker run -d --name foxtrack-bridge --network host -v foxtrack-bridge-data:/data --restart unless-stopped foxtrack-bridge
 ```
 
 See [Docker documentation](docs/docker.md) for fork, branch, and server deployment examples.

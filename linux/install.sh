@@ -37,15 +37,49 @@ err()  { printf 'error: %s\n' "$*" >&2; }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# ask_yes_no <prompt>: default yes. Reads from the terminal even when the
+# script itself is piped in (curl | sh). Returns 1 when nobody can answer.
+ask_yes_no() {
+	if [ -t 0 ]; then
+		printf '%s [Y/n] ' "$1"
+		read -r answer || return 1
+	elif (: </dev/tty) 2>/dev/null; then
+		printf '%s [Y/n] ' "$1" >/dev/tty
+		read -r answer </dev/tty || return 1
+	else
+		return 1
+	fi
+	case "$answer" in
+	"" | [Yy]*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# start_service: enable and start the user unit, then show the dashboard URL.
+# The unit runs on the default port; it does not see this shell's environment.
+start_service() {
+	port=8080
+	if ! systemctl --user daemon-reload || ! systemctl --user enable --now foxtrack-bridge; then
+		warn "could not start the service; run the commands below yourself"
+		return 1
+	fi
+	info "Dashboard: http://localhost:$port"
+	if { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; } && have_cmd xdg-open; then
+		(xdg-open "http://localhost:$port" >/dev/null 2>&1 &) || true
+	fi
+}
+
 usage() {
 	cat <<EOF
-Usage: linux/install.sh [--uninstall]
+Usage: linux/install.sh [--yes] [--uninstall]
 
 Installs FoxTrack Bridge for the current user only, under \$HOME/.local and
 \$HOME/.config. No sudo is used or required.
 
   (no arguments)  Install the binary, icon, desktop entry, and systemd
-                  user unit.
+                  user unit, then offer to start it now and at login.
+  --yes           Start the service without asking (when systemd user
+                  services are available).
   --uninstall     Remove everything the installer put in place. Your
                   configuration and print history in
                   \$HOME/.config/FoxTrack-Bridge are never touched.
@@ -215,6 +249,16 @@ do_install() {
 
 	info ""
 	info "Install complete."
+
+	if have_cmd systemctl && systemctl --user show-environment >/dev/null 2>&1 &&
+		{ [ "$ASSUME_YES" = 1 ] || ask_yes_no "Start FoxTrack Bridge now and at login?"; } &&
+		start_service; then
+		info ""
+		info "On a headless machine, keep it running after you log out with:"
+		info "  loginctl enable-linger $(id -un)"
+		return
+	fi
+
 	info "Dashboard: http://localhost:8080"
 	info ""
 	info "The service was installed but not enabled. To run it on login, run:"
@@ -241,18 +285,32 @@ do_uninstall() {
 	info "  $CONFIG_DIR"
 }
 
-case "${1:-}" in
-"")
+ASSUME_YES=0
+ACTION=install
+for arg in "$@"; do
+	case "$arg" in
+	--yes)
+		ASSUME_YES=1
+		;;
+	--uninstall)
+		ACTION=uninstall
+		;;
+	-h | --help)
+		usage
+		exit 0
+		;;
+	*)
+		usage >&2
+		exit 1
+		;;
+	esac
+done
+
+case "$ACTION" in
+install)
 	do_install
 	;;
---uninstall)
+uninstall)
 	do_uninstall
-	;;
--h | --help)
-	usage
-	;;
-*)
-	usage >&2
-	exit 1
 	;;
 esac
