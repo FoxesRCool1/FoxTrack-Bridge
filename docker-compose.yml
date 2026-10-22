@@ -1,0 +1,23 @@
+# Start with: docker compose up -d
+# Then open http://localhost:8080 (or http://<this machine's address>:8080).
+services:
+  foxtrack-bridge:
+    image: ghcr.io/foxesrcool1/foxtrack-bridge:latest
+    container_name: foxtrack-bridge
+    # Host networking lets the Bridge find Bambu printers (their SSDP
+    # broadcasts do not cross Docker's bridge network) and reach printers on
+    # your LAN. It also means `ports:` is ignored: the container listens on
+    # the host directly. Linux only; on Docker Desktop (Windows/macOS) add
+    # printers by address if discovery finds nothing.
+    network_mode: host
+    # To use another port, uncomment this (default 8080):
+    # environment:
+    #   FOXTRACK_BRIDGE_PORT: "9000"
+    volumes:
+      # Settings and print history. A named volume keeps the image's non-root
+      # ownership; a ./data bind mount would be created root-owned.
+      - foxtrack-bridge-data:/data
+    restart: unless-stopped
+
+volumes:
+  foxtrack-bridge-data:
