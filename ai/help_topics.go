@@ -226,16 +226,20 @@ The Bridge never controls a print on its own. It can pause, stop, set speed and 
 	{
 		ID:       "controls",
 		Title:    "What the control buttons do, and which printers have them",
-		Keywords: []string{"pause", "stop", "resume", "cancel", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "console", "command", "advanced"},
+		Keywords: []string{"pause", "stop", "resume", "cancel", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "console", "command", "advanced", "temperature", "nozzle", "bed", "heat", "preheat", "home", "temps"},
 		Body: `Available controls depend on how the printer is connected.
 
-Bambu Lab in LAN mode: pause, stop, light toggle, print speed (Silent, Standard, Sport, Ludicrous), fan speed, and a GCode console for single commands. The GCode console only appears in Advanced mode.
+Bambu Lab in LAN mode: pause, stop, light toggle, print speed (Silent, Standard, Sport, Ludicrous), fan speed, the Temps panel, and a GCode console for single commands. The GCode console only appears in Advanced mode.
 
-Bambu Lab over the cloud: the light toggle only. Pause, stop, speed, fan and GCode are hidden because Bambu's 2025 and later firmware rejects them from third-party clients. LAN mode is the only way to get those back.
+Bambu Lab over the cloud: the light toggle only. Pause, stop, speed, fan, Temps and GCode are hidden because Bambu's 2025 and later firmware rejects them from third-party clients. LAN mode is the only way to get those back.
 
-Klipper / Moonraker: pause, stop and fan speed.
+Klipper / Moonraker: pause, stop, fan speed and the Temps panel.
 
-Prusa (PrusaLink) and OctoPrint: pause, resume and stop.
+OctoPrint: pause, resume, stop and the Temps panel.
+
+Prusa (PrusaLink): pause, resume and stop. PrusaLink has no call for temperatures or homing, so there is no Temps panel.
+
+The Temps panel (the "Temps" button on the card) sets the nozzle target (0 to 320 C) and the bed target (0 to 120 C) with a Set button each; 0 turns that heater off. Its Home button homes X, Y and Z and is disabled while a print runs. FoxTrack's opened printer has the same fields and sends them through the Bridge.
 
 Home Assistant (read-only): no controls. The Bridge only reads the status.
 

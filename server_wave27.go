@@ -28,8 +28,9 @@ var (
 
 // bridgeCapabilities is what this build announces to FoxTrack's
 // bridge-commands endpoint. FoxTrack hands plug_on / plug_off only to a Bridge
-// that lists them.
-const bridgeCapabilities = "print_file,set_filament,alarms,plug_on,plug_off"
+// that lists them, and the console commands (set_nozzle_temp, set_bed_temp,
+// home) only to one that lists "console".
+const bridgeCapabilities = "print_file,set_filament,alarms,plug_on,plug_off,console"
 
 // printerLiveState is the latest telemetry for a printer, from whichever
 // driver has it.

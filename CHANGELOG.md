@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+**Printer console: temperatures and home**
+- FoxTrack's opened printer, and the card's new Temps panel, can set the
+  nozzle target (0 to 320 C) and the bed target (0 to 120 C; 0 turns the
+  heater off) and home the axes. Bambu Lab in LAN mode (M104 / M140 / G28),
+  Klipper (the same G-code through Moonraker) and OctoPrint (its printer API).
+  PrusaLink has no such call and answers "This printer does not take
+  temperature commands from the Bridge"; Home Assistant stays read-only. A
+  target out of range is refused before anything is sent. The Bridge announces
+  `console` to FoxTrack, which hands these commands only to a Bridge that
+  lists it.
+
 ## v2.7.0
 
 **OctoPrint printers**

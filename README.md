@@ -27,6 +27,7 @@ Among many other tools, AI was used to develop this program. If you have a probl
 - AMS filament slot display with colors and material types (Bambu Lab only)
 - Print speed selector: Silent, Standard, Sport, Ludicrous (Bambu Lab only)
 - Fan speed control (Bambu Lab and Klipper)
+- Nozzle and bed targets and Home, from the card's Temps panel or from FoxTrack (Bambu Lab in LAN mode, Klipper and OctoPrint)
 - Pause, resume and stop from FoxTrack (Bambu Lab in LAN mode, Klipper, PrusaLink and OctoPrint)
 - Print a sliced file from FoxTrack: the Bridge fetches it, puts it on the printer and starts it (Bambu Lab in LAN Only Mode with Developer Mode, Klipper, PrusaLink and OctoPrint with a `.gcode` file)
 - GCode console for sending single commands (Bambu Lab, Advanced mode only)

@@ -48,7 +48,7 @@ func fetchOctoPrintTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhoo
 	}
 	t := octoPrintTelemetry(printer, job)
 	t.PrinterModel = octoPrintModel(p)
-	return t, relayFor(t, configpkg.KindOctoPrint, []string{"print_file", "alarms"}), nil
+	return t, relayFor(t, configpkg.KindOctoPrint, []string{"print_file", "alarms", "console"}), nil
 }
 
 // octoPrintTelemetry maps /api/printer and /api/job into the Bridge's
@@ -131,27 +131,53 @@ func octoPrintAlarms(state map[string]interface{}) []webhook.RelayAlarm {
 	return []webhook.RelayAlarm{webhook.MessageAlarm(webhook.AlarmSerious, msg)}
 }
 
-// sendOctoPrintCommand runs pause, resume or stop on the current job.
-func sendOctoPrintCommand(p configpkg.Printer, command string) error {
-	var body string
-	switch command {
-	case "pause":
-		body = `{"command":"pause","action":"pause"}`
-	case "resume":
-		body = `{"command":"pause","action":"resume"}`
-	case "stop":
-		body = `{"command":"cancel"}`
-	default:
-		return fmt.Errorf("unsupported command for OctoPrint: %s", command)
+// sendOctoPrintCommand runs pause, resume or stop on the current job, and the
+// console commands (Bridge 2.8) on the printer: nozzle and bed targets through
+// /api/printer/tool and /api/printer/bed, home through /api/printer/printhead.
+func sendOctoPrintCommand(p configpkg.Printer, command string, args map[string]interface{}) error {
+	path, body, err := octoPrintCommandRequest(command, args)
+	if err != nil {
+		return err
 	}
 	client := &http.Client{Timeout: 6 * time.Second, Transport: insecureTransport()}
 	headers := moonrakerAuthHeaders(p)
 	headers["Content-Type"] = "application/json"
-	_, err := sendJSONRequest(client, "POST", octoPrintURL(p, "/api/job"), headers, strings.NewReader(body))
+	_, err = sendJSONRequest(client, "POST", octoPrintURL(p, path), headers, strings.NewReader(body))
 	if err != nil && err.Error() == "HTTP 409" {
+		if mqttpkg.IsConsoleCommand(command) {
+			return errors.New("OctoPrint is not connected to the printer.")
+		}
 		return errors.New("OctoPrint has no print to do that to right now.")
 	}
 	return err
+}
+
+// octoPrintCommandRequest is the OctoPrint API path and JSON body for a
+// command. Pure, so tests check the mapping without a server.
+func octoPrintCommandRequest(command string, args map[string]interface{}) (path, body string, err error) {
+	switch command {
+	case "pause":
+		return "/api/job", `{"command":"pause","action":"pause"}`, nil
+	case "resume":
+		return "/api/job", `{"command":"pause","action":"resume"}`, nil
+	case "stop":
+		return "/api/job", `{"command":"cancel"}`, nil
+	case "set_nozzle_temp":
+		c, err := mqttpkg.CelsiusArg(args, mqttpkg.NozzleMaxC)
+		if err != nil {
+			return "", "", err
+		}
+		return "/api/printer/tool", fmt.Sprintf(`{"command":"target","targets":{"tool0":%d}}`, c), nil
+	case "set_bed_temp":
+		c, err := mqttpkg.CelsiusArg(args, mqttpkg.BedMaxC)
+		if err != nil {
+			return "", "", err
+		}
+		return "/api/printer/bed", fmt.Sprintf(`{"command":"target","target":%d}`, c), nil
+	case "home":
+		return "/api/printer/printhead", `{"command":"home","axes":["x","y","z"]}`, nil
+	}
+	return "", "", fmt.Errorf("unsupported command for OctoPrint: %s", command)
 }
 
 // octoPrintUpload sends the file to OctoPrint's local storage and starts it

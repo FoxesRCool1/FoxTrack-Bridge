@@ -316,9 +316,12 @@ func (c *Controller) SendCommand(name, command string, args map[string]interface
 
 	switch p.Kind() {
 	case configpkg.KindPrusaLink:
+		if mqttpkg.IsConsoleCommand(command) {
+			return errPrusaNoConsole
+		}
 		return sendPrusaLinkCommand(p, command)
 	case configpkg.KindOctoPrint:
-		return sendOctoPrintCommand(p, command)
+		return sendOctoPrintCommand(p, command, args)
 	case configpkg.KindHomeAssistant:
 		return errReadOnly
 	}
@@ -642,7 +645,7 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 			PrinterKind:        "klipper",
 			PrinterModel:       "Klipper",
 			BridgeVersion:      version.AppVersion,
-			BridgeCapabilities: []string{"print_file", "filament_use", "alarms"},
+			BridgeCapabilities: []string{"print_file", "filament_use", "alarms", "console"},
 		},
 	}
 
@@ -772,6 +775,15 @@ func (c *Controller) sendKlipperCommand(p configpkg.Printer, state *mqttpkg.Tele
 		script := fmt.Sprintf("M106 S%d", s)
 		gcodeURL := moonrakerURL(p, "/printer/gcode/script?script="+url.QueryEscape(script))
 		_, err := sendJSONRequest(client, "POST", gcodeURL, headers, nil)
+		return err
+	case "set_nozzle_temp", "set_bed_temp", "home":
+		// The console (Bridge 2.8): the same G-code as Bambu, through Moonraker.
+		script, err := mqttpkg.ConsoleGcode(command, args)
+		if err != nil {
+			return err
+		}
+		gcodeURL := moonrakerURL(p, "/printer/gcode/script?script="+url.QueryEscape(script))
+		_, err = sendJSONRequest(client, "POST", gcodeURL, headers, nil)
 		return err
 	case "light", "toggle_light", "light_on", "light_off":
 		desiredOn := false

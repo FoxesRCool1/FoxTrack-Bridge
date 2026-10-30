@@ -26,6 +26,8 @@ var (
 	errPrusaUnreachable = errors.New("Bridge could not reach the printer while sending the file. Check that the printer is on and PrusaLink is enabled.")
 	errPrusaRefused     = errors.New("The printer refused the file. Check that a USB drive is in the printer and has free space.")
 	errNoPrusaJob       = errors.New("The printer has no print running.")
+	// PrusaLink's API has no temperature or homing call.
+	errPrusaNoConsole = errors.New("This printer does not take temperature commands from the Bridge.")
 )
 
 func prusaLinkURL(p configpkg.Printer, path string) string {
