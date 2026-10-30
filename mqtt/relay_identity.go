@@ -17,7 +17,7 @@ func stampRelayIdentity(pr *webhook.RelayPrint, p Printer, telemetryModel string
 	pr.BridgeVersion = version.AppVersion
 	caps := []string{"alarms"}
 	if !p.Cloud && !IsCloudSerial(p.Serial) {
-		caps = append(caps, "print_file", "set_filament", "filament_use", "console")
+		caps = append(caps, "print_file", "set_filament", "filament_use", "console", "files")
 	}
 	pr.BridgeCapabilities = WithPlugCaps(caps, pr.Plug != nil)
 }

@@ -48,7 +48,7 @@ func fetchOctoPrintTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhoo
 	}
 	t := octoPrintTelemetry(printer, job)
 	t.PrinterModel = octoPrintModel(p)
-	return t, relayFor(t, configpkg.KindOctoPrint, []string{"print_file", "alarms", "console"}), nil
+	return t, relayFor(t, configpkg.KindOctoPrint, []string{"print_file", "alarms", "console", "files"}), nil
 }
 
 // octoPrintTelemetry maps /api/printer and /api/job into the Bridge's

@@ -29,9 +29,10 @@ import (
 type fakeServer struct {
 	ln       net.Listener
 	password string
-	final    string // reply sent after the data connection closes; "" = never send one
-	pasvHost string // host written in the 227 reply
-	drop     int    // bytes the server loses from the end of an upload
+	final    string              // reply sent after the data connection closes; "" = never send one
+	pasvHost string              // host written in the 227 reply
+	drop     int                 // bytes the server loses from the end of an upload
+	listing  map[string][]string // LIST <dir> -> ls -l lines
 
 	mu       sync.Mutex
 	stored   map[string][]byte
@@ -197,6 +198,40 @@ func (s *fakeServer) serve(c net.Conn, dataCfg *tls.Config) {
 			if s.final != "" {
 				say("%s", s.final)
 			}
+		case "LIST":
+			s.mu.Lock()
+			s.verbs = append(s.verbs, "LIST "+arg)
+			lines, ok := s.listing[strings.TrimPrefix(arg, "-a ")]
+			s.mu.Unlock()
+			if !ok {
+				say("550 Failed to open directory.")
+				continue
+			}
+			dc, err := pasv.Accept()
+			if err != nil {
+				say("425 no data connection")
+				continue
+			}
+			say("150 Here comes the directory listing.")
+			var tc net.Conn = dc
+			if !clear {
+				tt := tls.Server(dc, dataCfg)
+				if err := tt.Handshake(); err != nil {
+					dc.Close()
+					continue
+				}
+				if !tt.ConnectionState().DidResume {
+					tt.Close()
+					say("522 SSL connection failed: session reuse required")
+					continue
+				}
+				tc = tt
+			}
+			for _, l := range lines {
+				fmt.Fprintf(tc, "%s\r\n", l)
+			}
+			tc.Close()
+			say("226 Directory send OK.")
 		case "SIZE":
 			s.mu.Lock()
 			b, ok := s.stored[arg]

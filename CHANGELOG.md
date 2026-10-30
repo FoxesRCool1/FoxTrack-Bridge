@@ -13,6 +13,15 @@
   `console` to FoxTrack, which hands these commands only to a Bridge that
   lists it.
 
+**Files on the printer**
+- FoxTrack's opened printer lists the files already on the printer (name,
+  size, date, newest first, up to 200) and can start one with a Print button.
+  Bambu Lab in LAN mode: the `.3mf` files on the card and in its cache folder,
+  read over FTPS; Klipper: Moonraker's gcodes folder; OctoPrint: its local
+  storage. The list is read only when FoxTrack asks, never in the poll loop.
+  A print is refused while the printer prints or is paused. PrusaLink and
+  Home Assistant printers are not listed. The Bridge announces `files`.
+
 ## v2.7.0
 
 **OctoPrint printers**

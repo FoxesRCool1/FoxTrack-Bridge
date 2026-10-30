@@ -645,7 +645,7 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 			PrinterKind:        "klipper",
 			PrinterModel:       "Klipper",
 			BridgeVersion:      version.AppVersion,
-			BridgeCapabilities: []string{"print_file", "filament_use", "alarms", "console"},
+			BridgeCapabilities: []string{"print_file", "filament_use", "alarms", "console", "files"},
 		},
 	}
 

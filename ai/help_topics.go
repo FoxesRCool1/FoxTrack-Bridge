@@ -248,6 +248,21 @@ A printer with a smart plug set in the Bridge also has a "Plug on" / "Plug off" 
 AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.`,
 	},
 	{
+		ID:       "files-on-printer",
+		Title:    "Files on the printer: list and print them from FoxTrack",
+		Keywords: []string{"files", "file list", "sd card", "card", "cache", "reprint", "print again", "3mf", "gcode", "moonraker", "octoprint", "list_files"},
+		Body: `FoxTrack's opened printer (the Printers page, click a printer) has a "Files on the printer" section. It lists the print files already on the printer, newest first, with size and date, up to 200. Each row has a Print button that starts that file on that printer. The Bridge reads the list only when FoxTrack asks for it.
+
+Bambu Lab in LAN mode: the .3mf and .gcode.3mf files on the card and in its cache folder (the folder Bambu Studio sends to), read over FTPS with the access code. A file in the cache shows as cache/<name>.
+Klipper / Moonraker: the files in Moonraker's gcodes folder.
+OctoPrint: the files in OctoPrint's local storage.
+PrusaLink and Home Assistant printers are not listed; FoxTrack hides the section for them.
+
+Print is refused while the printer prints or is paused, and while the Bridge is sending another file to that printer. A Bambu printer over the cloud cannot list or print files; switch it to LAN mode.
+
+This section is in FoxTrack, not in the Bridge dashboard. It needs FoxTrack Bridge 2.8 or later.`,
+	},
+	{
 		ID:       "add-octoprint",
 		Title:    "Adding an OctoPrint printer",
 		Keywords: []string{"octoprint", "octopi", "api key", "application key", "add", "connect", "webcam", "snapshot", "5000"},

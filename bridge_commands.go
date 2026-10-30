@@ -25,9 +25,10 @@ type bridgeCommand struct {
 }
 
 type bridgeCommandResult struct {
-	CommandID    string `json:"command_id"`
-	Status       string `json:"status"`                  // "running" (print_file only), "done" or "failed"
-	ErrorMessage string `json:"error_message,omitempty"` // driver error message when failed
+	CommandID    string          `json:"command_id"`
+	Status       string          `json:"status"`                  // "running" (print_file only), "done" or "failed"
+	ErrorMessage string          `json:"error_message,omitempty"` // driver error message when failed
+	Data         json.RawMessage `json:"data,omitempty"`          // list_files: the files; FoxTrack stores it in bridge_commands.result
 }
 
 // bridgeCommandsReply is the bridge-commands GET reply. Watched and
@@ -115,6 +116,10 @@ func pollBridgeCommands() {
 				if cmd.Command == "print_file" {
 					// Long job: accept it here, run it off the poll loop.
 					startPrintFile(apiKey, cmd)
+					continue
+				}
+				if isFilesCommand(cmd.Command) {
+					startFilesCommand(apiKey, cmd)
 					continue
 				}
 				execErr := executeBridgeCommand(cmd)
