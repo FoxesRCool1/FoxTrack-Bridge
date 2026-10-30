@@ -17,15 +17,18 @@ Among many other tools, AI was used to develop this program. If you have a probl
 
 ## Features
 
-- Live status for Bambu Lab, Klipper/Moonraker and PrusaLink printers, and read-only status for printers in Home Assistant
+- Live status for Bambu Lab, Klipper/Moonraker, PrusaLink and OctoPrint printers, and read-only status for printers in Home Assistant
+- Printer alarms: Bambu HMS and print error codes, Klipper shutdowns, PrusaLink and OctoPrint error text, on the card and in FoxTrack's Alarms view
+- Smart plugs (Shelly, Tasmota, Kasa): on/off and watts on the card, auto off after a print, energy per print into FoxTrack
+- Virtual printer: OrcaSlicer and PrusaSlicer send a sliced file to FoxTrack through the Bridge's OctoPrint-style upload
 - Print progress, temperatures, elapsed time, and ETA
 - Live camera feed (Bambu Lab A1 and P1 series, and Klipper webcams) and light toggle
 - Edit a saved printer, for example after its IP address changes
 - AMS filament slot display with colors and material types (Bambu Lab only)
 - Print speed selector: Silent, Standard, Sport, Ludicrous (Bambu Lab only)
 - Fan speed control (Bambu Lab and Klipper)
-- Pause, resume and stop from FoxTrack (Bambu Lab in LAN mode, Klipper and PrusaLink)
-- Print a sliced file from FoxTrack: the Bridge fetches it, puts it on the printer and starts it (Bambu Lab in LAN Only Mode with Developer Mode, Klipper, and PrusaLink with a `.gcode` file)
+- Pause, resume and stop from FoxTrack (Bambu Lab in LAN mode, Klipper, PrusaLink and OctoPrint)
+- Print a sliced file from FoxTrack: the Bridge fetches it, puts it on the printer and starts it (Bambu Lab in LAN Only Mode with Developer Mode, Klipper, PrusaLink and OctoPrint with a `.gcode` file)
 - GCode console for sending single commands (Bambu Lab, Advanced mode only)
 - Per-printer camera hiding, saved on the Bridge so it applies in every browser
 - Bambu Cloud sign-in for printers that are not in LAN mode (experimental)
@@ -90,7 +93,7 @@ Before a printer is saved, Bridge checks the connection and tells you what to fi
 
 ## Adding printers
 
-The first-run welcome and **Printers > Add printer** scan your network for Bambu Lab printers (SSDP broadcast), Klipper/Moonraker and PrusaLink printers (a quick scan of your local /24 subnet). Pick one, enter its access code or API key, and click Connect. Bridge checks the connection before saving and explains what to fix: a wrong Bambu access code, a wrong API key, an unreachable address, or a rejected Home Assistant token.
+The first-run welcome and **Printers > Add printer** scan your network for Bambu Lab printers (SSDP broadcast), Klipper/Moonraker, PrusaLink and OctoPrint printers (a quick scan of your local /24 subnet). Pick one, enter its access code or API key, and click Connect. Bridge checks the connection before saving and explains what to fix: a wrong Bambu access code, a wrong API key, an unreachable address, or a rejected Home Assistant token.
 
 Printers on another subnet or VLAN, and anything the scan misses, can be added by hand as below.
 
@@ -131,6 +134,28 @@ If Home Assistant already shows your printer (for example through its PrusaLink,
 3. In the dashboard, open Printers, click **Add printer**, select **Home Assistant (read-only)**, enter the Home Assistant URL (usually `http://homeassistant.local:8123`), the token and the entity IDs, and click Connect.
 
 The state entity can read idle, printing, paused, finished or error (running, standby, complete and failed work too). Unavailable or unknown shows the printer as offline. A time left entity can count seconds, minutes or hours (the Bridge reads its unit), or hold the time the print will finish.
+
+### OctoPrint
+
+1. In OctoPrint, make an API key: **Settings > Application Keys** (one for the Bridge), or copy the global key under **Settings > API**.
+2. In the dashboard, open Printers, click **Add printer**, select **OctoPrint**, enter the address (for example `http://octopi.local`, or `http://192.168.1.60:5000` when OctoPrint is not behind a web server) and the API key, and click Connect. The network scan also finds OctoPrint on ports 80 and 5000.
+3. The webcam is read from OctoPrint's own webcam settings. Enter a webcam URL only if the camera button does not work.
+
+The Bridge reports status, progress, temperatures, file name and time left, records finished prints, and reports an OctoPrint printer error as an alarm. FoxTrack can pause, resume and stop a print, and can send a `.gcode` file: the Bridge uploads it to OctoPrint and starts it. FoxTrack knows an OctoPrint printer by its name in the Bridge.
+
+### Smart plugs (Shelly, Tasmota, Kasa)
+
+A printer can be powered through a smart plug the Bridge reads and switches over your network; no maker's cloud is called. Supported: Shelly Gen1, Gen2 and Plus; Tasmota; Kasa plugs on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) is not supported yet.
+
+Set the plug on the printer: click the pencil on its card (or add the printer), scroll to **Smart plug**, choose the type, enter the plug's address and click **Check plug**. Tick **Turn the plug off after a print** to have the Bridge switch it off a set number of minutes after a print ends, once the nozzle is under 50 C. A new print in that time cancels it.
+
+The card then shows `Plug on · 142 W` and a **Plug on** / **Plug off** button. Off is disabled while the printer prints or is paused, and refused while the nozzle is above 50 C. The energy each print used (from the plug's counter, or watts summed over time for a plug without one) is sent to FoxTrack with the print history and shows in Reports under Printer use. FoxTrack's own plug buttons work through the Bridge.
+
+### Virtual printer (send from the slicer to FoxTrack)
+
+Under **Settings > Virtual printer**, the Bridge can look like an OctoPrint host to OrcaSlicer and PrusaSlicer. Turn it on (the Bridge must be connected to FoxTrack), then in the slicer add a physical printer / print host of type **OctoPrint** with the address shown (this computer, port 8090) and the API key shown. The slicer's send button then puts the sliced file on FoxTrack's Printers page under **From the slicer**, where you attach it to a product and print it from FoxTrack. It never goes to a printer directly.
+
+FoxTrack takes `.gcode` and `.gcode.3mf` files up to 50 MB, at most 50 waiting at once. Bambu Studio cannot send to it (it only talks to Bambu printers); use OrcaSlicer.
 
 ### Changing a printer later
 

@@ -60,7 +60,7 @@ func bambuModelName(code string) string {
 }
 
 type discoveredPrinter struct {
-	Type    string `json:"type"` // bambu, klipper or prusalink
+	Type    string `json:"type"` // bambu, klipper, prusalink or octoprint
 	Name    string `json:"name"`
 	Model   string `json:"model,omitempty"`
 	IP      string `json:"ip"`
@@ -458,8 +458,30 @@ func discoverHost(ctx context.Context, c *http.Client, ip string, open func(port
 		if name, ok := discoverPrusaLink(ctx, c, base); ok {
 			return discoveredPrinter{Type: "prusalink", Name: name, IP: ip, URL: base}, true
 		}
+		if discoverOctoPrint(ctx, c, base) {
+			return discoveredPrinter{Type: "octoprint", Name: "OctoPrint", IP: ip, URL: base}, true
+		}
+	}
+	if open(5000) {
+		base := "http://" + ip + ":5000"
+		if discoverOctoPrint(ctx, c, base) {
+			return discoveredPrinter{Type: "octoprint", Name: "OctoPrint", IP: ip, URL: base}, true
+		}
 	}
 	return discoveredPrinter{}, false
+}
+
+// discoverOctoPrint reports whether base is an OctoPrint server. Without a key
+// /api/version answers 403, so the page itself is read: OctoPrint's HTML names
+// it in the title. The Bridge's own virtual printer has no page, so it is
+// never listed.
+func discoverOctoPrint(ctx context.Context, c *http.Client, base string) bool {
+	status, _, body, err := discoverGet(ctx, c, base+"/")
+	if err != nil || status != http.StatusOK {
+		return false
+	}
+	s := strings.ToLower(string(body))
+	return strings.Contains(s, "<title>octoprint") || strings.Contains(s, "octoprint.js") || strings.Contains(s, `name="octoprint`)
 }
 
 // discoverBambuTLS finds a Bambu printer whose announcements Wi-Fi keeps

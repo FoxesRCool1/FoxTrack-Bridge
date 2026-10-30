@@ -53,7 +53,7 @@ func TestFetchHomeAssistantTelemetry_MapsEntities(t *testing.T) {
 		t.Fatalf("telemetry = %+v", tel)
 	}
 	p := relay.Print
-	if p.GcodeState != "RUNNING" || p.PrinterKind != "home_assistant" || p.BridgeCapabilities != nil || p.McRemainingTime != 90 {
+	if p.GcodeState != "RUNNING" || p.PrinterKind != "home_assistant" || strings.Join(p.BridgeCapabilities, ",") != "alarms" || p.McRemainingTime != 90 {
 		t.Fatalf("relay = %+v", p)
 	}
 }

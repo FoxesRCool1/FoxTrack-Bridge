@@ -128,10 +128,47 @@ func probePrinter(ctx context.Context, p config.Printer, reachOnly bool) probeRe
 		return probeMoonraker(ctx, p)
 	case config.KindPrusaLink:
 		return probePrusaLink(ctx, p)
+	case config.KindOctoPrint:
+		return probeOctoPrint(ctx, p)
 	case config.KindHomeAssistant:
 		return probeHomeAssistant(ctx, p)
 	}
 	return probeBambu(ctx, p, reachOnly)
+}
+
+// probeOctoPrint checks /api/version with the key. OctoPrint answers 403 to a
+// missing or wrong key before anything else, and its version body names it.
+func probeOctoPrint(ctx context.Context, p config.Printer) probeResult {
+	base, ok := probeBase(p.OctoPrintURL)
+	if !ok {
+		return probeBadAddress("OctoPrint")
+	}
+	headers := map[string]string{}
+	if key := strings.TrimSpace(p.APIKey); key != "" {
+		headers["X-Api-Key"] = key
+	}
+	const hint = "OctoPrint usually answers on port 80 or 5000, e.g. http://octopi.local"
+	status, body, fail := probeGet(ctx, "OctoPrint", base, "/api/version", hint, headers)
+	if fail != nil {
+		return *fail
+	}
+	if probeRefused(status) {
+		if strings.TrimSpace(p.APIKey) == "" {
+			return probeResultOf(probeAuth, "OctoPrint needs an API key.", "In OctoPrint: Settings → API, or make an Application Key for the Bridge.")
+		}
+		return probeResultOf(probeAuth, "OctoPrint refused the API key.", "In OctoPrint: Settings → API, or make an Application Key for the Bridge.")
+	}
+	var info struct {
+		Server string `json:"server"`
+		Text   string `json:"text"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &info) != nil || info.Server == "" {
+		return probeResultOf(probeNotFound, "That address answers, but it isn't OctoPrint.", hint)
+	}
+	if strings.Contains(info.Text, "FoxTrack Bridge") {
+		return probeResultOf(probeNotFound, "That is the Bridge's own virtual printer, not a real OctoPrint.", "Enter the address of the computer running OctoPrint.")
+	}
+	return probeResultOf(probeOK, fmt.Sprintf("Connected to OctoPrint %s.", info.Server), "")
 }
 
 // savedPrinter returns the saved printer with this ID.
@@ -399,6 +436,8 @@ func probeURL(p config.Printer) string {
 		return trim(p.MoonrakerURL) + "/printer/info"
 	case config.KindPrusaLink:
 		return trim(p.PrusaLinkURL) + "/api/version"
+	case config.KindOctoPrint:
+		return trim(p.OctoPrintURL) + "/api/version"
 	case config.KindHomeAssistant:
 		return trim(p.HomeAssistantURL) + "/api/"
 	}

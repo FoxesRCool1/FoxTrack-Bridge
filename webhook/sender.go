@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -362,11 +363,113 @@ type RelayPrint struct {
 	Ams                []RelayAmsSlot `json:"ams,omitempty"`            // nil for Klipper or printers without AMS
 	ExternalSpool      *RelayAmsSlot  `json:"external_spool,omitempty"` // Bambu external spool (slot 254); nil until reported
 
+	// Alarms is what the printer reports as wrong right now. Sent on EVERY
+	// push, for every printer kind, as [] when there is none: FoxTrack clears
+	// an open alarm the moment a push leaves it out, so a missing key would
+	// clear and reopen them. doSendRelay turns nil into [].
+	Alarms []RelayAlarm `json:"alarms"`
+	// Plug is the smart plug the printer is on, when one is set in the Bridge.
+	// Left out for a printer without one.
+	Plug *RelayPlug `json:"plug,omitempty"`
+
 	// What FoxTrack's Print dialog needs to list this printer.
-	PrinterKind        string   `json:"printer_kind,omitempty"`        // "bambu" | "klipper"
+	PrinterKind        string   `json:"printer_kind,omitempty"`        // "bambu" | "klipper" | "prusalink" | "octoprint" | "home_assistant"
 	PrinterModel       string   `json:"printer_model,omitempty"`       // "Bambu Lab P1S", "Klipper"
 	BridgeVersion      string   `json:"bridge_version,omitempty"`      // version.AppVersion
 	BridgeCapabilities []string `json:"bridge_capabilities,omitempty"` // ["print_file", "set_filament"]; empty over Bambu Cloud
+}
+
+// RelayAlarm is one open alarm, in the shape FoxTrack's printer_alarms
+// trigger reads. Code is the stable id FoxTrack keys the alarm on; with none,
+// it keys on Message, so that text must stay the same from push to push.
+type RelayAlarm struct {
+	Source   string  `json:"source"`   // "hms" | "print_error" | "message"
+	Code     *string `json:"code"`     // at most 40 chars, or null
+	Severity string  `json:"severity"` // "fatal" | "serious" | "common" | "info"
+	Message  *string `json:"message"`  // plain words, at most 300 chars, or null
+}
+
+// Alarm severities and sources, as FoxTrack stores them.
+const (
+	AlarmFatal   = "fatal"
+	AlarmSerious = "serious"
+	AlarmCommon  = "common"
+	AlarmInfo    = "info"
+
+	AlarmSourceHMS        = "hms"
+	AlarmSourcePrintError = "print_error"
+	AlarmSourceMessage    = "message"
+)
+
+const (
+	maxAlarmCodeChars    = 40
+	maxAlarmMessageChars = 300
+	maxAlarms            = 20
+)
+
+// MessageAlarm builds a text-only alarm (Klipper, PrusaLink, OctoPrint).
+func MessageAlarm(severity, message string) RelayAlarm {
+	msg := TruncateRunes(strings.TrimSpace(message), maxAlarmMessageChars)
+	return RelayAlarm{Source: AlarmSourceMessage, Severity: severity, Message: &msg}
+}
+
+// CodeAlarm builds an alarm keyed on a code; message may be "" for none.
+func CodeAlarm(source, code, severity, message string) RelayAlarm {
+	c := TruncateRunes(code, maxAlarmCodeChars)
+	a := RelayAlarm{Source: source, Code: &c, Severity: severity}
+	if m := TruncateRunes(strings.TrimSpace(message), maxAlarmMessageChars); m != "" {
+		a.Message = &m
+	}
+	return a
+}
+
+// CleanAlarms applies FoxTrack's rules so a payload never flaps: never nil,
+// no item without a code or a message, at most 20 items.
+func CleanAlarms(in []RelayAlarm) []RelayAlarm {
+	out := []RelayAlarm{}
+	for _, a := range in {
+		hasCode := a.Code != nil && strings.TrimSpace(*a.Code) != ""
+		hasMsg := a.Message != nil && strings.TrimSpace(*a.Message) != ""
+		if !hasCode && !hasMsg {
+			continue
+		}
+		switch a.Severity {
+		case AlarmFatal, AlarmSerious, AlarmCommon, AlarmInfo:
+		default:
+			a.Severity = AlarmCommon
+		}
+		switch a.Source {
+		case AlarmSourceHMS, AlarmSourcePrintError, AlarmSourceMessage:
+		default:
+			a.Source = AlarmSourceMessage
+		}
+		out = append(out, a)
+		if len(out) == maxAlarms {
+			break
+		}
+	}
+	return out
+}
+
+// TruncateRunes cuts s to at most n runes.
+func TruncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+// RelayPlug is the smart plug state FoxTrack reads as status.plug.
+type RelayPlug struct {
+	On        bool     `json:"on"`
+	Watts     *float64 `json:"watts"` // null when the plug has no meter
+	Kind      string   `json:"kind"`  // "shelly" | "tasmota" | "kasa"
+	AutoOff   bool     `json:"auto_off"`
+	Reachable bool     `json:"reachable"` // false when the last poll failed; On is then the last known state
 }
 
 // Send posts a Payload to the FoxTrack webhook URL.
@@ -419,6 +522,9 @@ type HistoryPayload struct {
 	PercentAtEnd   int               `json:"percent_at_end"`             // progress when the print left printing; 100 when finished
 	FilamentUsedMM float64           `json:"filament_used_mm,omitempty"` // Klipper: print_stats.filament_used at the end
 	Filaments      []HistoryFilament `json:"filaments,omitempty"`        // Bambu: every AMS slot plus the external spool (254)
+	// EnergyWh is what the printer's smart plug measured over the print, in
+	// Wh to one decimal. Left out for a printer without a plug.
+	EnergyWh *float64 `json:"energy_wh,omitempty"`
 }
 
 // HistoryFilament pairs one slot's spool at the start and end of a print, so
@@ -534,6 +640,7 @@ func SendHistory(apiKey, historyURL string, p HistoryPayload) {
 
 // doSendRelay performs the actual HTTP POST for a relay payload.
 func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayPayload) error {
+	p.Print.Alarms = CleanAlarms(p.Print.Alarms)
 	body, err := json.Marshal(p)
 	if err != nil {
 		return err
@@ -600,6 +707,34 @@ func SendSnapshot(apiKey, snapshotURL, serial, name string, jpegBytes []byte) er
 	log.Printf("[snapshot] sent frame for %s (%d bytes)", name, len(jpegBytes))
 	return nil
 }
+
+// UploadURLV2 is the FoxTrack endpoint that takes a sliced file from the
+// virtual printer (bridge-upload).
+var UploadURLV2 = v2Base + "/functions/v1/bridge-upload"
+
+// SendUpload posts one sliced file to FoxTrack and returns FoxTrack's status
+// code and body. One attempt, no retry: the slicer is waiting for the answer.
+// body is streamed; size must be its exact length.
+func SendUpload(ctx context.Context, apiKey, uploadURL, fileName string, body io.Reader, size int64) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", uploadURL, body)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.ContentLength = size
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("X-File-Name", url.PathEscape(fileName))
+	resp, err := uploadHTTPClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, readCappedBody(resp.Body), nil
+}
+
+// uploadHTTPClient has no overall timeout: a 50 MB file over a slow uplink
+// takes a while, and the caller's context ends it.
+var uploadHTTPClient = &http.Client{}
 
 // SendRelay posts a relay payload and queues a retry with backoff on failure.
 func SendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayPayload) error {

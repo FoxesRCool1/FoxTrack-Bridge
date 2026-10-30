@@ -152,7 +152,7 @@ func fetchBridgeCommands(apiKey string) (bridgeCommandsReply, error) {
 		return bridgeCommandsReply{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("X-Bridge-Capabilities", "print_file,set_filament")
+	req.Header.Set("X-Bridge-Capabilities", bridgeCapabilities)
 	req.Header.Set("X-Bridge-Version", version.AppVersion)
 
 	resp, err := bridgeCommandsHTTPClient.Do(req)
@@ -233,6 +233,9 @@ func executeBridgeCommand(cmd bridgeCommand) error {
 		return errNoMatchingPrinter
 	}
 
+	if isPlugCommand(cmd.Command) {
+		return runPlugCommandForFoxTrack(matchedName, cmd.Command)
+	}
 	if isBambu {
 		return mqttpkg.SendCommandWithArgs(matchedName, cmd.Command, cmd.Args)
 	}

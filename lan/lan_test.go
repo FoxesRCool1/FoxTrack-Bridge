@@ -11,7 +11,7 @@ import (
 
 func TestFetchKlipperTelemetry_MapsFieldsAndUsesHeader(t *testing.T) {
 	const expectedPath = "/printer/objects/query"
-	const expectedQuery = "print_stats&heater_bed&extruder&extruder1&extruder2&extruder3&toolhead&fan&display_status&virtual_sdcard"
+	const expectedQuery = "print_stats&heater_bed&extruder&extruder1&extruder2&extruder3&toolhead&fan&display_status&virtual_sdcard&webhooks"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// fetchKlipperTelemetry also polls lifetime hours; answer with an empty summary.

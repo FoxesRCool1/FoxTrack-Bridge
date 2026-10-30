@@ -173,6 +173,7 @@ func (c *Controller) recordEnd(name, fox2APIKey string, end *sessionEnd) {
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		PercentAtEnd:   end.percentAtEnd,
 		FilamentUsedMM: end.filamentUsedMM,
+		EnergyWh:       mqttpkg.PrintEnergy(name),
 	})
 }
 
@@ -316,10 +317,25 @@ func (c *Controller) SendCommand(name, command string, args map[string]interface
 	switch p.Kind() {
 	case configpkg.KindPrusaLink:
 		return sendPrusaLinkCommand(p, command)
+	case configpkg.KindOctoPrint:
+		return sendOctoPrintCommand(p, command)
 	case configpkg.KindHomeAssistant:
 		return errReadOnly
 	}
 	return c.sendKlipperCommand(p, state, command, args)
+}
+
+// snapshotURL is the still-image address the snapshot sender reads: the
+// webcam URL the user typed, else, for OctoPrint, the snapshot address the
+// server itself reports.
+func snapshotURL(p configpkg.Printer) string {
+	if u := strings.TrimSpace(p.WebcamURL); u != "" {
+		return u
+	}
+	if p.Kind() == configpkg.KindOctoPrint {
+		return octoPrintSnapshotURL(p)
+	}
+	return ""
 }
 
 func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name string) error {
@@ -337,7 +353,7 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name st
 		if err != nil {
 			continue
 		}
-		if p.Kind() == configpkg.KindKlipper {
+		if p.Kind() == configpkg.KindKlipper || p.Kind() == configpkg.KindOctoPrint {
 			applyMoonrakerAuth(req, p)
 		}
 		resp, err := client.Do(req)
@@ -390,6 +406,11 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 
 			t.PrinterID = p.Name
 			t.Timestamp = time.Now().Unix()
+			// The plug is read by its own poller; attach its latest state here so
+			// the dashboard and FoxTrack see it with the printer.
+			t.Plug = mqttpkg.PlugState(p.Name)
+			relayPayload.Print.Plug = t.Plug
+			relayPayload.Print.BridgeCapabilities = mqttpkg.WithPlugCaps(relayPayload.Print.BridgeCapabilities, t.Plug != nil)
 
 			// Capture previous state before overwriting, then detect print transitions.
 			c.mu.Lock()
@@ -413,7 +434,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 				}
 			}
 
-			if fox2APIKey != "" && (t.Status == "printing" || t.Status == "paused") && strings.TrimSpace(p.WebcamURL) != "" {
+			if fox2APIKey != "" && (t.Status == "printing" || t.Status == "paused") && snapshotURL(p) != "" {
 				now := time.Now().Unix()
 				c.snapLastTMu.Lock()
 				eligible := now-c.snapLastT[p.Name] >= pace.SnapshotGap(now)
@@ -431,7 +452,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 					c.snapInFlightMu.Unlock()
 
 					if !busy {
-						webcamURL := strings.TrimSpace(p.WebcamURL)
+						webcamURL := snapshotURL(p)
 						name := p.Name
 						apiKey := fox2APIKey
 						go func() {
@@ -505,6 +526,8 @@ func fetchTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.RelayPa
 	switch p.Kind() {
 	case configpkg.KindPrusaLink:
 		return fetchPrusaLinkTelemetry(p)
+	case configpkg.KindOctoPrint:
+		return fetchOctoPrintTelemetry(p)
 	case configpkg.KindHomeAssistant:
 		return fetchHomeAssistantTelemetry(p)
 	}
@@ -544,7 +567,7 @@ func klipperPrintHours(p configpkg.Printer) float64 {
 
 func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.RelayPayload, error) {
 	client := &http.Client{Timeout: 5 * time.Second, Transport: insecureTransport()}
-	u := moonrakerURL(p, "/printer/objects/query?print_stats&heater_bed&extruder&extruder1&extruder2&extruder3&toolhead&fan&display_status&virtual_sdcard")
+	u := moonrakerURL(p, "/printer/objects/query?print_stats&heater_bed&extruder&extruder1&extruder2&extruder3&toolhead&fan&display_status&virtual_sdcard&webhooks")
 	m, err := sendJSONRequest(client, "GET", u, moonrakerAuthHeaders(p), nil)
 	if err != nil {
 		return mqttpkg.TelemetryData{}, webhook.RelayPayload{}, err
@@ -602,6 +625,7 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 	fanSpeed := floatAny(anyFromMap(nestedMapAny(status, "fan"), "speed")) // 0.0-1.0
 	coolingFanPct := int(fanSpeed * 100)
 	filamentUsedMM := floatAny(anyFromMap(printStats, "filament_used"))
+	alarms := klipperAlarms(nestedMapAny(status, "webhooks"), printStats)
 
 	relay := webhook.RelayPayload{
 		Print: webhook.RelayPrint{
@@ -614,10 +638,11 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 			BedTargetTemper:    floatAny(anyFromMap(bed, "target")),
 			McRemainingTime:    remaining,
 			ActiveExtruder:     activeExtruderField,
+			Alarms:             alarms,
 			PrinterKind:        "klipper",
 			PrinterModel:       "Klipper",
 			BridgeVersion:      version.AppVersion,
-			BridgeCapabilities: []string{"print_file", "filament_use"},
+			BridgeCapabilities: []string{"print_file", "filament_use", "alarms"},
 		},
 	}
 
@@ -635,7 +660,33 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 		FilamentUsedMM:  filamentUsedMM,
 		TotalPrintHours: klipperPrintHours(p),
 		PrinterModel:    "Klipper",
+		Alarms:          alarms,
 	}, relay, nil
+}
+
+// klipperAlarms reads Klipper's own fault reports: webhooks.state "shutdown"
+// or "error" with state_message (a firmware shutdown, fatal), and
+// print_stats.state "error" with print_stats.message (the print failed,
+// serious). Both texts are stable while the fault lasts, which is what
+// FoxTrack keys a text-only alarm on.
+func klipperAlarms(webhooks, printStats map[string]interface{}) []webhook.RelayAlarm {
+	var out []webhook.RelayAlarm
+	switch lowerString(stringAny(anyFromMap(webhooks, "state"))) {
+	case "shutdown", "error":
+		msg := strings.TrimSpace(stringAny(anyFromMap(webhooks, "state_message")))
+		if msg == "" {
+			msg = "Klipper has shut down. Restart the firmware."
+		}
+		out = append(out, webhook.MessageAlarm(webhook.AlarmFatal, msg))
+	}
+	if lowerString(stringAny(anyFromMap(printStats, "state"))) == "error" {
+		msg := strings.TrimSpace(stringAny(anyFromMap(printStats, "message")))
+		if msg == "" {
+			msg = "The print stopped with an error."
+		}
+		out = append(out, webhook.MessageAlarm(webhook.AlarmSerious, msg))
+	}
+	return out
 }
 
 func mapKlipperState(state string) string {
@@ -823,6 +874,18 @@ func cameraCandidates(p configpkg.Printer) []string {
 	// If the user specified a webcam URL, try it first before guessing.
 	if strings.TrimSpace(p.WebcamURL) != "" {
 		return []string{strings.TrimSpace(p.WebcamURL)}
+	}
+	if p.Kind() == configpkg.KindOctoPrint {
+		// OctoPrint says where its webcam is; OctoPi's default paths come next.
+		var out []string
+		if u := octoPrintStreamURL(p); u != "" {
+			out = append(out, u)
+		}
+		if u := octoPrintSnapshotURL(p); u != "" {
+			out = append(out, u)
+		}
+		base := strings.TrimRight(strings.TrimSpace(p.OctoPrintURL), "/")
+		return append(out, base+"/webcam/?action=stream", base+"/webcam/?action=snapshot")
 	}
 	if p.Kind() != configpkg.KindKlipper {
 		return nil // PrusaLink and Home Assistant have no stream to guess

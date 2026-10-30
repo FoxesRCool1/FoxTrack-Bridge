@@ -94,6 +94,11 @@ type TelemetryData struct {
 	TotalPrintHours float64 `json:"total_print_hours,omitempty"` // lifetime hours: from printer for Bambu/Klipper, Bridge-tracked otherwise
 	PrinterModel    string  `json:"printer_model,omitempty"`     // e.g. "X1 Carbon", "P1S", "Klipper"
 	ExternalSpool   *AmsSlot `json:"external_spool,omitempty"`   // Bambu vt_tray, Slot = ExternalSlot; nil until reported
+	// Alarms is what the printer reports as wrong right now (Bambu HMS and
+	// print_error, Klipper shutdowns, PrusaLink and OctoPrint error text).
+	Alarms []webhook.RelayAlarm `json:"alarms,omitempty"`
+	// Plug is the printer's smart plug, nil without one.
+	Plug *webhook.RelayPlug `json:"plug,omitempty"`
 }
 
 type BambuReport struct {
@@ -249,6 +254,13 @@ func copyTelemetry(s *TelemetryData) *TelemetryData {
 	if s.ExternalSpool != nil {
 		ext := *s.ExternalSpool
 		c.ExternalSpool = &ext
+	}
+	if s.Alarms != nil {
+		c.Alarms = append([]webhook.RelayAlarm(nil), s.Alarms...)
+	}
+	if s.Plug != nil {
+		pl := *s.Plug
+		c.Plug = &pl
 	}
 	return &c
 }
@@ -863,8 +875,28 @@ func UrgentChange(prev, curr *TelemetryData) bool {
 		prev.FileName != curr.FileName ||
 		prev.Error != curr.Error ||
 		prev.LightOn != curr.LightOn ||
-		filamentChanged(prev, curr)
+		filamentChanged(prev, curr) ||
+		alarmsChanged(prev.Alarms, curr.Alarms) ||
+		plugChanged(prev.Plug, curr.Plug)
 }
+
+// Plug state and print energy come from the plug package, which the server
+// wires in at startup; the mqtt package stays free of that import.
+var (
+	plugState   = func(name string) *webhook.RelayPlug { return nil }
+	printEnergy = func(name string) *float64 { return nil }
+)
+
+// SetPlugSource installs the smart plug lookups shared with the lan package.
+func SetPlugSource(state func(name string) *webhook.RelayPlug, energy func(name string) *float64) {
+	plugState, printEnergy = state, energy
+}
+
+// PlugState is the installed plug lookup, for the lan package.
+func PlugState(name string) *webhook.RelayPlug { return plugState(name) }
+
+// PrintEnergy is the installed print energy lookup, for the lan package.
+func PrintEnergy(name string) *float64 { return printEnergy(name) }
 
 func makeHandler(p Printer) mqtt.MessageHandler {
 	return func(_ mqtt.Client, msg mqtt.Message) {
@@ -886,7 +918,8 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		// Ignore messages that carry no print or system data at all.
 		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
 		vtTray, hasVtTray := parseVtTray(msg.Payload())
-		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0 || hasVtTray
+		hasAlarmKeys := payloadHasAlarmKeys(msg.Payload())
+		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0 || hasVtTray || hasAlarmKeys
 		if !hasData {
 			if pr.Msg != 1 && !projectReply && hasPrintObject(msg.Payload()) {
 				log.Printf("[%s] MQTT skip (no usable data) | gcode=%q nozzle=%.1f bed=%.1f | payload: %.120s", p.Name, pr.GcodeState, pr.NozzleTemper, pr.BedTemper, msg.Payload())
@@ -1052,6 +1085,8 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			CoolingFanPct:   coolingFanPct,
 			TotalPrintHours: totalPrintHours,
 			PrinterModel:    printerModel,
+			Alarms:          mergeAlarms(prev.Alarms, msg.Payload()),
+			Plug:            plugState(p.Name),
 		}
 
 		// Track print sessions for history (including periodic temp samples).
@@ -1120,6 +1155,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						Timestamp:    time.Now().UTC().Format(time.RFC3339),
 						PercentAtEnd: percentAtEnd,
 						Filaments:    filaments,
+						EnergyWh:     printEnergy(p.Name),
 					})
 				}
 			}()
@@ -1196,6 +1232,8 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						LightOn:            &b,
 						Ams:                relayAms,
 						ExternalSpool:      relayExternalSpool(extSpool),
+						Alarms:             t.Alarms,
+						Plug:               t.Plug,
 					},
 				}
 				stampRelayIdentity(&relayPayload.Print, p, t.PrinterModel)

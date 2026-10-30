@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	configpkg "foxtrack-bridge/config"
@@ -61,7 +62,7 @@ func TestFetchPrusaLinkTelemetry_MapsFields(t *testing.T) {
 	}
 	p := relay.Print
 	if p.GcodeState != "RUNNING" || p.SubTaskName != "cube_PLA_MK4.bgcode" || p.McPercent != 42 || p.McRemainingTime != 30 ||
-		p.PrinterKind != "prusalink" || len(p.BridgeCapabilities) != 1 || p.BridgeCapabilities[0] != "print_file" {
+		p.PrinterKind != "prusalink" || strings.Join(p.BridgeCapabilities, ",") != "print_file,alarms" {
 		t.Fatalf("relay = %+v", p)
 	}
 }

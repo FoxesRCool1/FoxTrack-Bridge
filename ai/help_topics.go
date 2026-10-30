@@ -235,11 +235,76 @@ Bambu Lab over the cloud: the light toggle only. Pause, stop, speed, fan and GCo
 
 Klipper / Moonraker: pause, stop and fan speed.
 
-Prusa (PrusaLink): pause, resume and stop.
+Prusa (PrusaLink) and OctoPrint: pause, resume and stop.
 
 Home Assistant (read-only): no controls. The Bridge only reads the status.
 
+A printer with a smart plug set in the Bridge also has a "Plug on" / "Plug off" button. "Plug off" is disabled while the printer prints or is paused, and the Bridge refuses it while the nozzle is above 50 C.
+
 AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.`,
+	},
+	{
+		ID:       "add-octoprint",
+		Title:    "Adding an OctoPrint printer",
+		Keywords: []string{"octoprint", "octopi", "api key", "application key", "add", "connect", "webcam", "snapshot", "5000"},
+		Body: `Printers run by OctoPrint connect over OctoPrint's HTTP API.
+
+1. In OctoPrint, make an API key: Settings > Application Keys (make one for the Bridge), or copy the global key under Settings > API.
+2. In the dashboard go to Printers, click "Add Printer" and choose OctoPrint.
+3. Enter the OctoPrint address (for example http://octopi.local, or http://192.168.1.60:5000 when OctoPrint is not behind a web server) and the API key, then click Connect.
+4. The webcam is read from OctoPrint's own webcam settings. Enter a webcam URL only if the camera button does not work.
+
+The Bridge reads status, progress, temperatures, file name and time left, records finished prints in the history, and reports an OctoPrint printer error as an alarm. FoxTrack can pause, resume and stop a print, and can send a .gcode file: the Bridge uploads it to OctoPrint and starts it. FoxTrack knows an OctoPrint printer by its name in the Bridge.
+
+"OctoPrint is running but is not connected to the printer" means OctoPrint itself answers but its serial connection to the printer is closed: press Connect in OctoPrint.
+
+The network scan finds OctoPrint on port 80 and port 5000. The Bridge checks reachability by calling /api/version on the address with the key; OctoPrint answers 403 to a wrong key.`,
+	},
+	{
+		ID:       "smart-plugs",
+		Title:    "Smart plugs: watts, energy per print, auto off",
+		Keywords: []string{"plug", "smart plug", "shelly", "tasmota", "kasa", "power", "watts", "energy", "kwh", "electricity", "auto off", "turn off", "switch"},
+		Body: `A printer can be powered through a smart plug the Bridge reads and switches over your network. Supported: Shelly (Gen1, Gen2 and Plus), Tasmota, and Kasa plugs on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) is not supported yet; the plug check says so. No maker's cloud is ever called.
+
+To set one: open the printer's pencil (edit) or add it, scroll to Smart plug, choose the type, enter the plug's address on your network, and click "Check plug". The check reports on or off and the watts if the plug has an energy meter.
+
+The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button. "Plug off" is disabled while the printer prints or is paused, and refused while the nozzle is above 50 C, so a print is never cut.
+
+"Turn the plug off after a print": once a print ends (finished, stopped or failed), the Bridge waits the number of minutes you set (10 by default) with the printer idle and the nozzle under 50 C, then turns the plug off. A new print in that time cancels it. The log says "plug turned off after the print".
+
+Energy per print: the Bridge reads the plug's energy counter when a print starts and ends (or sums watts over time for a plug without a counter) and sends the Wh to FoxTrack with the print history. FoxTrack shows it in Reports under Printer use as kWh and a cost. A plug without a meter switches but reports no watts or energy.
+
+The plug is polled every 10 seconds. "Plug not answering" means the last poll failed; the Bridge keeps trying.`,
+	},
+	{
+		ID:       "virtual-printer",
+		Title:    "Virtual printer: send files from OrcaSlicer or PrusaSlicer to FoxTrack",
+		Keywords: []string{"virtual printer", "slicer", "orcaslicer", "orca", "prusaslicer", "bambu studio", "send", "upload", "print host", "physical printer", "8090", "api key"},
+		Body: `The Bridge can look like an OctoPrint printer to a slicer, so the slicer's "send to printer" button sends the sliced file to FoxTrack instead. The file never goes to a printer directly: it shows on FoxTrack's Printers page under "From the slicer", where you attach it to a product and print it from FoxTrack.
+
+Turn it on in Settings > Virtual printer. It needs the Bridge connected to FoxTrack (a Bridge token), because that is where the files go. The card then shows the address to type into the slicer (this computer's address with port 8090) and an API key with a Copy button.
+
+In OrcaSlicer or PrusaSlicer: add a physical printer / print host of type OctoPrint, enter that address as the host and the key as the API key, and press Test. Then slice and use the send or upload button.
+
+FoxTrack takes .gcode and .gcode.3mf files up to 50 MB, and at most 50 files can wait there at once. The slicer shows FoxTrack's answer when a file is refused: wrong file type, too large, storage full, too many waiting files, or a plan that does not include the Bridge.
+
+Bambu Studio cannot send to it: Bambu Studio only talks to Bambu printers, not to OctoPrint hosts. Use OrcaSlicer for Bambu printers.
+
+The virtual printer listens on port 8090 by default; the Bridge log says if the port could not be opened.`,
+	},
+	{
+		ID:       "alarms",
+		Title:    "Printer alarms: HMS codes and error messages",
+		Keywords: []string{"alarm", "hms", "error code", "warning", "fault", "shutdown", "attention", "bell", "alert"},
+		Body: `The Bridge reports what a printer says is wrong, and shows it on the printer's card and in FoxTrack's Printers page, Alarms view.
+
+Bambu Lab: HMS codes (the printer's health messages) with their severity (fatal, serious, common, info) and the print error code when a print fails. The card shows the code as Bambu does, for example 0300_1200_0002_0001, with a "What it means" link to the Bambu wiki page for that code. The Bridge does not fetch Bambu's own text for a code.
+
+Klipper: a firmware shutdown or error (the state message Klipper shows, for example "MCU 'mcu' shutdown: Timer too close") as a fatal alarm, and a print that ended in error as a serious one.
+
+PrusaLink: the error or attention text the printer shows. OctoPrint: the printer error OctoPrint reports.
+
+An alarm clears when the printer stops reporting it. In FoxTrack, a fatal or serious alarm rings the bell and sends the printer error alert (Telegram, WhatsApp, Discord, Slack or email, whichever is set up). Home Assistant printers report no alarms.`,
 	},
 	{
 		ID:       "foxtrack-link",
@@ -323,7 +388,7 @@ The Bridge dashboard has no login. Anyone who can reach it on your network can u
 		Keywords: []string{"help", "support", "bug", "report", "issue", "github", "contact", "broken", "stuck", "feature request"},
 		Body: `When the Bridge itself is at fault, or nothing in this help covers the problem, report it on GitHub: https://github.com/FoxesRCool1/FoxTrack-Bridge/issues
 
-A useful report includes the Bridge version shown in the dashboard footer, the operating system, how the printer is connected (Bambu LAN, Bambu Cloud, Klipper, PrusaLink, or Home Assistant), what was expected, what happened, and the Bridge's log output from around the time it happened.
+A useful report includes the Bridge version shown in the dashboard footer, the operating system, how the printer is connected (Bambu LAN, Bambu Cloud, Klipper, PrusaLink, OctoPrint, or Home Assistant), what was expected, what happened, and the Bridge's log output from around the time it happened.
 
 Questions about the FoxTrack web app, billing or a workspace plan belong in FoxTrack, not here.
 

@@ -102,6 +102,7 @@ func StartServer(port int) {
 	serverPort = port
 
 	mqttpkg.OnCloudAuthFailed = expireCloudToken
+	wirePlugs()
 	syncPrinterConnections(nil, cfg)
 
 	// Units shipped before v2.3.1 used Restart=on-failure, so the clean exit an
@@ -135,17 +136,19 @@ func StartServer(port int) {
 	http.HandleFunc("/api/update/install", handleUpdateInstall)
 	http.HandleFunc("/api/update/restart", handleUpdateRestart)
 	http.HandleFunc("/api/test", handleTest)
-	http.HandleFunc("/api/control/", handleControl)          // /api/control/{name}/{command}
-	http.HandleFunc("/api/camera/", handleCamera)            // /api/camera/{name}
-	http.HandleFunc("/api/logs", handleLogs)                 // GET: SSE log stream
-	http.HandleFunc("/api/history", handleHistory)           // GET all history records
-	http.HandleFunc("/api/history/", handleHistoryByPrinter) // GET /api/history/{name}
-	http.HandleFunc("/api/cloud/", handleCloud)              // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
-	http.HandleFunc("/api/ai/settings", handleAISettings)    // GET/POST: assistant provider settings
-	http.HandleFunc("/api/ai/models", handleAIModels)        // POST: list a provider's models
-	http.HandleFunc("/api/ai/chat", handleAIChat)            // POST: answer one message
-	http.HandleFunc("/api/discover", handleDiscover)         // GET: find printers on the local network
-	http.HandleFunc("/api/network", handleNetwork)           // GET: this computer's dashboard URLs
+	http.HandleFunc("/api/control/", handleControl)               // /api/control/{name}/{command}
+	http.HandleFunc("/api/camera/", handleCamera)                 // /api/camera/{name}
+	http.HandleFunc("/api/logs", handleLogs)                      // GET: SSE log stream
+	http.HandleFunc("/api/history", handleHistory)                // GET all history records
+	http.HandleFunc("/api/history/", handleHistoryByPrinter)      // GET /api/history/{name}
+	http.HandleFunc("/api/cloud/", handleCloud)                   // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
+	http.HandleFunc("/api/ai/settings", handleAISettings)         // GET/POST: assistant provider settings
+	http.HandleFunc("/api/ai/models", handleAIModels)             // POST: list a provider's models
+	http.HandleFunc("/api/ai/chat", handleAIChat)                 // POST: answer one message
+	http.HandleFunc("/api/discover", handleDiscover)              // GET: find printers on the local network
+	http.HandleFunc("/api/network", handleNetwork)                // GET: this computer's dashboard URLs
+	http.HandleFunc("/api/plug/test", handlePlugTest)             // POST: read a smart plug once
+	http.HandleFunc("/api/virtual-printer", handleVirtualPrinter) // GET: virtual printer address and key
 
 	printStartupBanner(port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
@@ -559,7 +562,13 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if printerIsBambu(printerName) {
+	if isPlugCommand(command) {
+		if err := runPlugCommand(printerName, command); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	} else if printerIsBambu(printerName) {
 		if err := mqttpkg.SendCommandWithArgs(printerName, command, args); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -777,6 +786,9 @@ type redactedPrinter struct {
 	HABedEntity           string `json:"ha_bed_entity,omitempty"`
 	HAFileEntity          string `json:"ha_file_entity,omitempty"`
 	HARemainingEntity     string `json:"ha_remaining_entity,omitempty"`
+	OctoPrintURL          string `json:"octoprint_url,omitempty"`
+	// Plug has no secret: the dashboard gets it as stored.
+	Plug *config.Plug `json:"plug,omitempty"`
 }
 
 // redactedConfig mirrors config.Config with the FoxTrack cloud tokens blanked
@@ -790,6 +802,9 @@ type redactedConfig struct {
 	AutoUpdate         bool              `json:"auto_update,omitempty"`
 	BambuCloud         *redactedCloud    `json:"bambu_cloud,omitempty"`
 	AI                 *redactedAI       `json:"ai,omitempty"`
+	// VirtualPrinter is shown as stored: the key is what the user types into
+	// the slicer, so the dashboard has to be able to show it.
+	VirtualPrinter *config.VirtualPrinter `json:"virtual_printer,omitempty"`
 }
 
 // redactedAI mirrors config.AI without the provider key, the same way
@@ -851,6 +866,8 @@ func redactPrinter(p config.Printer) redactedPrinter {
 		HABedEntity:           p.HABedEntity,
 		HAFileEntity:          p.HAFileEntity,
 		HARemainingEntity:     p.HARemainingEntity,
+		OctoPrintURL:          p.OctoPrintURL,
+		Plug:                  p.Plug,
 	}
 }
 
@@ -988,6 +1005,7 @@ func redactConfig(cfg *config.Config) redactedConfig {
 		out.BambuCloud = &redactedCloud{Linked: true, Email: bc.Email, Region: bc.Region, TokenExpiresAt: bc.ExpiresAt}
 	}
 	out.AI = redactAI(cfg.AI)
+	out.VirtualPrinter = cfg.VirtualPrinter
 	return out
 }
 
@@ -1052,6 +1070,7 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 		if p.HomeAssistantToken == "" {
 			p.HomeAssistantToken = prev.HomeAssistantToken
 		}
+		p.Plug = normalizePlug(p.Plug)
 		// PreviousNames has no redacted-view counterpart, so a client echoing
 		// back the config it was given always omits it. Treat "absent" as "keep"
 		// rather than letting a round-trip drop the rename history.
@@ -1091,7 +1110,9 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 	_ = json.Unmarshal(body, &meta) // best-effort; defaults to false
 
 	_, printersPresent := raw["printers"]
+	_, virtualPresent := raw["virtual_printer"]
 	newCfg := incoming
+	mergeVirtualPrinter(&newCfg, old, virtualPresent)
 	// Every top-level setting is partial: a body that omits a key leaves the
 	// stored value alone. Blank secrets are handled by applyStoredSecrets below;
 	// auto_update is a bool, so "absent" is the only way to say "leave it", and
@@ -1206,6 +1227,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		// Trim on create only: an existing printer's name is its lookup key and
 		// is never rewritten behind the user's back.
 		p.Name = strings.TrimSpace(p.Name)
+		p.Plug = normalizePlug(p.Plug)
 		if p.Name == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": errBlankPrinterName.Error()})
@@ -1243,6 +1265,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 			lanCtrl.AddOrUpdatePrinter(p, cfg.APIKey, cfg.FoxTrack2APIKey)
 			log.Printf("[%s] connected via %s", p.Name, p.Kind())
 		}
+		plugs.Sync(cfg.Printers)
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "printer": redactPrinter(p)})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1372,6 +1395,7 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		mqttpkg.RemovePrinterState(name)
 		lanCtrl.RemovePrinter(name)
 	}
+	plugs.Sync(cfg.Printers)
 	if len(removedNames) > 0 {
 		syncCloud(cfg) // unsubscribes a removed cloud printer without reconnecting
 	}
@@ -1391,14 +1415,17 @@ type printerEdit struct {
 	WebcamURL    *string `json:"webcam_url"`
 
 	PrusaLinkURL       *string `json:"prusalink_url"`
+	OctoPrintURL       *string `json:"octoprint_url"`
 	HomeAssistantURL   *string `json:"home_assistant_url"`
 	HomeAssistantToken *string `json:"home_assistant_token"`
-	HAStateEntity      *string `json:"ha_state_entity"`
-	HAProgressEntity   *string `json:"ha_progress_entity"`
-	HANozzleEntity     *string `json:"ha_nozzle_entity"`
-	HABedEntity        *string `json:"ha_bed_entity"`
-	HAFileEntity       *string `json:"ha_file_entity"`
-	HARemainingEntity  *string `json:"ha_remaining_entity"`
+	// Plug replaces the printer's plug when present; {"kind": ""} removes it.
+	Plug              *config.Plug `json:"plug"`
+	HAStateEntity     *string      `json:"ha_state_entity"`
+	HAProgressEntity  *string      `json:"ha_progress_entity"`
+	HANozzleEntity    *string      `json:"ha_nozzle_entity"`
+	HABedEntity       *string      `json:"ha_bed_entity"`
+	HAFileEntity      *string      `json:"ha_file_entity"`
+	HARemainingEntity *string      `json:"ha_remaining_entity"`
 }
 
 var errPrinterNotFound = errors.New("printer not found")
@@ -1468,6 +1495,10 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 			p.Name = name
 		}
 	}
+	if edit.Plug != nil {
+		g := *edit.Plug
+		p.Plug = normalizePlug(&g)
+	}
 
 	switch {
 	case p.IsCloud():
@@ -1501,6 +1532,20 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 				return nil, -1, err
 			}
 			p.PrusaLinkURL = v
+		}
+		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
+			p.APIKey = strings.TrimSpace(*edit.APIKey)
+		}
+		if edit.WebcamURL != nil {
+			p.WebcamURL = strings.TrimSpace(*edit.WebcamURL)
+		}
+	case p.Kind() == config.KindOctoPrint:
+		if edit.OctoPrintURL != nil {
+			v, err := required(edit.OctoPrintURL, "OctoPrint URL")
+			if err != nil {
+				return nil, -1, err
+			}
+			p.OctoPrintURL = v
 		}
 		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
 			p.APIKey = strings.TrimSpace(*edit.APIKey)
@@ -1628,6 +1673,7 @@ func handleEditPrinter(w http.ResponseWriter, r *http.Request, token string) {
 		log.Printf("Warning: failed to save config: %v", err)
 	}
 	reconnectEditedPrinter(before, after, snapshot)
+	plugs.Sync(snapshot.Printers)
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "printer": redactPrinter(after)})
 }
 
@@ -1669,10 +1715,10 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 
 // httpConnFields lists what an HTTP printer's poll loop reads from its config,
 // so an edit that changes none of them leaves the loop running.
-func httpConnFields(p config.Printer) [12]string {
+func httpConnFields(p config.Printer) [13]string {
 	return [...]string{p.MoonrakerURL, p.APIKey, p.WebcamURL, p.PrusaLinkURL,
 		p.HomeAssistantURL, p.HomeAssistantToken, p.HAStateEntity, p.HAProgressEntity,
-		p.HANozzleEntity, p.HABedEntity, p.HAFileEntity, p.HARemainingEntity}
+		p.HANozzleEntity, p.HABedEntity, p.HAFileEntity, p.HARemainingEntity, p.OctoPrintURL}
 }
 
 // printerHistory returns the local print history for the printer named name,
@@ -1740,6 +1786,8 @@ func syncPrinterConnections(oldCfg, cfg *config.Config) {
 
 	lanCtrl.SyncPrinters(cfg.Printers, cfg.APIKey, cfg.FoxTrack2APIKey)
 	syncCloud(cfg)
+	plugs.Sync(cfg.Printers)
+	syncVirtualPrinter(cfg)
 }
 
 func printerIsBambu(name string) bool {
@@ -1806,7 +1854,7 @@ func isBambuPrinterConfig(p config.Printer) bool {
 		return false
 	}
 	if p.Kind() != config.KindBambu {
-		return false // a Moonraker, PrusaLink or Home Assistant address decides the kind
+		return false // a Moonraker, PrusaLink, OctoPrint or Home Assistant address decides the kind
 	}
 	if p.IsCloud() {
 		return true // the cloud reports the LAN code; its absence only disables the camera

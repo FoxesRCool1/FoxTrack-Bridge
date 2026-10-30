@@ -71,8 +71,11 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	logf := func(format string, a ...any) {
 		log.Printf("[%s] print_file: %s", name, fmt.Sprintf(format, a...))
 	}
-	if p.Kind() == configpkg.KindPrusaLink {
+	switch p.Kind() {
+	case configpkg.KindPrusaLink:
 		return prusaLinkUpload(ctx, p, localPath, remoteName, logf)
+	case configpkg.KindOctoPrint:
+		return octoPrintUpload(ctx, p, localPath, remoteName, logf)
 	}
 	target := moonrakerURL(p, "/server/files/upload")
 	if target == "" {

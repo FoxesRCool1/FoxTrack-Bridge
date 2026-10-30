@@ -1,6 +1,41 @@
 # Changelog
 
-## Unreleased
+## v2.7.0
+
+**OctoPrint printers**
+- Printers run by OctoPrint can be added with their address and an API key.
+  The Bridge reports status, progress, temperatures, file name and time left,
+  records finished prints, can pause, resume and stop, and accepts a `.gcode`
+  file sent from FoxTrack (uploaded to OctoPrint and started). The webcam is
+  read from OctoPrint's own settings. The network scan finds OctoPrint on
+  ports 80 and 5000.
+
+**Printer alarms**
+- Every status report now carries the printer's open alarms, and FoxTrack
+  lists them in its Alarms view and rings the bell for serious ones: Bambu HMS
+  codes (formatted as Bambu does, with their severity) and print error codes,
+  Klipper firmware shutdowns and print errors with Klipper's own message,
+  PrusaLink error and attention text, OctoPrint printer errors. The printer
+  card shows them too; a Bambu HMS code links to the Bambu wiki page for it.
+
+**Smart plugs**
+- A printer can be powered through a Shelly, Tasmota or Kasa (older firmware)
+  plug, set on the printer in the Bridge. The card shows on/off and watts, a
+  Plug on / Plug off button (off is refused while printing, paused or hot),
+  and the Bridge can turn the plug off a set number of minutes after a print
+  once the printer is cool. The energy each print used goes to FoxTrack with
+  the print history (Reports, Printer use). FoxTrack's own Turn plug on/off
+  buttons work through the Bridge.
+
+**Virtual printer**
+- Settings, Virtual printer: the Bridge can look like an OctoPrint host to
+  OrcaSlicer and PrusaSlicer (port 8090, its own API key). A file the slicer
+  sends goes to FoxTrack's Printers page, From the slicer, never to a printer.
+  Needs the Bridge connected to FoxTrack.
+
+The Bridge now announces `alarms`, `plug_on` and `plug_off` to FoxTrack, which
+hands plug commands only to a Bridge that lists them. Config changes are
+additive: an existing `config.json` loads unchanged.
 
 **Easier setup**
 - A first-run welcome finds printers on your network; click Add and type the
