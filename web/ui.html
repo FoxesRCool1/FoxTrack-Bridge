@@ -3181,8 +3181,8 @@ function cardInnerHTML(printer, live) {
     // not Home Assistant (read-only).
     const hasConsole = !removeMode && !isCloud && !readOnly && brand !== 'prusalink';
     const tempInput = (cls, max, tgt, cmd) =>
-        '<input class="' + cls + ' field w-20" type="number" inputmode="numeric" min="0" max="' + max + '" step="1" placeholder="' + (tgt !== null ? Math.round(tgt) : 0) + '"'
-        + ' aria-label="Target in degrees Celsius, 0 to ' + max + '" onkeydown="if(event.key===\'Enter\')setTempEncoded(\'' + enc + '\',\'' + cmd + '\')">'
+        '<div class="w-24 shrink-0"><input class="' + cls + ' field" type="number" inputmode="numeric" min="0" max="' + max + '" step="1" placeholder="' + (tgt !== null ? Math.round(tgt) : 0) + '"'
+        + ' aria-label="Target in degrees Celsius, 0 to ' + max + '" onkeydown="if(event.key===\'Enter\')setTempEncoded(\'' + enc + '\',\'' + cmd + '\')"></div>'
         + '<button ' + dis + 'onclick="setTempEncoded(\'' + enc + '\',\'' + cmd + '\')" class="btn-outline">Set</button>';
     const homeDis = (dis || status === 'printing' || status === 'paused') ? 'disabled ' : '';
     const tempsPanel = hasConsole ?
