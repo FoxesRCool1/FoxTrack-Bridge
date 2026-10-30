@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -55,8 +56,54 @@ var (
 	errFileNotCard  = errors.New("The printer prints .3mf and .gcode.3mf files from its card.")
 )
 
-// Test seam.
-var ftpsList = ftps.List
+// Test seams.
+var (
+	ftpsList     = ftps.List
+	ftpsDownload = ftps.Download
+)
+
+// maxPlateProbeBytes caps the download that finds a file's sliced plate.
+const maxPlateProbeBytes = 200 << 20
+
+func bambuFTPSConfig(p Printer, op string) ftps.Config {
+	return ftps.Config{
+		Host: p.IP, User: "bblp", Password: p.LANCode,
+		Logf: func(format string, args ...any) {
+			log.Printf("[%s] %s: ftps: "+format, append([]any{p.Name, op}, args...)...)
+		},
+	}
+}
+
+// slicedPlate downloads a .3mf from the printer and returns the plate it was
+// sliced for. Any failure is logged and gives plate 1: the file name is all
+// the printer needs, the plate only picks Metadata/plate_N.gcode.
+func slicedPlate(ctx context.Context, p Printer, name string, logf func(string, ...any)) int {
+	tmp, err := os.CreateTemp("", "foxtrack-plate-*.3mf")
+	if err != nil {
+		logf("plate: no temp file (%v), using plate 1", err)
+		return 1
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+	cfg := bambuFTPSConfig(p, "print_printer_file")
+	remote := "/" + name
+	err = ftpsDownload(ctx, cfg, remote, tmp.Name(), maxPlateProbeBytes)
+	if useClearData(ctx, serialPrefix(p.Serial), err) {
+		cfg.ClearData = true
+		err = ftpsDownload(ctx, cfg, remote, tmp.Name(), maxPlateProbeBytes)
+	}
+	if err != nil {
+		logf("plate: download failed (%v), using plate 1", err)
+		return 1
+	}
+	plate, err := firstSlicedPlate(tmp.Name())
+	if err != nil {
+		logf("plate: %v, using plate 1", err)
+		return 1
+	}
+	logf("plate %d is the sliced one", plate)
+	return plate
+}
 
 // bambuFileDirs are the folders a Bambu printer keeps print files in: the
 // card root and the cache Bambu Studio sends to.
@@ -69,21 +116,29 @@ func ListPrinterFiles(ctx context.Context, p Printer) ([]PrinterFile, error) {
 	if p.Cloud || IsCloudSerial(p.Serial) {
 		return nil, errPrintCloud
 	}
-	cfg := ftps.Config{
-		Host: p.IP, User: "bblp", Password: p.LANCode,
-		Logf: func(format string, args ...any) {
-			log.Printf("[%s] list_files: ftps: "+format, append([]any{p.Name}, args...)...)
-		},
+	cfg := bambuFTPSConfig(p, "list_files")
+	serial := serialPrefix(p.Serial)
+	list := func(dir string) ([]ftps.Entry, error) {
+		entries, err := ftpsList(ctx, cfg, dir)
+		if useClearData(ctx, serial, err) {
+			// A1 / A1 mini: the TLS data channel can hang, as for an upload.
+			cfg.ClearData = true
+			entries, err = ftpsList(ctx, cfg, dir)
+		}
+		return entries, err
 	}
 	var out []PrinterFile
 	for _, dir := range bambuFileDirs {
-		entries, err := ftpsList(ctx, cfg, dir)
+		entries, err := list(dir)
 		if err != nil {
-			if dir != "/" {
+			if dir != "/" && errors.Is(err, ftps.ErrNotFound) {
 				continue // no cache folder on this printer
 			}
 			log.Printf("[%s] list_files: %v", p.Name, err)
-			if errors.Is(err, ftps.ErrLogin) {
+			switch {
+			case ctx.Err() != nil:
+				return nil, ctx.Err()
+			case errors.Is(err, ftps.ErrLogin):
 				return nil, errPrintAccess
 			}
 			return nil, errListNoClient
@@ -103,15 +158,31 @@ func ListPrinterFiles(ctx context.Context, p Printer) ([]PrinterFile, error) {
 	return NewestFirst(out, MaxListedFiles), nil
 }
 
+// badFileName reports a path that leaves the printer's file folders: a ".."
+// segment (not just two dots inside a name like "v1..2.3mf") or a backslash.
+func badFileName(name string) bool {
+	if strings.Contains(name, `\`) {
+		return true
+	}
+	for _, seg := range strings.Split(name, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // PrintPrinterFile starts a file that is already on the printer (a name from
 // ListPrinterFiles): the project_file command with the printer-local path,
-// plate 1, the AMS when the printer has one. Refused while printing.
-func PrintPrinterFile(ctx context.Context, p Printer, name string) error {
+// the given plate (0 = the sliced plate, read from the file after downloading
+// it from the printer; plate 1 when that fails), the AMS when the printer has
+// one. Refused while printing.
+func PrintPrinterFile(ctx context.Context, p Printer, name string, plate int) error {
 	logf := func(format string, args ...any) {
 		log.Printf("[%s] print_printer_file: "+format, append([]any{p.Name}, args...)...)
 	}
 	name = strings.TrimPrefix(strings.TrimSpace(name), "/")
-	if name == "" || strings.Contains(name, "..") {
+	if name == "" || badFileName(name) {
 		return errFileName
 	}
 	if !IsBambuPrintFile(name) {
@@ -121,11 +192,22 @@ func PrintPrinterFile(ctx context.Context, p Printer, name string) error {
 		logf("refused: %v", err)
 		return err
 	}
+	if plate < 1 {
+		plate = slicedPlate(ctx, p, name, logf)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// The download can take a while: the printer may have been started meanwhile.
+		if err := PrintPreflight(p); err != nil {
+			logf("refused after download: %v", err)
+			return err
+		}
+	}
 	prefix := serialPrefix(p.Serial)
 	st := GetPrinterState(p.Name)
 	payload, err := buildProjectFile(projectFileInput{
 		SeqID: nextSequenceID(), ID: newJobID(),
-		Plate: 1, RemoteName: name,
+		Plate: plate, RemoteName: name,
 		TaskName: strings.TrimSuffix(strings.TrimSuffix(path.Base(name), ".3mf"), ".gcode"),
 		MD5:      "", UseAMS: len(st.AMS) > 0,
 		DualNozzle: dualNozzle(prefix), P2S: prefix == "22E",

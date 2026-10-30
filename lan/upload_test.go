@@ -199,14 +199,24 @@ func TestUploadAndPrint_BusyPrinterSendsNothing(t *testing.T) {
 	}
 }
 
+// Names with no usable characters must not all collapse to one file, or the
+// next upload overwrites the last (PrusaLink is sent Overwrite).
+func TestSanitizeRemoteName_FallbackIsUnique(t *testing.T) {
+	a, b := SanitizeRemoteName("部品.gcode"), SanitizeRemoteName("品部.gcode")
+	if a == "print.gcode" || a == b {
+		t.Fatalf("fallback names must differ: %q %q", a, b)
+	}
+	if again := SanitizeRemoteName(a); again != a || SanitizeRemoteName("部品.gcode") != a {
+		t.Fatalf("fallback must be stable: %q then %q", a, again)
+	}
+}
+
 func TestSanitizeRemoteName(t *testing.T) {
 	cases := map[string]string{
 		"vase.gcode":                        "vase.gcode",
 		"My Vase (v2).gcode":                "My_Vase_v2.gcode",
 		"../../etc/passwd":                  "etcpasswd.gcode",
 		"héllo wörld.GCODE":                 "hllo_wrld.GCODE",
-		"":                                  "print.gcode",
-		"部品.gcode":                          "print.gcode",
 		"Ünïcödé.gcode":                     "ncd.gcode",
 		"vase.gcode.3mf":                    "vase.gcode.3mf.gcode",
 		strings.Repeat("a", 300) + ".gcode": strings.Repeat("a", 114) + ".gcode",

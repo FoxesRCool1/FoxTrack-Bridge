@@ -113,6 +113,28 @@ func inspect3MF(path string, wantPlate int) (threeMFInfo, error) {
 	return info, nil
 }
 
+// firstSlicedPlate is the lowest plate number with sliced gcode
+// (Metadata/plate_N.gcode) in the file.
+func firstSlicedPlate(path string) (int, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return 0, errNotA3MF
+	}
+	defer zr.Close()
+	best := 0
+	for _, f := range zr.File {
+		if m := plateGcodeRe.FindStringSubmatch(f.Name); m != nil {
+			if n, _ := strconv.Atoi(m[1]); n > 0 && (best == 0 || n < best) {
+				best = n
+			}
+		}
+	}
+	if best == 0 {
+		return 0, errNoPlate
+	}
+	return best, nil
+}
+
 // plateFilamentIDs reads slice_info.config: the filament ids of the plate with
 // the given index (the only plate when there is just one) and the number of
 // values in its filament_maps metadata.

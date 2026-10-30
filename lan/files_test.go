@@ -54,6 +54,9 @@ func TestListFiles_AndPrintFile_PerKind(t *testing.T) {
 		case "/server/files/list":
 			_, _ = w.Write([]byte(`{"result":[{"path":"a.gcode","modified":1760000000,"size":1}]}`))
 		case "/api/files/local":
+			if r.URL.Query().Get("recursive") != "true" {
+				t.Errorf("OctoPrint list must be recursive: %s", r.URL.RawQuery)
+			}
 			_, _ = w.Write([]byte(`{"files":[{"name":"b.gcode","date":1760000000,"size":2,"type":"machinecode"}]}`))
 		default:
 			_, _ = w.Write([]byte(`{}`))

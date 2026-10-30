@@ -85,6 +85,11 @@ var (
 // Inside Docker (or any install owned by another user) this is false and
 // self-update cannot work.
 func CanReplaceExecutable() bool {
+	// In a container the image is the update: a swapped binary is lost on
+	// recreate, and a relaunch from PID 1 stops the container.
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return false
+	}
 	exePath, err := os.Executable()
 	if err != nil {
 		return false
@@ -97,6 +102,9 @@ func CanReplaceExecutable() bool {
 	os.Remove(f.Name())
 	return true
 }
+
+// maxBinarySize caps an update download; the real binaries are ~20 MB.
+const maxBinarySize = 200 << 20
 
 func CheckLatest(ctx context.Context) (CheckResult, error) {
 	if !version.IsValid(version.AppVersion) {
@@ -256,7 +264,13 @@ func StartInstall(ctx context.Context) error {
 		return fmt.Errorf("no compatible update asset found for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
+	// Every release publishes checksums.txt (release.yml), a minute or two
+	// after the binaries. Without it the download can't be verified, so wait
+	// for the next check rather than install an unchecked binary.
 	checksumAsset, hasChecksum := pickChecksumAsset(rel.Assets)
+	if !hasChecksum {
+		return fmt.Errorf("release %s has no checksums yet; try again in a few minutes", rel.TagName)
+	}
 	return downloadAndStage(ctx, asset, checksumAsset, hasChecksum, rel.TagName)
 }
 
@@ -300,7 +314,7 @@ func downloadAndStage(ctx context.Context, asset Asset, checksumAsset Asset, has
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxBinarySize)); err != nil {
 		f.Close()
 		return err
 	}

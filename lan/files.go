@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,7 +34,7 @@ func (c *Controller) ListFiles(name string) ([]mqttpkg.PrinterFile, error) {
 	headers := moonrakerAuthHeaders(p)
 	switch p.Kind() {
 	case configpkg.KindOctoPrint:
-		m, err := sendJSONRequest(client, "GET", octoPrintURL(p, "/api/files/local?recursive=false"), headers, nil)
+		m, err := sendJSONRequest(client, "GET", octoPrintURL(p, "/api/files/local?recursive=true"), headers, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -75,26 +76,35 @@ func parseMoonrakerFiles(m map[string]interface{}) []mqttpkg.PrinterFile {
 	return out
 }
 
-// parseOctoPrintFiles reads GET /api/files/local?recursive=false:
-// {"files":[{"name":"a.gcode","size":123,"date":1700000000,"type":"machinecode"}]}.
-// Folders are skipped.
+// parseOctoPrintFiles reads GET /api/files/local?recursive=true:
+// {"files":[{"name":"a.gcode","path":"sub/a.gcode","size":123,"date":1700000000,"type":"machinecode"}]}.
+// Folders are walked through their children; only machinecode (printable)
+// files are listed, under their folder path.
 func parseOctoPrintFiles(m map[string]interface{}) []mqttpkg.PrinterFile {
 	list, _ := m["files"].([]interface{})
 	var out []mqttpkg.PrinterFile
 	for _, it := range list {
 		f, ok := it.(map[string]interface{})
-		if !ok || stringAny(f["type"]) == "folder" {
+		if !ok {
 			continue
 		}
-		name := stringAny(f["name"])
-		if name == "" {
-			continue
+		switch stringAny(f["type"]) {
+		case "folder":
+			out = append(out, parseOctoPrintFiles(map[string]interface{}{"files": f["children"]})...)
+		case "machinecode":
+			name := stringAny(f["path"])
+			if name == "" {
+				name = stringAny(f["name"])
+			}
+			if name == "" {
+				continue
+			}
+			out = append(out, mqttpkg.PrinterFile{
+				Name:       name,
+				SizeBytes:  int64(floatAny(f["size"])),
+				ModifiedAt: unixToRFC3339(floatAny(f["date"])),
+			})
 		}
-		out = append(out, mqttpkg.PrinterFile{
-			Name:       name,
-			SizeBytes:  int64(floatAny(f["size"])),
-			ModifiedAt: unixToRFC3339(floatAny(f["date"])),
-		})
 	}
 	return out
 }
@@ -111,7 +121,7 @@ func unixToRFC3339(sec float64) string {
 // Refused while the printer prints or is paused (PrintReady).
 func (c *Controller) PrintFile(name, file string) error {
 	file = strings.TrimPrefix(strings.TrimSpace(file), "/")
-	if file == "" || strings.Contains(file, "..") {
+	if file == "" || slices.Contains(strings.Split(file, "/"), "..") {
 		return errors.New("Pick a file from the printer's list.")
 	}
 	if err := c.PrintReady(name); err != nil {

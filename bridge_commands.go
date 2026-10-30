@@ -208,6 +208,21 @@ func ackBridgeCommand(apiKey string, result bridgeCommandResult) error {
 	return nil
 }
 
+var errHomeWhilePrinting = errors.New("The printer is printing. Home it when the print has finished.")
+
+// refuseHomeMidPrint stops a home command while a print runs: G28 mid-print
+// drives the toolhead into the part. Temperatures stay allowed: users tune
+// them during a print. Both FoxTrack and the dashboard go through this.
+func refuseHomeMidPrint(name, command string) error {
+	if command != "home" {
+		return nil
+	}
+	if s, ok := printerLiveState(name); ok && s != nil && mqttpkg.InPrint(s.Status) {
+		return errHomeWhilePrinting
+	}
+	return nil
+}
+
 // executeBridgeCommand resolves external_id to a local printer and dispatches
 // the command directly to the appropriate driver, with no HTTP roundtrip through
 // the bridge's own server.
@@ -240,6 +255,9 @@ func executeBridgeCommand(cmd bridgeCommand) error {
 
 	if isPlugCommand(cmd.Command) {
 		return runPlugCommandForFoxTrack(matchedName, cmd.Command)
+	}
+	if err := refuseHomeMidPrint(matchedName, cmd.Command); err != nil {
+		return err
 	}
 	if isBambu {
 		return mqttpkg.SendCommandWithArgs(matchedName, cmd.Command, cmd.Args)

@@ -39,9 +39,9 @@ func TestOctoPrintTelemetry_States(t *testing.T) {
 		{"printing", `"operational":true,"printing":true,"error":false`, octoJobPrinting, "printing", 42, 30, "Cube v2.gcode"},
 		{"paused", `"operational":true,"paused":true`, octoJobPrinting, "paused", 42, 30, "Cube v2.gcode"},
 		{"pausing", `"operational":true,"printing":true,"pausing":true`, octoJobPrinting, "paused", 42, 30, "Cube v2.gcode"},
-		{"error", `"error":true,"closedOrError":true`, octoJobPrinting, "error", 0, 0, ""},
+		{"error", `"error":true,"closedOrError":true`, octoJobPrinting, "error", 42, 0, "Cube v2.gcode"},
 		{"idle after cancel", `"operational":true,"ready":true`, `{"job":{"file":{"name":"cube.gcode"}},"progress":{"completion":42.5}}`, "idle", 0, 0, ""},
-		{"finished", `"operational":true,"ready":true`, `{"job":{"file":{"name":"cube.gcode"}},"progress":{"completion":100.0}}`, "finished", 0, 0, ""},
+		{"finished", `"operational":true,"ready":true`, `{"job":{"file":{"name":"cube.gcode"}},"progress":{"completion":100.0}}`, "finished", 100, 0, "cube.gcode"},
 		{"idle no job", `"operational":true,"ready":true`, `{"job":{"file":{"name":null}},"progress":{"completion":null}}`, "idle", 0, 0, ""},
 	}
 	for _, tc := range cases {

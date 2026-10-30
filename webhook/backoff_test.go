@@ -22,7 +22,7 @@ func retryDelays(backoffs []time.Duration, firstDelay time.Duration, firstAttemp
 }
 
 func TestRetryBackoffSchedule(t *testing.T) {
-	// The table both workers use (sender.go, relay and history).
+	// The relay table (relayBackoffs in sender.go). History now backs off up to 10 minutes.
 	backoffs := []time.Duration{2 * time.Second, 8 * time.Second, 30 * time.Second}
 	// What SendRelay and SendHistory put in the queue on the first failure.
 	const firstDelay = 2 * time.Second

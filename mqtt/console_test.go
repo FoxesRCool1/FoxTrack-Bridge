@@ -16,6 +16,7 @@ func TestConsoleGcode_MapsCommands(t *testing.T) {
 		{"set_nozzle_temp", map[string]interface{}{"celsius": 210.0}, "M104 S210"},
 		{"set_nozzle_temp", map[string]interface{}{"celsius": 0.0}, "M104 S0"},
 		{"set_nozzle_temp", map[string]interface{}{"celsius": "320"}, "M104 S320"},
+		{"set_nozzle_temp", map[string]interface{}{"celsius": 350.0}, "M104 S350"}, // H2D-class
 		{"set_bed_temp", map[string]interface{}{"celsius": 60.0}, "M140 S60"},
 		{"set_bed_temp", map[string]interface{}{"celsius": json.Number("120")}, "M140 S120"},
 	}
@@ -32,7 +33,7 @@ func TestConsoleGcode_RefusesOutOfRange(t *testing.T) {
 		cmd  string
 		args map[string]interface{}
 	}{
-		{"set_nozzle_temp", map[string]interface{}{"celsius": 321.0}},
+		{"set_nozzle_temp", map[string]interface{}{"celsius": 351.0}},
 		{"set_bed_temp", map[string]interface{}{"celsius": 121.0}},
 		{"set_bed_temp", map[string]interface{}{"celsius": -1.0}},
 		{"set_bed_temp", map[string]interface{}{"celsius": 60.5}},
@@ -54,7 +55,7 @@ func TestConsoleGcode_RefusesOutOfRange(t *testing.T) {
 	if IsConsoleCommand("pause") || !IsConsoleCommand("home") || !IsConsoleCommand("set_bed_temp") {
 		t.Fatal("IsConsoleCommand")
 	}
-	if ConsoleMaxC("set_nozzle_temp") != 320 || ConsoleMaxC("set_bed_temp") != 120 || ConsoleMaxC("home") != 0 {
+	if ConsoleMaxC("set_nozzle_temp") != 350 || ConsoleMaxC("set_bed_temp") != 120 || ConsoleMaxC("home") != 0 {
 		t.Fatal("ConsoleMaxC")
 	}
 }

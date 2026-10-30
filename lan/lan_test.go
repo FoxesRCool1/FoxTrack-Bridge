@@ -15,9 +15,9 @@ func TestFetchKlipperTelemetry_MapsFieldsAndUsesHeader(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// fetchKlipperTelemetry also polls lifetime hours; answer with an empty summary.
-		if r.URL.Path == "/server/history/summary" {
+		if r.URL.Path == "/server/history/totals" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"result": {"job_totals": {}}}`))
+			_, _ = w.Write([]byte(`{"result": {"job_totals": {"total_print_time": 7200}}}`))
 			return
 		}
 		if r.URL.Path != expectedPath {
@@ -72,6 +72,9 @@ func TestFetchKlipperTelemetry_MapsFieldsAndUsesHeader(t *testing.T) {
 
 	if telemetry.Status != "printing" {
 		t.Fatalf("unexpected telemetry status: %s", telemetry.Status)
+	}
+	if telemetry.TotalPrintHours != 2 {
+		t.Fatalf("lifetime hours should come from /server/history/totals: got %v", telemetry.TotalPrintHours)
 	}
 	if telemetry.Progress != 42 {
 		t.Fatalf("unexpected telemetry progress: %d", telemetry.Progress)

@@ -2,6 +2,7 @@ package virtualprinter
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +24,12 @@ import (
 
 // MaxFileBytes is FoxTrack's cap on a sliced file.
 const MaxFileBytes = 50 << 20
+
+const (
+	maxBodyBytes = MaxFileBytes + 1<<20 // file plus multipart framing and form fields
+	maxFormBytes = 1 << 20              // all non-file parts together
+	maxUploads   = 2                    // uploads handled at once
+)
 
 // Forwarder sends one file to FoxTrack and returns FoxTrack's HTTP status
 // and body. It is nil while the Bridge is not connected to FoxTrack.
@@ -35,22 +43,30 @@ type Server struct {
 	forward Forwarder
 	srv     *http.Server
 	ln      net.Listener
+
+	uploading atomic.Int32
 }
 
 // Apply makes the server match the settings: off, or on at port with key.
 // The forwarder may change without a restart (connecting FoxTrack later).
 func (s *Server) Apply(enabled bool, port int, key string, forward Forwarder) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	// The old server is shut down after the lock is released: Shutdown waits
+	// for running requests and handle() needs the lock.
+	var old *http.Server
+	defer func() {
+		s.mu.Unlock()
+		shutdown(old)
+	}()
 	s.forward = forward
 	if !enabled || key == "" {
-		s.stopLocked()
+		old = s.stopLocked()
 		return
 	}
 	if s.srv != nil && s.port == port && s.key == key {
 		return
 	}
-	s.stopLocked()
+	old = s.stopLocked()
 	s.port, s.key = port, key
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -60,7 +76,12 @@ func (s *Server) Apply(enabled bool, port int, key string, forward Forwarder) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handle)
 	s.ln = ln
-	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       10 * time.Minute, // a 50 MB upload over a slow link
+		IdleTimeout:       2 * time.Minute,
+	}
 	go func(srv *http.Server, ln net.Listener) {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("[virtual-printer] server stopped: %v", err)
@@ -76,14 +97,25 @@ func (s *Server) Running() bool {
 	return s.srv != nil
 }
 
-func (s *Server) stopLocked() {
-	if s.srv == nil {
+// stopLocked detaches the running server and frees its port at once. The
+// caller shuts the returned server down once it has released s.mu.
+func (s *Server) stopLocked() *http.Server {
+	old := s.srv
+	if old == nil {
+		return nil
+	}
+	_ = s.ln.Close()
+	s.srv, s.ln = nil, nil
+	return old
+}
+
+func shutdown(srv *http.Server) {
+	if srv == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	_ = s.srv.Shutdown(ctx)
+	_ = srv.Shutdown(ctx)
 	cancel()
-	s.srv, s.ln = nil, nil
 	log.Printf("[virtual-printer] stopped")
 }
 
@@ -123,7 +155,7 @@ func (s *Server) authorized(r *http.Request, key string) bool {
 	if got == "" {
 		got = r.URL.Query().Get("apikey")
 	}
-	return got == key
+	return subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1
 }
 
 // upload reads the multipart "file" part into a temp file (so the size is
@@ -134,12 +166,19 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, forward Forwarde
 		http.Error(w, "The Bridge is not connected to FoxTrack. Paste a Bridge token in the Bridge dashboard first.", http.StatusBadGateway)
 		return
 	}
+	if s.uploading.Add(1) > maxUploads {
+		s.uploading.Add(-1)
+		http.Error(w, "The Bridge is busy with other uploads. Try again in a moment.", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.uploading.Add(-1)
 	// The whole request is at least the file, so an oversized Content-Length is
 	// refused without reading it.
 	if r.ContentLength > MaxFileBytes+(64<<10) {
 		http.Error(w, "The file is larger than 50 MB.", http.StatusRequestEntityTooLarge)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		http.Error(w, "Expected a multipart upload with a file part.", http.StatusBadRequest)
@@ -147,6 +186,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, forward Forwarde
 	}
 	var name string
 	var tmp *os.File
+	var formBytes int64
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -157,7 +197,11 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, forward Forwarde
 			return
 		}
 		if part.FormName() != "file" {
-			_, _ = io.Copy(io.Discard, part)
+			n, _ := io.Copy(io.Discard, io.LimitReader(part, maxFormBytes+1))
+			if formBytes += n; formBytes > maxFormBytes {
+				http.Error(w, "The upload has too much form data.", http.StatusRequestEntityTooLarge)
+				return
+			}
 			continue
 		}
 		name = FileName(part.FileName())
@@ -169,6 +213,11 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, forward Forwarde
 		n, err := io.Copy(tmp, io.LimitReader(part, MaxFileBytes+1))
 		if err != nil {
 			cleanup(tmp)
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				http.Error(w, "The file is larger than 50 MB.", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "The upload was cut short.", http.StatusBadRequest)
 			return
 		}
@@ -228,7 +277,11 @@ func cleanup(f *os.File) {
 // include folders) and trims it. The name is sent to FoxTrack URI-encoded.
 func FileName(raw string) string {
 	raw = strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
-	return strings.TrimSpace(path.Base(raw))
+	name := strings.TrimSpace(path.Base(raw))
+	if name == "." || name == ".." || name == "/" {
+		return "" // path.Base("") is "."; none of these is a file name
+	}
+	return name
 }
 
 // Answer maps FoxTrack's status onto the code and text the slicer shows.

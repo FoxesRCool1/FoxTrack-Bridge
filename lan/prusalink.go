@@ -67,6 +67,11 @@ func fetchPrusaLinkTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhoo
 		PrinterModel:  "PrusaLink",
 		Alarms:        prusaLinkAlarms(printer),
 	}
+	if t.Status == "disconnected" {
+		// PrusaLink answered but has lost the printer: a failed poll, so a
+		// running print gets pollGrace instead of ending as cancelled.
+		return t, webhook.RelayPayload{}, fmt.Errorf("PrusaLink reports the printer as %q", stringAny(printer["state"]))
+	}
 	return t, relayFor(t, configpkg.KindPrusaLink, []string{"print_file", "alarms"}), nil
 }
 

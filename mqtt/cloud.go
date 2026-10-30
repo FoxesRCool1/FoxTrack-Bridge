@@ -361,7 +361,18 @@ func (r *cloudRunner) setPrinters(printers []Printer, onIP func(serial, ip strin
 			clientMutex.Lock()
 			printerClients[np.Name] = client
 			clientMutex.Unlock()
-			markConnected(np.Name)
+			if prev := GetPrinterState(old.Name); had && prev.Status != "disconnected" {
+				// A rename gets no subscribe, so carry the live state over
+				// instead of resetting it to a bare "connected", and ask for
+				// a fresh dump (rate limited like every other pushall).
+				UpdatePrinterState(np.Name, *prev)
+				r.pushallLocked(client, serial, np.Name)
+			} else {
+				markConnected(np.Name)
+			}
+			if had {
+				RemovePrinterState(old.Name) // no ghost printer under the old name
+			}
 		}
 	}
 	r.printers = next
@@ -424,6 +435,13 @@ func (r *cloudRunner) loop() {
 	failures, connFailures := 0, 0
 	for {
 		r.setStatus(CloudStateConnecting, "", 0, failures)
+		// A retry signal that lost the race with the backoff timer is stale
+		// now (RetryCloudNow only signals in backoff or held state, and the
+		// state just changed); drop it so it cannot cut the next wait short.
+		select {
+		case <-r.retry:
+		default:
+		}
 		start := time.Now()
 		err := r.connectAndServe()
 		r.dropClient()
@@ -561,9 +579,18 @@ func (r *cloudRunner) connectAndServe() error {
 
 	client := mqtt.NewClient(opts)
 	tok := client.Connect()
-	if !tok.WaitTimeout(20 * time.Second) {
+	connectTimer := time.NewTimer(20 * time.Second)
+	defer connectTimer.Stop()
+	select {
+	case <-tok.Done():
+	case <-connectTimer.C:
 		client.Disconnect(0)
 		return errCloudTimeout
+	case <-r.stop:
+		// Stopping must not wait out the connect timeout: SetCloudPrinters
+		// holds cloudMu while it waits for this goroutine.
+		client.Disconnect(0)
+		return nil
 	}
 	if err := tok.Error(); err != nil {
 		return err
@@ -688,8 +715,10 @@ func (r *cloudRunner) handleMessage(c mqtt.Client, msg mqtt.Message) {
 			go onIP(serial, ip)
 		}
 	}
-	if p.IP == "" {
-		p.IP = CloudIP(serial)
+	// The IP the printer reports about itself beats the configured one: it
+	// follows a DHCP change, the configured one does not.
+	if ip := CloudIP(serial); ip != "" {
+		p.IP = ip
 	}
 	makeHandler(p)(c, msg)
 }

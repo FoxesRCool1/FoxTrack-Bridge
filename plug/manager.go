@@ -50,6 +50,11 @@ type entry struct {
 	printWh     *float64 // the finished print's use, until the history sender takes it
 	printEndAt  time.Time
 
+	// last printer status the poller saw while the printer was reporting; Set
+	// falls back to it when the printer cannot be asked (link down)
+	known       bool
+	lastNozzleC float64
+
 	// auto off
 	pendingOff time.Time // zero while no print has just ended
 }
@@ -64,6 +69,7 @@ var (
 	ErrPrinting = errors.New("The printer is printing. Stop the print first.")
 	ErrHot      = errors.New("The hotend is still hot. Try again in a few minutes.")
 	ErrNoPlug   = errors.New("This printer has no smart plug set in the Bridge.")
+	ErrUnknown  = errors.New("Can't confirm the printer is idle, so the plug stays on. Use the plug's own app to switch it off.")
 )
 
 // Default is the manager the server uses.
@@ -155,14 +161,27 @@ func (m *Manager) Set(ctx context.Context, name string, on bool) error {
 	cfg := e.cfg
 	status := m.status
 	m.mu.Unlock()
-	if !on && status != nil {
-		if inPrint, nozzle, ok := status(name); ok {
-			if inPrint {
-				return ErrPrinting
+	if !on {
+		inPrint, nozzle, ok := false, 0.0, false
+		if status != nil {
+			inPrint, nozzle, ok = status(name)
+		}
+		if !ok {
+			// The printer cannot be asked (link down): go by the last state
+			// the poller saw, and refuse when there never was one.
+			m.mu.Lock()
+			if e, found := m.plugs[name]; found && e.known {
+				inPrint, nozzle, ok = e.inPrint, e.lastNozzleC, true
 			}
-			if nozzle > coolNozzleC {
-				return ErrHot
-			}
+			m.mu.Unlock()
+		}
+		switch {
+		case !ok:
+			return ErrUnknown
+		case inPrint:
+			return ErrPrinting
+		case nozzle > coolNozzleC:
+			return ErrHot
 		}
 	}
 	if err := m.switchF(ctx, cfg, on); err != nil {
@@ -269,7 +288,9 @@ func (m *Manager) poll(name string) {
 	}
 
 	turnOff := false
+	// No status (printer link down) changes nothing: it is not a print end.
 	if haveStatus {
+		e.known, e.lastNozzleC = true, nozzle
 		switch {
 		case inPrint && !e.inPrint:
 			m.beginPrint(e)
@@ -280,14 +301,29 @@ func (m *Manager) poll(name string) {
 			switch {
 			case inPrint:
 				e.pendingOff = time.Time{}
-			case m.now().Sub(e.pendingOff) >= cfg.Delay() && nozzle < coolNozzleC && e.on && e.reachable:
-				turnOff = true
+			case m.now().Sub(e.pendingOff) >= cfg.Delay() && nozzle < coolNozzleC:
+				// Due now. A plug that is off or unreachable has nothing to
+				// cut, and must not be cut later when it is switched on by hand.
+				turnOff = e.on && e.reachable
 				e.pendingOff = time.Time{}
 			}
 		}
 	}
 	m.mu.Unlock()
 
+	if turnOff {
+		// The lock was released since the decision: a settings change or a new
+		// print may have landed.
+		m.mu.Lock()
+		cur, found := m.plugs[name]
+		turnOff = found && cur == e && cur.cfg == cfg && cfg.AutoOff && !cur.inPrint
+		m.mu.Unlock()
+		if turnOff && status != nil {
+			if ip, _, ok := status(name); ok && ip {
+				turnOff = false
+			}
+		}
+	}
 	if turnOff {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout+time.Second)
 		err := m.switchF(ctx, cfg, false)
@@ -309,6 +345,9 @@ func (m *Manager) poll(name string) {
 // Caller holds m.mu.
 func (m *Manager) applyReading(e *entry, r Reading) {
 	now := m.now()
+	if !e.readAt.IsZero() && !e.on && r.On {
+		e.pendingOff = time.Time{} // switched on by hand: no auto-off from the old print
+	}
 	if e.inPrint && !e.lastSampleT.IsZero() {
 		dt := now.Sub(e.lastSampleT).Hours()
 		if dt > 0 && dt < 1 { // a gap over an hour is a sleeping laptop, not a print
@@ -342,12 +381,15 @@ func (m *Manager) beginPrint(e *entry) {
 // Caller holds m.mu.
 func (m *Manager) endPrint(e *entry) {
 	e.inPrint = false
-	wh := e.sumWh
+	wh, counted := e.sumWh, false
 	if e.startWh != nil && e.energyWh != nil && e.reachable && *e.energyWh >= *e.startWh {
-		wh = *e.energyWh - *e.startWh
+		wh, counted = *e.energyWh-*e.startWh, true
 	}
-	wh = math.Round(wh*10) / 10
-	e.printWh = &wh
+	e.printWh = nil // no usable reading: nothing to report, not 0 Wh
+	if counted || wh != 0 {
+		wh = math.Round(wh*10) / 10
+		e.printWh = &wh
+	}
 	e.printEndAt = m.now()
 	e.pendingOff = m.now()
 }

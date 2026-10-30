@@ -248,6 +248,66 @@ func TestCloudflareBlockHoldsEveryCall(t *testing.T) {
 	}
 }
 
+func TestDevices_FailureIsThrottledToo(t *testing.T) {
+	var calls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/iot-service/api/user/bind", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	c, clock := newTestClient(t, mux, base)
+	ctx := context.Background()
+	_, first := c.Devices(ctx, "tok", false)
+	if first == nil {
+		t.Fatal("a 500 must be an error")
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := c.Devices(ctx, "tok", true); err == nil || err.Error() != first.Error() {
+			t.Fatalf("repeat %d: err = %v, want the cached %v", i, err, first)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("bind calls = %d, want 1 (failures are cached for a minute)", calls)
+	}
+	*clock = clock.Add(61 * time.Second)
+	c.Devices(ctx, "tok", true)
+	if calls != 2 {
+		t.Errorf("bind calls after a minute = %d, want 2", calls)
+	}
+}
+
+func TestSessionFromToken_PacedCachedAndHeld(t *testing.T) {
+	var calls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/design-user-service/my/preference", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Write([]byte(`{"uid":42}`))
+	})
+	c, _ := newTestClient(t, mux, base)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, err := c.SessionFromToken(ctx, "a@b.c", "opaque"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("preference calls = %d, want 1 (username cached per token)", calls)
+	}
+	if _, err := c.SessionFromToken(ctx, "a@b.c", "other"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("second token inside the gap: err = %v, want ErrRateLimited", err)
+	}
+	startHold()
+	limitMu.Lock()
+	lastUserAt = time.Time{}
+	limitMu.Unlock()
+	if _, err := c.SessionFromToken(ctx, "a@b.c", "third"); !errors.Is(err, ErrCloudflare) {
+		t.Fatalf("during hold: err = %v, want ErrCloudflare", err)
+	}
+	if calls != 1 {
+		t.Errorf("preference calls = %d, want 1 (nothing sent during a hold)", calls)
+	}
+}
+
 func TestTokenExpiry(t *testing.T) {
 	jwt := fakeJWT(t, map[string]interface{}{"exp": float64(1800000000)})
 	cases := []struct {

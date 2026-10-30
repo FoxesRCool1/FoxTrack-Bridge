@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -256,55 +257,91 @@ func readCappedBody(r io.Reader) []byte {
 	return b
 }
 
-// retryItem holds a failed relay call that should be retried.
+// relayState orders the relay posts of one printer to one endpoint. FoxTrack
+// replaces its stored status with every post, so an older payload landing after
+// a newer one (a late retry, or two goroutines racing) would roll the printer
+// back to a status it already left.
+type relayState struct {
+	seq       atomic.Uint64 // last sequence handed out, one per SendRelay call
+	mu        sync.Mutex    // serialises sends for this printer
+	delivered uint64        // highest sequence FoxTrack accepted; guarded by mu
+}
+
+var relayStates sync.Map // webhookURL + "\x00" + serial -> *relayState
+
+func relayStateFor(webhookURL, serial string) *relayState {
+	v, _ := relayStates.LoadOrStore(webhookURL+"\x00"+serial, &relayState{})
+	return v.(*relayState)
+}
+
+// retryItem is a relay call: the first attempt, or one waiting to be retried.
 type retryItem struct {
 	apiKey, webhookURL, serial, name string
 	payload                          RelayPayload
 	attempts                         int
-	after                            time.Time
 	createdAt                        time.Time
+	st                               *relayState
+	seq                              uint64
 }
 
-// retryQueue is a bounded channel for failed relay payloads awaiting retry.
-// If full, new failures are dropped to prevent unbounded memory growth.
-var retryQueue = make(chan retryItem, 64)
+// relayBackoffs are the waits before each relay retry. A var so tests can
+// shrink them.
+var relayBackoffs = []time.Duration{2 * time.Second, 8 * time.Second, 30 * time.Second}
 
-func init() {
-	go retryWorker()
-	go historyRetryWorker()
+var pendingRelayRetries atomic.Int32
+
+// deliverRelay sends item unless a newer payload for the same printer has
+// already been delivered, in which case it reports skipped and sends nothing.
+func deliverRelay(item retryItem) (err error, skipped bool) {
+	item.st.mu.Lock()
+	defer item.st.mu.Unlock()
+	if item.st.delivered > item.seq {
+		return nil, true
+	}
+	if err = doSendRelay(item.apiKey, item.webhookURL, item.serial, item.name, item.payload); err == nil {
+		item.st.delivered = item.seq
+	}
+	return err, false
 }
 
-// retryWorker retries failed relay calls with exponential backoff (2s, 8s, 30s).
-// Items older than 5 minutes are discarded.
-func retryWorker() {
-	for item := range retryQueue {
-		wait := time.Until(item.after)
-		if wait > 0 {
-			time.Sleep(wait)
-		}
-		if time.Since(item.createdAt) > 5*time.Minute {
-			log.Printf("[relay-retry] dropping stale payload for %s (created %s ago)", item.name, time.Since(item.createdAt).Round(time.Second))
-			continue
-		}
-		if err := doSendRelay(item.apiKey, item.webhookURL, item.serial, item.name, item.payload); err != nil {
-			if errors.Is(err, errNotRetryable) {
-				log.Printf("[relay-retry] dropping payload for %s: %v", item.name, err)
-				continue
-			}
-			backoffs := []time.Duration{2 * time.Second, 8 * time.Second, 30 * time.Second}
-			if item.attempts < len(backoffs) {
-				next := item
-				next.attempts++
-				next.after = time.Now().Add(backoffs[item.attempts])
-				select {
-				case retryQueue <- next:
-				default:
-					log.Printf("[relay-retry] queue full, dropping retry for %s", item.name)
-				}
-			} else {
-				log.Printf("[relay-retry] giving up on payload for %s after %d attempts", item.name, item.attempts)
-			}
-		}
+// scheduleRelayRetry runs item after its backoff on its own timer, so one
+// printer's wait never delays another's. At most maxPendingRetries wait at once.
+func scheduleRelayRetry(item retryItem) {
+	if pendingRelayRetries.Add(1) > maxPendingRetries {
+		pendingRelayRetries.Add(-1)
+		log.Printf("[relay-retry] queue full, dropping retry for %s", item.name)
+		return
+	}
+	time.AfterFunc(relayBackoffs[item.attempts-1], func() {
+		pendingRelayRetries.Add(-1)
+		runRelayRetry(item)
+	})
+}
+
+// runRelayRetry retries a failed relay call. Items older than 5 minutes are
+// discarded, and so are items a newer delivered payload has replaced.
+func runRelayRetry(item retryItem) {
+	if time.Since(item.createdAt) > 5*time.Minute {
+		log.Printf("[relay-retry] dropping stale payload for %s (created %s ago)", item.name, time.Since(item.createdAt).Round(time.Second))
+		return
+	}
+	err, skipped := deliverRelay(item)
+	if skipped {
+		log.Printf("[relay-retry] dropping payload for %s: a newer one was already sent", item.name)
+		return
+	}
+	if err == nil {
+		return
+	}
+	if errors.Is(err, errNotRetryable) {
+		log.Printf("[relay-retry] dropping payload for %s: %v", item.name, err)
+		return
+	}
+	if item.attempts < len(relayBackoffs) {
+		item.attempts++
+		scheduleRelayRetry(item)
+	} else {
+		log.Printf("[relay-retry] giving up on payload for %s after %d attempts", item.name, item.attempts)
 	}
 }
 
@@ -546,45 +583,68 @@ type historyRetryItem struct {
 	historyURL string
 	payload    HistoryPayload
 	attempts   int
-	after      time.Time
 	createdAt  time.Time
 }
 
-// historyRetryQueue is a bounded channel for history payloads awaiting retry.
-var historyRetryQueue = make(chan historyRetryItem, 64)
+// A finished print is worth keeping through a long FoxTrack outage, so history
+// retries back off 2s, 8s, 32s... up to 10 minutes and last 24 hours. Vars so
+// tests can shrink them.
+var (
+	historyBackoffBase = 2 * time.Second
+	historyBackoffMax  = 10 * time.Minute
+	historyMaxAge      = 24 * time.Hour
+)
 
-// historyRetryWorker retries failed SendHistory calls with exponential backoff
-// (2s, 8s, 30s). Items older than 5 minutes are discarded.
-func historyRetryWorker() {
-	for item := range historyRetryQueue {
-		if wait := time.Until(item.after); wait > 0 {
-			time.Sleep(wait)
-		}
-		if time.Since(item.createdAt) > 5*time.Minute {
-			log.Printf("[history-retry] dropping stale payload for %s (created %s ago)",
-				item.payload.PrinterName, time.Since(item.createdAt).Round(time.Second))
-			continue
-		}
-		if err := doSendHistory(item.apiKey, item.historyURL, item.payload); err != nil {
-			if errors.Is(err, errNotRetryable) {
-				log.Printf("[history-retry] dropping payload for %s: %v", item.payload.PrinterName, err)
-				continue
-			}
-			backoffs := []time.Duration{2 * time.Second, 8 * time.Second, 30 * time.Second}
-			if item.attempts < len(backoffs) {
-				next := item
-				next.attempts++
-				next.after = time.Now().Add(backoffs[item.attempts])
-				select {
-				case historyRetryQueue <- next:
-				default:
-					log.Printf("[history-retry] queue full, dropping retry for %s", item.payload.PrinterName)
-				}
-			} else {
-				log.Printf("[history-retry] giving up on payload for %s after %d attempts", item.payload.PrinterName, item.attempts)
-			}
-		}
+// maxPendingRetries bounds each retry set (relay, history) so an endless
+// outage cannot grow memory without limit.
+const maxPendingRetries = 64
+
+var pendingHistoryRetries atomic.Int32
+
+// historyDelay is the wait before retry number attempts (1-based).
+func historyDelay(attempts int) time.Duration {
+	d := historyBackoffBase
+	for i := 1; i < attempts && d < historyBackoffMax; i++ {
+		d *= 4
 	}
+	if d > historyBackoffMax {
+		d = historyBackoffMax
+	}
+	return d
+}
+
+// scheduleHistoryRetry runs item after its backoff on its own timer. Items
+// older than historyMaxAge are discarded.
+// ponytail: retries live in memory only and do not survive a restart; persist
+// them to disk if losing a history post across a restart ever matters.
+func scheduleHistoryRetry(item historyRetryItem) {
+	if pendingHistoryRetries.Add(1) > maxPendingRetries {
+		pendingHistoryRetries.Add(-1)
+		log.Printf("[history-retry] queue full, dropping retry for %s", item.payload.PrinterName)
+		return
+	}
+	time.AfterFunc(historyDelay(item.attempts), func() {
+		pendingHistoryRetries.Add(-1)
+		runHistoryRetry(item)
+	})
+}
+
+func runHistoryRetry(item historyRetryItem) {
+	if time.Since(item.createdAt) > historyMaxAge {
+		log.Printf("[history-retry] giving up on payload for %s (created %s ago)",
+			item.payload.PrinterName, time.Since(item.createdAt).Round(time.Second))
+		return
+	}
+	err := doSendHistory(item.apiKey, item.historyURL, item.payload)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, errNotRetryable) {
+		log.Printf("[history-retry] dropping payload for %s: %v", item.payload.PrinterName, err)
+		return
+	}
+	item.attempts++
+	scheduleHistoryRetry(item)
 }
 
 // doSendHistory performs the actual HTTP POST for a history payload.
@@ -615,7 +675,7 @@ func doSendHistory(apiKey, historyURL string, p HistoryPayload) error {
 }
 
 // SendHistory posts a HistoryPayload to the FoxTrack bridge-history endpoint
-// and queues a retry with exponential backoff on failure.
+// and queues a retry with capped exponential backoff on failure.
 func SendHistory(apiKey, historyURL string, p HistoryPayload) {
 	if err := doSendHistory(apiKey, historyURL, p); err != nil {
 		if errors.Is(err, errNotRetryable) {
@@ -623,18 +683,13 @@ func SendHistory(apiKey, historyURL string, p HistoryPayload) {
 			return
 		}
 		log.Printf("[history] send failed for %s: %v; queuing retry", p.PrinterName, err)
-		select {
-		case historyRetryQueue <- historyRetryItem{
+		scheduleHistoryRetry(historyRetryItem{
 			apiKey:     apiKey,
 			historyURL: historyURL,
 			payload:    p,
 			attempts:   1,
-			after:      time.Now().Add(2 * time.Second),
 			createdAt:  time.Now(),
-		}:
-		default:
-			log.Printf("[history] retry queue full, dropping payload for %s", p.PrinterName)
-		}
+		})
 	}
 }
 
@@ -737,32 +792,30 @@ func SendUpload(ctx context.Context, apiKey, uploadURL, fileName string, body io
 var uploadHTTPClient = &http.Client{}
 
 // SendRelay posts a relay payload and queues a retry with backoff on failure.
+// Each call gets the next sequence number for its printer; see relayState.
 func SendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayPayload) error {
 	if !URLAllowed(webhookURL) {
 		return fmt.Errorf("relay webhook URL must use HTTPS")
 	}
-	if err := doSendRelay(apiKey, webhookURL, printerSerial, printerName, p); err != nil {
-		// A revoked token or a plan gate answers the same way every time;
-		// retrying it three times only delays the dashboard warning.
-		if errors.Is(err, errNotRetryable) {
-			log.Printf("[relay] %s: %v", printerName, err)
-			return err
-		}
-		select {
-		case retryQueue <- retryItem{
-			apiKey:     apiKey,
-			webhookURL: webhookURL,
-			serial:     printerSerial,
-			name:       printerName,
-			payload:    p,
-			attempts:   1,
-			after:      time.Now().Add(2 * time.Second),
-			createdAt:  time.Now(),
-		}:
-		default:
-			log.Printf("[relay] retry queue full, dropping payload for %s", printerName)
-		}
+	st := relayStateFor(webhookURL, printerSerial)
+	return sendRelaySeq(retryItem{
+		apiKey: apiKey, webhookURL: webhookURL, serial: printerSerial, name: printerName,
+		payload: p, attempts: 1, createdAt: time.Now(), st: st, seq: st.seq.Add(1),
+	})
+}
+
+// sendRelaySeq makes the first attempt for item and queues a retry on failure.
+func sendRelaySeq(item retryItem) error {
+	err, _ := deliverRelay(item)
+	if err == nil {
+		return nil
+	}
+	// A revoked token or a plan gate answers the same way every time;
+	// retrying it three times only delays the dashboard warning.
+	if errors.Is(err, errNotRetryable) {
+		log.Printf("[relay] %s: %v", item.name, err)
 		return err
 	}
-	return nil
+	scheduleRelayRetry(item)
+	return err
 }

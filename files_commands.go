@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -22,6 +23,10 @@ import (
 
 const filesCommandTimeout = 45 * time.Second
 
+// print_printer_file may first download the file (up to 200 MB) to find its
+// sliced plate, then wait for the printer to start.
+const printPrinterFileTimeout = 5 * time.Minute
+
 func isFilesCommand(command string) bool {
 	return command == "list_files" || command == "print_printer_file"
 }
@@ -39,7 +44,11 @@ func startFilesCommand(apiKey string, cmd bridgeCommand) {
 	printJobs.wg.Add(1)
 	go func() {
 		defer printJobs.wg.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), filesCommandTimeout)
+		timeout := filesCommandTimeout
+		if cmd.Command == "print_printer_file" {
+			timeout = printPrinterFileTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		result := bridgeCommandResult{CommandID: cmd.ID, Status: "done"}
 		var err error
@@ -58,7 +67,15 @@ func startFilesCommand(apiKey string, cmd bridgeCommand) {
 			}
 		} else {
 			name, _ := cmd.Args["name"].(string)
-			err = printPrinterFile(ctx, p.Name, isBambu, mq, name)
+			plate, ok := 0, true // 0 = find it from the file
+			if v, present := cmd.Args["plate"]; present && v != nil {
+				if plate, ok = intArg(v); !ok || plate < 1 {
+					err = errors.New("Pick a plate number from 1 up.")
+				}
+			}
+			if err == nil {
+				err = printPrinterFile(ctx, p.Name, isBambu, mq, name, plate)
+			}
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			err = errors.New("The printer did not answer in time. Try again.")
@@ -70,21 +87,22 @@ func startFilesCommand(apiKey string, cmd bridgeCommand) {
 		} else {
 			log.Printf("[bridge-commands] %s %s/%s done", cmd.ID, p.Name, cmd.Command)
 		}
-		if ackErr := ackBridgeCommand(apiKey, result); ackErr != nil {
-			log.Printf("[bridge-commands] ack error for %s: %v", cmd.ID, ackErr)
-		}
+		ackWithRetry(apiKey, result, func(format string, a ...interface{}) {
+			log.Printf("[bridge-commands] %s %s/%s: %s", cmd.ID, p.Name, cmd.Command, fmt.Sprintf(format, a...))
+		})
 	}()
 }
 
 // printPrinterFile starts a file on the printer. The printer lock keeps it
-// from racing a print_file upload to the same printer.
-func printPrinterFile(ctx context.Context, name string, isBambu bool, mq mqttpkg.Printer, file string) error {
+// from racing a print_file upload to the same printer. plate is for Bambu
+// only (0 = the sliced plate of the file); the LAN printers print the file as it is.
+func printPrinterFile(ctx context.Context, name string, isBambu bool, mq mqttpkg.Printer, file string, plate int) error {
 	if !printJobs.lockPrinter(name) {
 		return errPrintBusy
 	}
 	defer printJobs.unlockPrinter(name)
 	if isBambu {
-		return mqttpkg.PrintPrinterFile(ctx, mq, file)
+		return mqttpkg.PrintPrinterFile(ctx, mq, file, plate)
 	}
 	return lanCtrl.PrintFile(name, file)
 }

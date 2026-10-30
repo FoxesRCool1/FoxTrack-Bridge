@@ -4,8 +4,8 @@
 
 **Printer console: temperatures and home**
 - FoxTrack's opened printer, and the card's new Temps panel, can set the
-  nozzle target (0 to 320 C) and the bed target (0 to 120 C; 0 turns the
-  heater off) and home the axes. Bambu Lab in LAN mode (M104 / M140 / G28),
+  nozzle target (0 to 350 C) and the bed target (0 to 120 C; 0 turns the
+  heater off) and home the axes. Home is refused while a print runs. Bambu Lab in LAN mode (M104 / M140 / G28),
   Klipper (the same G-code through Moonraker) and OctoPrint (its printer API).
   PrusaLink has no such call and answers "This printer does not take
   temperature commands from the Bridge"; Home Assistant stays read-only. A
@@ -21,6 +21,41 @@
   storage. The list is read only when FoxTrack asks, never in the poll loop.
   A print is refused while the printer prints or is paused. PrusaLink and
   Home Assistant printers are not listed. The Bridge announces `files`.
+  A Bambu `.3mf` starts on the plate it was sliced for (read from the file),
+  unless FoxTrack names a `plate`.
+
+**Fixes**
+- Safety: a smart plug can no longer be switched off, or auto-off, while the
+  Bridge has lost the printer mid-print. With the printer unreachable the
+  Bridge goes by the last state it saw, and refuses if it never saw one.
+- Security: the dashboard API refuses writes a browser sends from another
+  site, so a web page can no longer change the FoxTrack token or clear the
+  printers. Request bodies are capped at 1 MB.
+- A config save that cannot be written to disk now shows an error instead of
+  "saved". An unreadable (not corrupt) config stops the Bridge instead of
+  being moved aside; a corrupt config falls back to an older valid copy.
+- Updates install only when the release's checksums are published, and never
+  inside Docker.
+- Bambu Lab: a target temperature of 0 now shows as 0; a print that ends while
+  the printer is offline is still recorded; partial AMS reports no longer wipe
+  the other trays; no blank status is posted right after a reconnect; error
+  codes no longer flicker; renaming a printer mid-print keeps the print.
+  Listing files works on the A1 and A1 mini.
+- Bambu Cloud: failed device lookups and token sign-ins are paced like the
+  rest, and a cloud printer that moved to a new IP is found again.
+- Klipper: Home no longer reports a failure while the printer homes; lifetime
+  print hours are read from the right Moonraker endpoint; the camera stream is
+  no longer cut every 8 seconds.
+- PrusaLink and OctoPrint: a blank or offline status gets the same grace as a
+  lost connection instead of cancelling the print; OctoPrint keeps the file
+  name and progress on a finished print and lists only printable files.
+- FoxTrack posts: status posts for one printer always arrive in order, and a
+  finished print's history is retried for up to 24 hours.
+- Files and console commands report their result even after a FoxTrack blip.
+- Dashboard: a printer name with "/" or "%" works with every button; a slow
+  status poll can no longer show older data; the Auto-update switch no longer
+  saves half-typed tokens.
+- Virtual printer: read timeouts, upload size and concurrency limits.
 
 ## v2.7.0
 

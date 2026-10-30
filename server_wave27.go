@@ -33,14 +33,21 @@ var (
 const bridgeCapabilities = "print_file,set_filament,alarms,plug_on,plug_off,console,files"
 
 // printerLiveState is the latest telemetry for a printer, from whichever
-// driver has it.
+// driver has it. ok is false while the printer is not reporting: "disconnected"
+// (link down, a placeholder with no real data) and "connected" (link up, no
+// report yet). The plug guards must read that as "unknown", never as "idle".
 func printerLiveState(name string) (*mqttpkg.TelemetryData, bool) {
+	var s *mqttpkg.TelemetryData
 	if printerIsBambu(name) {
-		s := mqttpkg.GetPrinterState(name)
-		return s, s.Status != "disconnected" || s.Timestamp != 0
+		s = mqttpkg.GetPrinterState(name)
+	} else {
+		s = lanCtrl.GetStates()[name]
 	}
-	s, ok := lanCtrl.GetStates()[name]
-	return s, ok
+	return s, telemetryReporting(s)
+}
+
+func telemetryReporting(s *mqttpkg.TelemetryData) bool {
+	return s != nil && s.Status != "disconnected" && s.Status != "connected"
 }
 
 // wirePlugs installs the plug package's lookups: printer status for the

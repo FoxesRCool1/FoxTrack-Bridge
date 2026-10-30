@@ -36,6 +36,10 @@ import (
 // ErrLogin means the printer refused the user name or access code.
 var ErrLogin = errors.New("ftps login refused")
 
+// ErrNotFound means the printer has no such directory or file (550 to LIST
+// or RETR).
+var ErrNotFound = errors.New("ftps: no such directory or file")
+
 // ErrStalled means the upload made no progress for Config.StallTimeout.
 var ErrStalled = errors.New("ftps upload stalled")
 
@@ -231,6 +235,9 @@ func openData(ctx context.Context, cfg Config, c *control, conns *connSet, tlsCf
 		return nil, err
 	}
 	code, msg, err = c.cmd("%s", verb)
+	if err == nil && code == 550 && (strings.HasPrefix(verb, "LIST") || strings.HasPrefix(verb, "RETR")) {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, msg)
+	}
 	if err != nil || (code != 150 && code != 125) {
 		return nil, replyErr(strings.Fields(verb)[0], code, msg, err)
 	}

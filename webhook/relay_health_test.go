@@ -123,8 +123,8 @@ func TestSendRelay_PermanentRejectIsNotRetried(t *testing.T) {
 	if hits != 1 {
 		t.Errorf("expected exactly one request, got %d", hits)
 	}
-	if len(retryQueue) != 0 {
-		t.Errorf("a permanent reject must not enter the retry queue, depth %d", len(retryQueue))
+	if pendingRelayRetries.Load() != 0 {
+		t.Errorf("a permanent reject must not enter the retry queue, depth %d", pendingRelayRetries.Load())
 	}
 	if p := RelayHealth(); p == nil || p.Kind != "plan_limit" {
 		t.Fatalf("expected the dashboard problem to be raised, got %+v", p)

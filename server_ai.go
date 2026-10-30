@@ -141,7 +141,8 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 		configMutex.Unlock()
 
 		if err := config.SaveConfig(cfg); err != nil {
-			log.Printf("[assistant] Warning: failed to save config: %v", err)
+			writeSaveFailed(w, err)
+			return
 		}
 		json.NewEncoder(w).Encode(view)
 	default:

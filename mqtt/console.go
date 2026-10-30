@@ -15,7 +15,7 @@ import (
 // so each kind refuses the same way.
 
 const (
-	NozzleMaxC = 320
+	NozzleMaxC = 350 // H2D-class hot ends; the printer's own firmware enforces its limit too
 	BedMaxC    = 120
 )
 

@@ -159,3 +159,135 @@ func TestSync_StartsAndStopsByConfig(t *testing.T) {
 		t.Fatal("plug not removed")
 	}
 }
+
+func TestSet_OffWithPrinterLinkDownUsesLastKnownState(t *testing.T) {
+	m, _, switches, _ := fakeManager(t)
+	addNoLoop(m, plugged(false))
+	inPrint, nozzle, ok := false, 30.0, false
+	m.SetStatusSource(func(string) (bool, float64, bool) { return inPrint, nozzle, ok })
+
+	// Never saw the printer: can't confirm it is idle.
+	if err := m.Set(context.Background(), "P1", false); !errors.Is(err, ErrUnknown) {
+		t.Fatalf("never known: err = %v", err)
+	}
+	// Saw it printing, then the link dropped.
+	ok, inPrint, nozzle = true, true, 210
+	m.poll("P1")
+	ok = false
+	if err := m.Set(context.Background(), "P1", false); !errors.Is(err, ErrPrinting) {
+		t.Fatalf("was printing: err = %v", err)
+	}
+	// Saw it idle but hot.
+	ok, inPrint = true, false
+	m.poll("P1")
+	ok = false
+	if err := m.Set(context.Background(), "P1", false); !errors.Is(err, ErrHot) {
+		t.Fatalf("was hot: err = %v", err)
+	}
+	// Saw it idle and cool.
+	ok, nozzle = true, 30
+	m.poll("P1")
+	ok = false
+	if err := m.Set(context.Background(), "P1", false); err != nil {
+		t.Fatalf("was idle and cool: err = %v", err)
+	}
+	if len(*switches) != 1 {
+		t.Fatalf("switches = %v", *switches)
+	}
+}
+
+func TestPoll_LinkDownMidPrintKeepsPrintAndEnergy(t *testing.T) {
+	m, reading, switches, now := fakeManager(t)
+	addNoLoop(m, plugged(true))
+	inPrint, nozzle, ok := true, 215.0, true
+	m.SetStatusSource(func(string) (bool, float64, bool) { return inPrint, nozzle, ok })
+	w := 100.0
+	reading.Watts = &w
+
+	m.poll("P1") // print starts
+	*now = now.Add(30 * time.Minute)
+	ok, inPrint, nozzle = false, false, 0 // link down: status unknown
+	m.poll("P1")                          // 100 W x 0.5 h
+	*now = now.Add(3 * time.Minute)
+	m.poll("P1")
+	if len(*switches) != 0 || !m.plugs["P1"].pendingOff.IsZero() || !m.plugs["P1"].inPrint {
+		t.Fatalf("link drop ended the print: switches %v, entry %+v", *switches, *m.plugs["P1"])
+	}
+	*now = now.Add(30*time.Minute - 3*time.Minute)
+	ok, inPrint, nozzle = true, true, 215 // link back, still printing
+	m.poll("P1")                          // another 100 W x 0.5 h
+	inPrint = false
+	m.poll("P1")
+	if got := m.PrintEnergy("P1"); got == nil || *got != 100 {
+		t.Fatalf("energy over the blip = %v, want 100", got)
+	}
+}
+
+func TestPrintEnergy_NilWithoutUsableReading(t *testing.T) {
+	m, _, _, _ := fakeManager(t) // readings carry no watts and no counter
+	addNoLoop(m, plugged(false))
+	inPrint := false
+	m.SetStatusSource(func(string) (bool, float64, bool) { return inPrint, 30, true })
+	m.poll("P1")
+	inPrint = true
+	m.poll("P1")
+	inPrint = false
+	m.poll("P1")
+	if got := m.PrintEnergy("P1"); got != nil {
+		t.Fatalf("energy = %v, want nil", *got)
+	}
+}
+
+func TestAutoOff_PendingClearedWhenPlugOffOrSwitchedOnByHand(t *testing.T) {
+	m, reading, switches, now := fakeManager(t)
+	addNoLoop(m, plugged(true))
+	inPrint := true
+	m.SetStatusSource(func(string) (bool, float64, bool) { return inPrint, 30, true })
+	m.poll("P1")
+	inPrint = false
+	m.poll("P1")       // wait starts
+	reading.On = false // someone switched it off by hand
+	*now = now.Add(3 * time.Minute)
+	m.poll("P1")      // due, but the plug is off: wait ends
+	reading.On = true // later switched on by hand
+	*now = now.Add(time.Minute)
+	m.poll("P1")
+	if len(*switches) != 0 {
+		t.Fatalf("Bridge cut a plug that was switched on by hand: %v", *switches)
+	}
+
+	// Off then on again before the delay is due: also no auto-off.
+	inPrint = true
+	m.poll("P1")
+	inPrint = false
+	m.poll("P1")
+	reading.On = false
+	m.poll("P1")
+	reading.On = true
+	*now = now.Add(3 * time.Minute)
+	m.poll("P1")
+	if len(*switches) != 0 {
+		t.Fatalf("Bridge cut a plug that was switched on by hand: %v", *switches)
+	}
+}
+
+func TestAutoOff_RechecksRightBeforeSwitching(t *testing.T) {
+	m, _, switches, now := fakeManager(t)
+	addNoLoop(m, plugged(true))
+	calls, printing := 0, true
+	m.SetStatusSource(func(string) (bool, float64, bool) {
+		calls++
+		if calls == 4 { // poll 3's re-check: a new print has started
+			return true, 200, true
+		}
+		return printing, 30, true
+	})
+	m.poll("P1")
+	printing = false
+	m.poll("P1")
+	*now = now.Add(3 * time.Minute)
+	m.poll("P1") // would switch off; the re-check sees a print
+	if len(*switches) != 0 {
+		t.Fatalf("switched despite a new print: %v", *switches)
+	}
+}

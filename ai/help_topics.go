@@ -239,7 +239,7 @@ OctoPrint: pause, resume, stop and the Temps panel.
 
 Prusa (PrusaLink): pause, resume and stop. PrusaLink has no call for temperatures or homing, so there is no Temps panel.
 
-The Temps panel (the "Temps" button on the card) sets the nozzle target (0 to 320 C) and the bed target (0 to 120 C) with a Set button each; 0 turns that heater off. Its Home button homes X, Y and Z and is disabled while a print runs. FoxTrack's opened printer has the same fields and sends them through the Bridge.
+The Temps panel (the "Temps" button on the card) sets the nozzle target (0 to 350 C) and the bed target (0 to 120 C) with a Set button each; 0 turns that heater off. Its Home button homes X, Y and Z and is disabled while a print runs. FoxTrack's opened printer has the same fields and sends them through the Bridge.
 
 Home Assistant (read-only): no controls. The Bridge only reads the status.
 

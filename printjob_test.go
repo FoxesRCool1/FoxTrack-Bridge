@@ -825,3 +825,38 @@ func TestPrintFile_LateRefusalKeepsItsMessage(t *testing.T) {
 		})
 	}
 }
+
+// list_files and print_printer_file are marked seen at once, so a lost ack
+// would never be re-delivered: their ack is retried like print_file's.
+func TestFilesCommand_AckIsRetried(t *testing.T) {
+	e := newPrintEnv(t)
+	e.ackFail["failed"] = 2
+	startFilesCommand("test-key", bridgeCommand{ID: "f1", ExternalID: "Voron", Command: "list_files"})
+	printJobs.wg.Wait()
+	if e.count("ack500:failed") != 2 || e.count("ack:failed") != 1 {
+		t.Fatalf("events = %v", e.snapshot())
+	}
+}
+
+// G28 mid-print crashes the toolhead into the part; temperatures are fine.
+func TestHome_RefusedWhilePrintingButTempsAreNot(t *testing.T) {
+	newPrintEnv(t) // the P1S Shelf printer config
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "printing"})
+	t.Cleanup(func() { mqttpkg.RemovePrinterState("P1S Shelf") })
+	home := bridgeCommand{ID: "h1", ExternalID: "01P00A000000001", Command: "home"}
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("home while printing: err = %v", err)
+	}
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "paused"})
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("home while paused: err = %v", err)
+	}
+	temp := bridgeCommand{ID: "h2", ExternalID: "01P00A000000001", Command: "set_nozzle_temp", Args: map[string]interface{}{"celsius": 200.0}}
+	if err := executeBridgeCommand(temp); errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("a temperature change must not be blocked: %v", err)
+	}
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "idle"})
+	if err := executeBridgeCommand(home); errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("home while idle must not be blocked: %v", err)
+	}
+}

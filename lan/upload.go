@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log"
 	"mime/multipart"
@@ -221,8 +222,11 @@ func SanitizeRemoteName(name string) string {
 		}
 	}
 	s := b.String()
+	// Nothing usable survived (a name in another script): a name made from the
+	// original, so two such files do not overwrite each other on the printer.
+	fallback := fmt.Sprintf("print-%08x.gcode", crc32.ChecksumIEEE([]byte(name)))
 	if strings.HasPrefix(s, ".") && strings.EqualFold(strings.TrimLeft(s, "."), "gcode") {
-		return "print.gcode" // nothing but the extension survived
+		return fallback
 	}
 	s = strings.TrimLeft(s, ".")
 	if !strings.HasSuffix(strings.ToLower(s), ".gcode") {
@@ -232,7 +236,7 @@ func SanitizeRemoteName(name string) string {
 		s = s[:120-len(".gcode")] + ".gcode"
 	}
 	if s == ".gcode" {
-		s = "print.gcode"
+		s = fallback
 	}
 	return s
 }

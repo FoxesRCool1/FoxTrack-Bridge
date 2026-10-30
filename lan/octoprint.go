@@ -48,6 +48,11 @@ func fetchOctoPrintTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhoo
 	}
 	t := octoPrintTelemetry(printer, job)
 	t.PrinterModel = octoPrintModel(p)
+	if t.Status == "disconnected" {
+		// OctoPrint answered but has lost the printer: a failed poll, so a
+		// running print gets pollGrace instead of ending as cancelled.
+		return t, webhook.RelayPayload{}, errOctoOffline
+	}
 	return t, relayFor(t, configpkg.KindOctoPrint, []string{"print_file", "alarms", "console", "files"}), nil
 }
 
@@ -89,11 +94,14 @@ func octoPrintTelemetry(printer, job map[string]interface{}) mqttpkg.TelemetryDa
 	if fileName == "" {
 		fileName = stringAny(file["name"])
 	}
-	if !mqttpkg.InPrint(status) {
+	// The job stays selected after it ends, so finished, error and cancelled
+	// keep its name and progress, as Klipper does. Only an idle printer has none.
+	keepJob := mqttpkg.InPrint(status) || status == "finished" || status == "error" || status == "cancelled"
+	if !keepJob {
 		fileName = ""
 	}
 	pct := 0
-	if hasCompletion && mqttpkg.InPrint(status) {
+	if hasCompletion && keepJob {
 		pct = clampPercent(completion)
 	}
 	remaining := 0

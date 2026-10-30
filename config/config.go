@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -322,11 +323,16 @@ func configPath() string {
 	return filepath.Join(base, "FoxTrack-Bridge", "config.json")
 }
 
+// ErrCorrupt wraps a config file that was read but could not be parsed. Only
+// then may the caller move the file aside; any other read error (permissions,
+// a directory in the way) must not cost the user a good file.
+var ErrCorrupt = errors.New("config file is corrupt")
+
 func LoadConfig() (*Config, error) {
 	preferredPath := configPath()
+	legacyPath := legacyConfigPath()
 	data, err := os.ReadFile(preferredPath)
 	if errors.Is(err, os.ErrNotExist) {
-		legacyPath := legacyConfigPath()
 		legacyData, legacyErr := os.ReadFile(legacyPath)
 		if legacyErr != nil {
 			return nil, err
@@ -339,7 +345,18 @@ func LoadConfig() (*Config, error) {
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		// A corrupt preferred file with a good legacy one behind it: keep the
+		// corrupt file as a backup and carry on from the legacy copy, which
+		// the save below migrates back to the preferred path.
+		legacyData, legacyErr := os.ReadFile(legacyPath)
+		if legacyErr != nil || preferredPath == legacyPath || json.Unmarshal(legacyData, &cfg) != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		}
+		backup, berr := backupFile(preferredPath)
+		if berr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		}
+		log.Printf("ERROR: %s failed to load (%v); it was backed up to %s and the older config at %s is used instead", preferredPath, err, backup, legacyPath)
 	}
 
 	backfilled := false
@@ -450,7 +467,19 @@ func BackupCorrupt() (string, error) {
 		}
 		p = legacy
 	}
-	backup := p + ".corrupt-" + time.Now().Format("20060102-150405")
+	return backupFile(p)
+}
+
+// backupFile renames p to p.corrupt-<timestamp>, never over an existing backup.
+func backupFile(p string) (string, error) {
+	base := p + ".corrupt-" + time.Now().Format("20060102-150405")
+	backup := base
+	for i := 2; ; i++ {
+		if _, err := os.Lstat(backup); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		backup = fmt.Sprintf("%s-%d", base, i)
+	}
 	if err := os.Rename(p, backup); err != nil {
 		return "", err
 	}

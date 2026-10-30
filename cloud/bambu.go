@@ -119,8 +119,16 @@ var (
 	lastCodeAt  time.Time
 	holdUntil   time.Time
 	lastBindAt  time.Time
+	lastUserAt  time.Time
 	bindCache   []Device
 	bindToken   string
+	// bindTry is the token of the latest device-list attempt and bindErr its
+	// failure (nil while in flight or after a success), so a failing call is
+	// held to the same interval as a good one.
+	bindTry string
+	bindErr error
+	// userToken and userName cache the profile lookup for one token.
+	userToken, userName string
 
 	now = time.Now // swapped in tests
 )
@@ -129,8 +137,8 @@ var (
 func ResetPacing() {
 	limitMu.Lock()
 	defer limitMu.Unlock()
-	lastLoginAt, lastCodeAt, holdUntil, lastBindAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}
-	bindCache, bindToken = nil, ""
+	lastLoginAt, lastCodeAt, holdUntil, lastBindAt, lastUserAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}
+	bindCache, bindToken, bindTry, bindErr, userToken, userName = nil, "", "", nil, "", ""
 }
 
 // HoldUntil reports when a Cloudflare hold ends (zero when none is active).
@@ -305,6 +313,16 @@ func (c *Client) username(ctx context.Context, token string) (string, error) {
 			return u, nil
 		}
 	}
+	limitMu.Lock()
+	if userToken == token {
+		u := userName
+		limitMu.Unlock()
+		return u, nil
+	}
+	limitMu.Unlock()
+	if err := takeSlot(&lastUserAt, codeInterval); err != nil {
+		return "", err
+	}
 	status, body, err := c.do(ctx, "GET", "/v1/design-user-service/my/preference", token, nil)
 	if err != nil {
 		return "", err
@@ -321,7 +339,11 @@ func (c *Client) username(ctx context.Context, token string) (string, error) {
 	if err := json.Unmarshal(body, &pref); err != nil || pref.UID.String() == "" {
 		return "", errors.New("profile: Bambu did not return a user id")
 	}
-	return "u_" + pref.UID.String(), nil
+	u := "u_" + pref.UID.String()
+	limitMu.Lock()
+	userToken, userName = token, u
+	limitMu.Unlock()
+	return u, nil
 }
 
 // Devices lists the printers bound to the account. Results are cached for
@@ -334,24 +356,41 @@ func (c *Client) Devices(ctx context.Context, token string, force bool) ([]Devic
 		limitMu.Unlock()
 		return nil, ErrCloudflare
 	}
-	fresh := bindToken == token && !lastBindAt.IsZero() && t.Sub(lastBindAt) < bindInterval
-	if fresh || (!force && bindToken == token && bindCache != nil) {
+	fresh := bindTry == token && !lastBindAt.IsZero() && t.Sub(lastBindAt) < bindInterval
+	if bindToken == token && (fresh || (!force && bindCache != nil)) {
 		out := append([]Device(nil), bindCache...)
 		limitMu.Unlock()
 		return out, nil
 	}
-	lastBindAt = t
-	limitMu.Unlock()
-
-	status, body, err := c.do(ctx, "GET", "/v1/iot-service/api/user/bind", token, nil)
-	if err != nil {
+	if fresh {
+		// The last attempt failed (or is still running): do not ask again yet.
+		err := bindErr
+		limitMu.Unlock()
+		if err == nil {
+			err = ErrRateLimited
+		}
 		return nil, err
 	}
+	lastBindAt, bindTry, bindErr = t, token, nil
+	limitMu.Unlock()
+
+	fail := func(err error) ([]Device, error) {
+		limitMu.Lock()
+		if bindTry == token {
+			bindErr = err
+		}
+		limitMu.Unlock()
+		return nil, err
+	}
+	status, body, err := c.do(ctx, "GET", "/v1/iot-service/api/user/bind", token, nil)
+	if err != nil {
+		return fail(err)
+	}
 	if status == http.StatusUnauthorized {
-		return nil, ErrUnauthorized
+		return fail(ErrUnauthorized)
 	}
 	if status != http.StatusOK {
-		return nil, apiError("device list", status, body)
+		return fail(apiError("device list", status, body))
 	}
 	var resp struct {
 		Devices []struct {
@@ -365,7 +404,7 @@ func (c *Client) Devices(ctx context.Context, token string, force bool) ([]Devic
 		} `json:"devices"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("device list: unexpected reply: %w", err)
+		return fail(fmt.Errorf("device list: unexpected reply: %w", err))
 	}
 	out := make([]Device, 0, len(resp.Devices))
 	for _, d := range resp.Devices {

@@ -3,6 +3,7 @@ package ftps
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -44,14 +45,22 @@ func List(ctx context.Context, cfg Config, dir string) (entries []Entry, err err
 		return nil, err
 	}
 	data.SetReadDeadline(time.Now().Add(cfg.StallTimeout))
-	raw, err := io.ReadAll(io.LimitReader(data, 4<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(data, 4<<20))
 	data.Close()
-	if err != nil {
-		return nil, fmt.Errorf("read listing: %w", err)
+	// Bambu closes the data channel without a TLS close_notify (see ftps.go):
+	// that reads as io.ErrUnexpectedEOF. The listing is whole when the control
+	// channel then confirms it with 226, so only then is it accepted.
+	truncated := errors.Is(readErr, io.ErrUnexpectedEOF)
+	if readErr != nil && !truncated {
+		return nil, fmt.Errorf("read listing: %w", readErr)
 	}
 	// The 226 after the listing; a slow one is not an error, the data is here.
 	c.step = cfg.StepTimeout
-	if code, msg, err := c.reply(); err == nil && code != 226 && code != 250 {
+	code, msg, rerr := c.reply()
+	if truncated && (rerr != nil || (code != 226 && code != 250)) {
+		return nil, fmt.Errorf("read listing: %w", readErr)
+	}
+	if rerr == nil && code != 226 && code != 250 {
 		cfg.Logf("LIST %s ended with %d %q", dir, code, msg)
 	}
 

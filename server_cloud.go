@@ -82,7 +82,7 @@ func cloudAccount() *config.BambuCloud {
 }
 
 // storeCloudSession saves a fresh sign-in and (re)starts the connection.
-func storeCloudSession(sess *cloud.Session) {
+func storeCloudSession(sess *cloud.Session) error {
 	configMutex.Lock()
 	configStore.BambuCloud = &config.BambuCloud{
 		Region:       sess.Region,
@@ -94,11 +94,10 @@ func storeCloudSession(sess *cloud.Session) {
 	}
 	cfg := configStore.Clone()
 	configMutex.Unlock()
-	if err := config.SaveConfig(cfg); err != nil {
-		log.Printf("Warning: failed to save config: %v", err)
-	}
+	saveErr := config.SaveConfig(cfg)
 	log.Printf("[bambu-cloud] linked %s (%s); token valid until %s", sess.Email, sess.Region, time.Unix(sess.ExpiresAt, 0).Format("2006-01-02"))
 	syncCloud(cfg)
+	return saveErr
 }
 
 // expireCloudToken marks the stored token dead after Bambu rejected it, so
@@ -234,7 +233,10 @@ func handleCloudLogin(w http.ResponseWriter, r *http.Request) {
 		writeCloudError(w, err)
 		return
 	}
-	storeCloudSession(sess)
+	if err := storeCloudSession(sess); err != nil {
+		writeSaveFailed(w, err)
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
@@ -260,7 +262,10 @@ func handleCloudVerify(w http.ResponseWriter, r *http.Request) {
 		writeCloudError(w, err)
 		return
 	}
-	storeCloudSession(sess)
+	if err := storeCloudSession(sess); err != nil {
+		writeSaveFailed(w, err)
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
@@ -286,7 +291,10 @@ func handleCloudToken(w http.ResponseWriter, r *http.Request) {
 		writeCloudError(w, err)
 		return
 	}
-	storeCloudSession(sess)
+	if err := storeCloudSession(sess); err != nil {
+		writeSaveFailed(w, err)
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
@@ -299,11 +307,13 @@ func handleCloudUnlink(w http.ResponseWriter, r *http.Request) {
 	configStore.BambuCloud = nil
 	cfg := configStore.Clone()
 	configMutex.Unlock()
-	if err := config.SaveConfig(cfg); err != nil {
-		log.Printf("Warning: failed to save config: %v", err)
-	}
+	saveErr := config.SaveConfig(cfg)
 	syncCloud(cfg)
 	log.Printf("[bambu-cloud] account unlinked")
+	if saveErr != nil {
+		writeSaveFailed(w, saveErr)
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
