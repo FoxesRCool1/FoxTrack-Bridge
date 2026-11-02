@@ -1,6 +1,130 @@
 # Changelog
 
-## Unreleased
+## v2.5.2
+
+The v2.7.0 notes below were never released on their own. Everything in them ships in v2.5.2.
+
+**Printer console: temperatures and home**
+- FoxTrack's opened printer, and the card's new Temps panel, can set the
+  nozzle target (0 to 350 C) and the bed target (0 to 120 C; 0 turns the
+  heater off) and home the axes. Home is refused while a print runs. Bambu Lab in LAN mode (M104 / M140 / G28),
+  Klipper (the same G-code through Moonraker) and OctoPrint (its printer API).
+  PrusaLink has no such call and answers "This printer does not take
+  temperature commands from the Bridge"; Home Assistant stays read-only. A
+  target out of range is refused before anything is sent. The Bridge announces
+  `console` to FoxTrack, which hands these commands only to a Bridge that
+  lists it.
+
+**Files on the printer**
+- FoxTrack's opened printer lists the files already on the printer (name,
+  size, date, newest first, up to 200) and can start one with a Print button.
+  Bambu Lab in LAN mode: the `.3mf` files on the card and in its cache folder,
+  read over FTPS; Klipper: Moonraker's gcodes folder; OctoPrint: its local
+  storage. The list is read only when FoxTrack asks, never in the poll loop.
+  A print is refused while the printer prints or is paused. PrusaLink and
+  Home Assistant printers are not listed. The Bridge announces `files`.
+  A Bambu `.3mf` starts on the plate it was sliced for (read from the file),
+  unless FoxTrack names a `plate`.
+
+**Fixes**
+- Security: the dashboard answers only to a LAN name or address (an IP,
+  localhost, a name with no dot, .local, .lan, .home.arpa, .internal, or this
+  computer's name). A web page can no longer reach it by pointing its own
+  domain at your computer (DNS rebinding). Behind a reverse proxy on a real
+  domain, list that name in `FOXTRACK_BRIDGE_ALLOWED_HOSTS` (comma-separated).
+- Security: the connection check uses a saved access code, API key or token
+  only for the saved printer's own address, so it can no longer be sent to
+  another host.
+- Security: a file name with a line break or a quote is refused, so it can no
+  longer slip a second command to a Bambu printer's FTP server or into a
+  Klipper print command.
+- Security: the OctoPrint API key goes only to OctoPrint itself, never to a
+  webcam on another machine or along a redirect.
+- Security: another web site can no longer start a network scan.
+- Safety: Plug off, auto-off and Home are refused while a Bambu print is
+  starting (PREPARE, SLICING) and whenever the printer's state is unknown. With
+  the printer unreachable, a remembered state older than 2 minutes no longer
+  counts.
+- Console commands run beside the command loop: a Klipper Home no longer holds
+  up pause and stop for the other printers, and a lost reply to FoxTrack no
+  longer runs the command a second time.
+- The connection check no longer blames the serial number when a Bambu printer
+  is only slow to answer.
+- OctoPrint: one slow reply no longer drops the webcam address and model for
+  5 minutes.
+- Smart plug check: the watts read right (it showed 10 W for 100 W).
+- Network scan: a saved OctoPrint printer, or one saved with spaces around its
+  address, shows as added; a Bambu printer found by its certificate gets a
+  name; a printer that moved to a remembered address is no longer hidden.
+- Printer replies are capped at 16 MB.
+- Safety: a smart plug can no longer be switched off, or auto-off, while the
+  Bridge has lost the printer mid-print. With the printer unreachable the
+  Bridge goes by the last state it saw, and refuses if it never saw one.
+- Security: the dashboard API refuses writes a browser sends from another
+  site, so a web page can no longer change the FoxTrack token or clear the
+  printers. Request bodies are capped at 1 MB.
+- A config save that cannot be written to disk now shows an error instead of
+  "saved". An unreadable (not corrupt) config stops the Bridge instead of
+  being moved aside; a corrupt config falls back to an older valid copy.
+- Updates install only when the release's checksums are published, and never
+  inside Docker.
+- Bambu Lab: a target temperature of 0 now shows as 0; a print that ends while
+  the printer is offline is still recorded; partial AMS reports no longer wipe
+  the other trays; no blank status is posted right after a reconnect; error
+  codes no longer flicker; renaming a printer mid-print keeps the print.
+  Listing files works on the A1 and A1 mini.
+- Bambu Cloud: failed device lookups and token sign-ins are paced like the
+  rest, and a cloud printer that moved to a new IP is found again.
+- Klipper: Home no longer reports a failure while the printer homes; lifetime
+  print hours are read from the right Moonraker endpoint; the camera stream is
+  no longer cut every 8 seconds.
+- PrusaLink and OctoPrint: a blank or offline status gets the same grace as a
+  lost connection instead of cancelling the print; OctoPrint keeps the file
+  name and progress on a finished print and lists only printable files.
+- FoxTrack posts: status posts for one printer always arrive in order, and a
+  finished print's history is retried for up to 24 hours.
+- Files and console commands report their result even after a FoxTrack blip.
+- Dashboard: a printer name with "/" or "%" works with every button; a slow
+  status poll can no longer show older data; the Auto-update switch no longer
+  saves half-typed tokens.
+- Virtual printer: read timeouts, upload size and concurrency limits.
+
+## v2.7.0 notes (never released on their own; ship in v2.5.2)
+
+**OctoPrint printers**
+- Printers run by OctoPrint can be added with their address and an API key.
+  The Bridge reports status, progress, temperatures, file name and time left,
+  records finished prints, can pause, resume and stop, and accepts a `.gcode`
+  file sent from FoxTrack (uploaded to OctoPrint and started). The webcam is
+  read from OctoPrint's own settings. The network scan finds OctoPrint on
+  ports 80 and 5000.
+
+**Printer alarms**
+- Every status report now carries the printer's open alarms, and FoxTrack
+  lists them in its Alarms view and rings the bell for serious ones: Bambu HMS
+  codes (formatted as Bambu does, with their severity) and print error codes,
+  Klipper firmware shutdowns and print errors with Klipper's own message,
+  PrusaLink error and attention text, OctoPrint printer errors. The printer
+  card shows them too; a Bambu HMS code links to the Bambu wiki page for it.
+
+**Smart plugs**
+- A printer can be powered through a Shelly, Tasmota or Kasa (older firmware)
+  plug, set on the printer in the Bridge. The card shows on/off and watts, a
+  Plug on / Plug off button (off is refused while printing, paused or hot),
+  and the Bridge can turn the plug off a set number of minutes after a print
+  once the printer is cool. The energy each print used goes to FoxTrack with
+  the print history (Reports, Printer use). FoxTrack's own Turn plug on/off
+  buttons work through the Bridge.
+
+**Virtual printer**
+- Settings, Virtual printer: the Bridge can look like an OctoPrint host to
+  OrcaSlicer and PrusaSlicer (port 8090, its own API key). A file the slicer
+  sends goes to FoxTrack's Printers page, From the slicer, never to a printer.
+  Needs the Bridge connected to FoxTrack.
+
+The Bridge now announces `alarms`, `plug_on` and `plug_off` to FoxTrack, which
+hands plug commands only to a Bridge that lists them. Config changes are
+additive: an existing `config.json` loads unchanged.
 
 **Easier setup**
 - A first-run welcome finds printers on your network; click Add and type the

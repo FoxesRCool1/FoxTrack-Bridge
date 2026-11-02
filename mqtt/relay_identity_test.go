@@ -16,7 +16,7 @@ func TestStampRelayIdentity_LANBambuAnnouncesPrintFile(t *testing.T) {
 	if want := ModelFromSerial("NO-SUCH-PREFIX"); want == "" && pr.PrinterModel != "P1S" {
 		t.Fatalf("model = %q, want the telemetry model when the serial is unknown", pr.PrinterModel)
 	}
-	if strings.Join(pr.BridgeCapabilities, ",") != "print_file,set_filament,filament_use" {
+	if strings.Join(pr.BridgeCapabilities, ",") != "alarms,print_file,set_filament,filament_use,console,files" {
 		t.Fatalf("capabilities = %v", pr.BridgeCapabilities)
 	}
 }
@@ -29,7 +29,7 @@ func TestStampRelayIdentity_CloudPrinterNeverAnnouncesPrintFile(t *testing.T) {
 	}
 	var pr webhook.RelayPrint
 	stampRelayIdentity(&pr, Printer{Serial: "01P00A000000009", Cloud: true}, "")
-	if len(pr.BridgeCapabilities) != 0 {
+	if strings.Join(pr.BridgeCapabilities, ",") != "alarms" {
 		t.Fatalf("capabilities = %v, want none for a cloud printer", pr.BridgeCapabilities)
 	}
 	if err := PrintPreflight(Printer{Name: "cloud-no-session", Serial: "01P00A000000009", Cloud: true}); err != errPrintCloud {

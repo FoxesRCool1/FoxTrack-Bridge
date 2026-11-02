@@ -236,7 +236,7 @@ func TestPrintFile_FetchHeadersAndRunningAckBeforeJob(t *testing.T) {
 	e.mu.Lock()
 	caps, ver := e.getHeader.Get("X-Bridge-Capabilities"), e.getHeader.Get("X-Bridge-Version")
 	e.mu.Unlock()
-	if caps != "print_file,set_filament" || ver == "" {
+	if caps != bridgeCapabilities || ver == "" {
 		t.Fatalf("headers: capabilities %q version %q", caps, ver)
 	}
 	got := strings.Join(e.snapshot(), " | ")
@@ -313,7 +313,7 @@ func TestPrintFile_SizeMismatchFails(t *testing.T) {
 func TestPrintFile_FormatMustMatchPrinterKind(t *testing.T) {
 	cases := []struct{ printer, serialOrName, format, want string }{
 		{"klipper", "Voron", "gcode_3mf", "This file is for a Bambu Lab printer, but Voron is a Klipper printer."},
-		{"bambu", "01P00A000000001", "gcode", "This file is a plain G-code file for a Klipper or PrusaLink printer, but P1S Shelf is a Bambu Lab printer."},
+		{"bambu", "01P00A000000001", "gcode", "This file is a plain G-code file for a Klipper, PrusaLink or OctoPrint printer, but P1S Shelf is a Bambu Lab printer."},
 		{"cloud", "01P00A000000002", "gcode_3mf", errPrintCloud.Error()},
 	}
 	for _, tc := range cases {
@@ -823,5 +823,63 @@ func TestPrintFile_LateRefusalKeepsItsMessage(t *testing.T) {
 				t.Fatalf("events = %v", e.snapshot())
 			}
 		})
+	}
+}
+
+// list_files and print_printer_file are marked seen at once, so a lost ack
+// would never be re-delivered: their ack is retried like print_file's.
+func TestFilesCommand_AckIsRetried(t *testing.T) {
+	e := newPrintEnv(t)
+	e.ackFail["failed"] = 2
+	startFilesCommand("test-key", bridgeCommand{ID: "f1", ExternalID: "Voron", Command: "list_files"})
+	printJobs.wg.Wait()
+	if e.count("ack500:failed") != 2 || e.count("ack:failed") != 1 {
+		t.Fatalf("events = %v", e.snapshot())
+	}
+}
+
+// G28 mid-print crashes the toolhead into the part; temperatures are fine.
+func TestHome_RefusedWhilePrintingButTempsAreNot(t *testing.T) {
+	newPrintEnv(t) // the P1S Shelf printer config
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "printing"})
+	t.Cleanup(func() { mqttpkg.RemovePrinterState("P1S Shelf") })
+	home := bridgeCommand{ID: "h1", ExternalID: "01P00A000000001", Command: "home"}
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("home while printing: err = %v", err)
+	}
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "paused"})
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("home while paused: err = %v", err)
+	}
+	temp := bridgeCommand{ID: "h2", ExternalID: "01P00A000000001", Command: "set_nozzle_temp", Args: map[string]interface{}{"celsius": 200.0}}
+	if err := executeBridgeCommand(temp); errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("a temperature change must not be blocked: %v", err)
+	}
+	// A Bambu print that is starting reports PREPARE: still a print.
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "PREPARE"})
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("home while preparing: err = %v", err)
+	}
+	// Link up, no report yet: unknown, so refused.
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "connected"})
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeUnknown) {
+		t.Fatalf("home with no report: err = %v", err)
+	}
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "idle"})
+	if err := executeBridgeCommand(home); errors.Is(err, errHomeWhilePrinting) || errors.Is(err, errHomeUnknown) {
+		t.Fatalf("home while idle must not be blocked: %v", err)
+	}
+}
+
+// A console command runs off the poll loop and is deduped on its id: the
+// same pending command fetched twice runs and acks once.
+func TestConsoleCommand_RunsOnceAndAcks(t *testing.T) {
+	e := newPrintEnv(t)
+	cmd := bridgeCommand{ID: "c1", ExternalID: "Voron", Command: "set_bed_temp", Args: map[string]interface{}{"celsius": 60.0}}
+	startConsoleCommand("test-key", cmd)
+	startConsoleCommand("test-key", cmd)
+	printJobs.wg.Wait()
+	if e.count("ack:") != 1 {
+		t.Fatalf("events = %v", e.snapshot())
 	}
 }

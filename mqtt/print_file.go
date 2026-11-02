@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -134,7 +135,7 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 	}
 	uploadOnce := func() error { return ftpsUpload(ctx, cfg, localPath, remote) }
 	err = uploadOnce()
-	if err != nil && ctx.Err() == nil && (prefix == "030" || prefix == "039") && !errors.Is(err, ftps.ErrLogin) {
+	if useClearData(ctx, prefix, err) {
 		logf("upload failed (%v); A1 family, retrying once with a clear-text data channel", err)
 		cfg.ClearData = true
 		err = uploadOnce()
@@ -391,11 +392,30 @@ type projectFileCmd struct {
 	AMSMapping2           []amsRef `json:"ams_mapping2,omitempty"`
 }
 
+// useClearData reports whether a failed FTPS call should be retried once with
+// a clear-text data channel: A1 / A1 mini (serial prefix 030, 039) can hang on
+// a TLS one. A refused login or a missing folder would fail again.
+func useClearData(ctx context.Context, prefix string, err error) bool {
+	return err != nil && ctx.Err() == nil && (prefix == "030" || prefix == "039") &&
+		!errors.Is(err, ftps.ErrLogin) && !errors.Is(err, ftps.ErrNotFound)
+}
+
 // printerFileURL is the "url" field. Senders disagree: bambuddy sends
 // ftp://<name> for every model (used here); ha-bambulab sends
 // file:///sdcard/<name> on everything but H2. If a real printer wants the
-// other form, change only this function.
-func printerFileURL(name string) string { return "ftp://" + name }
+// other form, change only this function. A file in a folder gets an empty
+// host (ftp:///cache/x.3mf), or "cache" would read as the host. Each segment
+// is percent-escaped so spaces, # and ? stay in the path.
+func printerFileURL(name string) string {
+	segs := strings.Split(name, "/")
+	for i, s := range segs {
+		segs[i] = strings.ReplaceAll(url.PathEscape(s), ":", "%3A")
+	}
+	if len(segs) > 1 {
+		return "ftp:///" + strings.Join(segs, "/")
+	}
+	return "ftp://" + segs[0]
+}
 
 // buildProjectFile is the pure payload builder.
 func buildProjectFile(in projectFileInput) ([]byte, error) {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log"
 	"mime/multipart"
@@ -71,8 +72,11 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	logf := func(format string, a ...any) {
 		log.Printf("[%s] print_file: %s", name, fmt.Sprintf(format, a...))
 	}
-	if p.Kind() == configpkg.KindPrusaLink {
+	switch p.Kind() {
+	case configpkg.KindPrusaLink:
 		return prusaLinkUpload(ctx, p, localPath, remoteName, logf)
+	case configpkg.KindOctoPrint:
+		return octoPrintUpload(ctx, p, localPath, remoteName, logf)
 	}
 	target := moonrakerURL(p, "/server/files/upload")
 	if target == "" {
@@ -218,8 +222,11 @@ func SanitizeRemoteName(name string) string {
 		}
 	}
 	s := b.String()
+	// Nothing usable survived (a name in another script): a name made from the
+	// original, so two such files do not overwrite each other on the printer.
+	fallback := fmt.Sprintf("print-%08x.gcode", crc32.ChecksumIEEE([]byte(name)))
 	if strings.HasPrefix(s, ".") && strings.EqualFold(strings.TrimLeft(s, "."), "gcode") {
-		return "print.gcode" // nothing but the extension survived
+		return fallback
 	}
 	s = strings.TrimLeft(s, ".")
 	if !strings.HasSuffix(strings.ToLower(s), ".gcode") {
@@ -229,7 +236,7 @@ func SanitizeRemoteName(name string) string {
 		s = s[:120-len(".gcode")] + ".gcode"
 	}
 	if s == ".gcode" {
-		s = "print.gcode"
+		s = fallback
 	}
 	return s
 }

@@ -118,13 +118,32 @@ func TestMarkAdded(t *testing.T) {
 	}
 }
 
+func TestMarkAdded_OctoPrintURLAndTrimmedIP(t *testing.T) {
+	found := []discoveredPrinter{
+		{Type: "octoprint", IP: "192.168.1.50"},
+		{Type: "klipper", IP: "192.168.1.9"},
+		{Type: "octoprint", IP: "192.168.1.51"},
+	}
+	saved := []config.Printer{
+		{Name: "octo", OctoPrintURL: "http://192.168.1.50:5000"},
+		{Name: "klippy", IP: " 192.168.1.9 "},
+	}
+	markAdded(found, saved)
+	want := []bool{true, true, false}
+	for i, p := range found {
+		if p.Added != want[i] {
+			t.Errorf("%s %s: added = %v, want %v", p.Type, p.IP, p.Added, want[i])
+		}
+	}
+}
+
 func TestDedupeSort(t *testing.T) {
 	got := dedupeSort([]discoveredPrinter{
 		{Type: "prusalink", IP: "192.168.1.70"},
 		{Type: "klipper", IP: "192.168.1.100"},
 		{Type: "klipper", IP: "192.168.1.60"},
 		{Type: "bambu", IP: "192.168.1.42", Serial: "S1", Name: "first"},
-		{Type: "bambu", IP: "192.168.1.42", Serial: "S1", Name: "same ip"},
+		{Type: "bambu", IP: "192.168.1.44", Serial: "S2", Name: "distinct"},
 		{Type: "bambu", IP: "192.168.1.43", Serial: "s1", Name: "same serial"},
 		{Type: "klipper", IP: "192.168.1.60"},
 	})
@@ -132,7 +151,7 @@ func TestDedupeSort(t *testing.T) {
 	for _, p := range got {
 		keys = append(keys, p.Type+" "+p.IP)
 	}
-	want := "bambu 192.168.1.42,klipper 192.168.1.60,klipper 192.168.1.100,prusalink 192.168.1.70"
+	want := "bambu 192.168.1.42,bambu 192.168.1.44,klipper 192.168.1.60,klipper 192.168.1.100,prusalink 192.168.1.70"
 	if strings.Join(keys, ",") != want {
 		t.Errorf("got %s, want %s", strings.Join(keys, ","), want)
 	}
@@ -141,6 +160,18 @@ func TestDedupeSort(t *testing.T) {
 	}
 	if empty := dedupeSort(nil); empty == nil {
 		t.Error("dedupeSort(nil) = nil, want an empty slice")
+	}
+}
+
+func TestDedupeSort_LiveEntryBeatsRemembered(t *testing.T) {
+	// The input order is remembered sightings first, then this scan's finds: a
+	// live printer that took a remembered printer's IP must win the dedupe.
+	got := dedupeSort([]discoveredPrinter{
+		{Type: "bambu", IP: "192.168.1.42", Serial: "OLD", Name: "old"},
+		{Type: "bambu", IP: "192.168.1.42", Serial: "NEW", Name: "live"},
+	})
+	if len(got) != 1 || got[0].Serial != "NEW" || got[0].Name != "live" {
+		t.Errorf("got %+v, want the live entry", got)
 	}
 }
 

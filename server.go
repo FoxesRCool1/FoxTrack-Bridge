@@ -77,6 +77,10 @@ func StartServer(port int) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			log.Printf("No config found; starting fresh")
+		} else if !errors.Is(err, config.ErrCorrupt) {
+			// Unreadable, not unparseable (permissions, a directory in the
+			// way): the file may be fine, so leave it alone and stop.
+			log.Fatalf("ERROR: the config file could not be read (%v); refusing to start with an empty config; fix the file's permissions and start the Bridge again", err)
 		} else {
 			// The file exists but failed to load. Never start with an empty
 			// config in that case, because a later save would overwrite the user's
@@ -102,6 +106,7 @@ func StartServer(port int) {
 	serverPort = port
 
 	mqttpkg.OnCloudAuthFailed = expireCloudToken
+	wirePlugs()
 	syncPrinterConnections(nil, cfg)
 
 	// Units shipped before v2.3.1 used Restart=on-failure, so the clean exit an
@@ -135,20 +140,22 @@ func StartServer(port int) {
 	http.HandleFunc("/api/update/install", handleUpdateInstall)
 	http.HandleFunc("/api/update/restart", handleUpdateRestart)
 	http.HandleFunc("/api/test", handleTest)
-	http.HandleFunc("/api/control/", handleControl)          // /api/control/{name}/{command}
-	http.HandleFunc("/api/camera/", handleCamera)            // /api/camera/{name}
-	http.HandleFunc("/api/logs", handleLogs)                 // GET: SSE log stream
-	http.HandleFunc("/api/history", handleHistory)           // GET all history records
-	http.HandleFunc("/api/history/", handleHistoryByPrinter) // GET /api/history/{name}
-	http.HandleFunc("/api/cloud/", handleCloud)              // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
-	http.HandleFunc("/api/ai/settings", handleAISettings)    // GET/POST: assistant provider settings
-	http.HandleFunc("/api/ai/models", handleAIModels)        // POST: list a provider's models
-	http.HandleFunc("/api/ai/chat", handleAIChat)            // POST: answer one message
-	http.HandleFunc("/api/discover", handleDiscover)         // GET: find printers on the local network
-	http.HandleFunc("/api/network", handleNetwork)           // GET: this computer's dashboard URLs
+	http.HandleFunc("/api/control/", handleControl)               // /api/control/{name}/{command}
+	http.HandleFunc("/api/camera/", handleCamera)                 // /api/camera/{name}
+	http.HandleFunc("/api/logs", handleLogs)                      // GET: SSE log stream
+	http.HandleFunc("/api/history", handleHistory)                // GET all history records
+	http.HandleFunc("/api/history/", handleHistoryByPrinter)      // GET /api/history/{name}
+	http.HandleFunc("/api/cloud/", handleCloud)                   // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
+	http.HandleFunc("/api/ai/settings", handleAISettings)         // GET/POST: assistant provider settings
+	http.HandleFunc("/api/ai/models", handleAIModels)             // POST: list a provider's models
+	http.HandleFunc("/api/ai/chat", handleAIChat)                 // POST: answer one message
+	http.HandleFunc("/api/discover", handleDiscover)              // GET: find printers on the local network
+	http.HandleFunc("/api/network", handleNetwork)                // GET: this computer's dashboard URLs
+	http.HandleFunc("/api/plug/test", handlePlugTest)             // POST: read a smart plug once
+	http.HandleFunc("/api/virtual-printer", handleVirtualPrinter) // GET: virtual printer address and key
 
 	printStartupBanner(port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), guardWrites(http.DefaultServeMux)); err != nil {
 		log.Printf("Server error: %v", err)
 	}
 }
@@ -276,6 +283,115 @@ func isFoxTrackWebOrigin(origin string) bool {
 	}
 	host := u.Hostname()
 	return u.Scheme == "http" && (host == "localhost" || host == "127.0.0.1" || host == "::1")
+}
+
+// writeSaveFailed answers a change that took effect in memory but could not
+// be written to the config file, so the dashboard doesn't show it as saved.
+func writeSaveFailed(w http.ResponseWriter, err error) {
+	log.Printf("ERROR: failed to save config: %v", err)
+	http.Error(w, "The change is active, but the config file could not be written ("+err.Error()+"). It will be lost when the Bridge restarts.", http.StatusInternalServerError)
+}
+
+// maxRequestBody caps every request body. Nothing the dashboard or FoxTrack
+// sends comes close; the cap only stops a client from exhausting memory.
+const maxRequestBody = 1 << 20
+
+// guardWrites refuses state-changing requests a browser sends from another
+// site. The API has no auth of its own, so without this any page the user
+// visits could POST a text/plain body (no CORS preflight) to /api/config and
+// swap the FoxTrack token or clear the printers. Browsers always send Origin
+// on a cross-origin POST, PUT, PATCH or DELETE; scripts and curl send none and
+// are let through, as before. The FoxTrack web app may reach the control and
+// camera endpoints only (see foxtrackWebOrigins).
+func guardWrites(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		}
+		if !hostAllowed(r.Host) {
+			http.Error(w, "unknown host name; set FOXTRACK_BRIDGE_ALLOWED_HOSTS to allow it", http.StatusForbidden)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			// A scan floods the network, so another site may not start one
+			// with an <img> tag.
+			if r.URL.Path == "/api/discover" && !writeAllowed(r) {
+				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !writeAllowed(r) {
+			http.Error(w, "cross-site request refused", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeAllowed decides for a state-changing request. Sec-Fetch-Site is the
+// browser's own verdict and still holds behind a reverse proxy that rewrites
+// Host; Origin against Host covers browsers that don't send it.
+func writeAllowed(r *http.Request) bool {
+	site := r.Header.Get("Sec-Fetch-Site")
+	origin := r.Header.Get("Origin")
+	switch {
+	case site == "same-origin" || site == "none":
+		return true
+	case site == "" && origin == "":
+		return true // not a browser
+	case origin != "" && sameOrigin(origin, r.Host):
+		return true
+	}
+	return isFoxTrackWebOrigin(origin) &&
+		(strings.HasPrefix(r.URL.Path, "/api/control/") || strings.HasPrefix(r.URL.Path, "/api/camera/"))
+}
+
+// hostAllowed blocks DNS rebinding: a public site whose name was re-pointed
+// at this computer sends its own name as Host, and the browser then treats
+// the dashboard as that site (same-origin), so the write guard would pass.
+// Allowed: IP addresses, localhost, a name with no dot, the LAN-only suffixes
+// (.local, .lan, .home.arpa, .internal, .localhost), this computer's name, and
+// any name in FOXTRACK_BRIDGE_ALLOWED_HOSTS (comma-separated, for a reverse
+// proxy on a real domain). Public names cannot end in those suffixes.
+func hostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "" || net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+		return true
+	}
+	for _, suffix := range []string{".local", ".lan", ".home.arpa", ".internal", ".localhost"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	if name, err := os.Hostname(); err == nil && strings.EqualFold(host, name) {
+		return true
+	}
+	for _, h := range strings.Split(os.Getenv("FOXTRACK_BRIDGE_ALLOWED_HOSTS"), ",") {
+		if h = strings.TrimSpace(h); h != "" && strings.EqualFold(host, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameOrigin reports whether a browser Origin header names this server.
+func sameOrigin(origin, host string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && strings.EqualFold(u.Host, host)
+}
+
+// pathTail returns the request path after prefix, still percent-encoded, so a
+// printer name holding "/" or "%" survives intact until the caller unescapes
+// it once.
+func pathTail(r *http.Request, prefix string) string {
+	return strings.TrimPrefix(r.URL.EscapedPath(), prefix)
 }
 
 // allowWebOrigin echoes an allowed Origin back as CORS headers. Chrome's
@@ -536,7 +652,7 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse /api/control/{name}/{command}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/control/"), "/")
+	parts := strings.Split(pathTail(r, "/api/control/"), "/")
 	if len(parts) != 2 {
 		http.Error(w, "usage: /api/control/{printer_name}/{command}", http.StatusBadRequest)
 		return
@@ -559,7 +675,18 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if printerIsBambu(printerName) {
+	if err := refuseHomeMidPrint(printerName, command); err != nil {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if isPlugCommand(command) {
+		if err := runPlugCommand(printerName, command); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	} else if printerIsBambu(printerName) {
 		if err := mqttpkg.SendCommandWithArgs(printerName, command, args); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -585,7 +712,7 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	printerName := strings.TrimPrefix(r.URL.Path, "/api/camera/")
+	printerName := pathTail(r, "/api/camera/")
 	printerName = strings.TrimSuffix(printerName, "/")
 	if decodedName, err := url.PathUnescape(printerName); err == nil {
 		printerName = decodedName
@@ -777,6 +904,9 @@ type redactedPrinter struct {
 	HABedEntity           string `json:"ha_bed_entity,omitempty"`
 	HAFileEntity          string `json:"ha_file_entity,omitempty"`
 	HARemainingEntity     string `json:"ha_remaining_entity,omitempty"`
+	OctoPrintURL          string `json:"octoprint_url,omitempty"`
+	// Plug has no secret: the dashboard gets it as stored.
+	Plug *config.Plug `json:"plug,omitempty"`
 }
 
 // redactedConfig mirrors config.Config with the FoxTrack cloud tokens blanked
@@ -790,6 +920,9 @@ type redactedConfig struct {
 	AutoUpdate         bool              `json:"auto_update,omitempty"`
 	BambuCloud         *redactedCloud    `json:"bambu_cloud,omitempty"`
 	AI                 *redactedAI       `json:"ai,omitempty"`
+	// VirtualPrinter is shown as stored: the key is what the user types into
+	// the slicer, so the dashboard has to be able to show it.
+	VirtualPrinter *config.VirtualPrinter `json:"virtual_printer,omitempty"`
 }
 
 // redactedAI mirrors config.AI without the provider key, the same way
@@ -851,6 +984,8 @@ func redactPrinter(p config.Printer) redactedPrinter {
 		HABedEntity:           p.HABedEntity,
 		HAFileEntity:          p.HAFileEntity,
 		HARemainingEntity:     p.HARemainingEntity,
+		OctoPrintURL:          p.OctoPrintURL,
+		Plug:                  p.Plug,
 	}
 }
 
@@ -988,6 +1123,7 @@ func redactConfig(cfg *config.Config) redactedConfig {
 		out.BambuCloud = &redactedCloud{Linked: true, Email: bc.Email, Region: bc.Region, TokenExpiresAt: bc.ExpiresAt}
 	}
 	out.AI = redactAI(cfg.AI)
+	out.VirtualPrinter = cfg.VirtualPrinter
 	return out
 }
 
@@ -1033,6 +1169,7 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 	}
 	for i := range newCfg.Printers {
 		p := &newCfg.Printers[i]
+		p.Plug = normalizePlug(p.Plug)
 		prev, ok := config.Printer{}, false
 		if p.ID != "" {
 			prev, ok = oldByID[p.ID]
@@ -1091,7 +1228,9 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 	_ = json.Unmarshal(body, &meta) // best-effort; defaults to false
 
 	_, printersPresent := raw["printers"]
+	_, virtualPresent := raw["virtual_printer"]
 	newCfg := incoming
+	mergeVirtualPrinter(&newCfg, old, virtualPresent)
 	// Every top-level setting is partial: a body that omits a key leaves the
 	// stored value alone. Blank secrets are handled by applyStoredSecrets below;
 	// auto_update is a bool, so "absent" is the only way to say "leave it", and
@@ -1158,11 +1297,13 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		snapshot := newCfg.Clone()
 		configMutex.Unlock()
 		syncPrinterConnections(oldCfg, snapshot)
-		if err := config.SaveConfig(snapshot); err != nil {
-			log.Printf("Warning: failed to save config: %v", err)
-		}
+		saveErr := config.SaveConfig(snapshot)
 		if oldCfg == nil || oldCfg.FoxTrack2APIKey != snapshot.FoxTrack2APIKey {
 			wakeBridgeCommands()
+		}
+		if saveErr != nil {
+			writeSaveFailed(w, saveErr)
+			return
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
@@ -1206,6 +1347,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		// Trim on create only: an existing printer's name is its lookup key and
 		// is never rewritten behind the user's back.
 		p.Name = strings.TrimSpace(p.Name)
+		p.Plug = normalizePlug(p.Plug)
 		if p.Name == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": errBlankPrinterName.Error()})
@@ -1232,9 +1374,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		cfg := configStore.Clone()
 		configMutex.Unlock()
 
-		if err := config.SaveConfig(cfg); err != nil {
-			log.Printf("Warning: failed to save config: %v", err)
-		}
+		saveErr := config.SaveConfig(cfg)
 		if p.IsCloud() {
 			syncCloud(cfg)
 		} else if isBambuPrinterConfig(p) {
@@ -1242,6 +1382,11 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		} else {
 			lanCtrl.AddOrUpdatePrinter(p, cfg.APIKey, cfg.FoxTrack2APIKey)
 			log.Printf("[%s] connected via %s", p.Name, p.Kind())
+		}
+		plugs.Sync(cfg.Printers)
+		if saveErr != nil {
+			writeSaveFailed(w, saveErr)
+			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "printer": redactPrinter(p)})
 	default:
@@ -1361,19 +1506,24 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 	configStore.Printers = printers
 	cfg := configStore.Clone()
 	configMutex.Unlock()
-	if err := config.SaveConfig(cfg); err != nil {
-		log.Printf("Warning: failed to save config: %v", err)
-	}
+	saveErr := config.SaveConfig(cfg)
 	// Stop whichever connection type each removed printer had. Both calls
 	// are no-ops for names they don't manage, so no need to know which type
 	// it was.
+	// syncCloud goes first: a cloud message arriving after RemovePrinterState
+	// but before the unsubscribe would recreate the removed printer's state.
+	if len(removedNames) > 0 {
+		syncCloud(cfg) // unsubscribes a removed cloud printer without reconnecting
+	}
 	for _, name := range removedNames {
 		mqttpkg.DisconnectPrinter(name)
 		mqttpkg.RemovePrinterState(name)
 		lanCtrl.RemovePrinter(name)
 	}
-	if len(removedNames) > 0 {
-		syncCloud(cfg) // unsubscribes a removed cloud printer without reconnecting
+	plugs.Sync(cfg.Printers)
+	if saveErr != nil {
+		writeSaveFailed(w, saveErr)
+		return
 	}
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -1391,14 +1541,17 @@ type printerEdit struct {
 	WebcamURL    *string `json:"webcam_url"`
 
 	PrusaLinkURL       *string `json:"prusalink_url"`
+	OctoPrintURL       *string `json:"octoprint_url"`
 	HomeAssistantURL   *string `json:"home_assistant_url"`
 	HomeAssistantToken *string `json:"home_assistant_token"`
-	HAStateEntity      *string `json:"ha_state_entity"`
-	HAProgressEntity   *string `json:"ha_progress_entity"`
-	HANozzleEntity     *string `json:"ha_nozzle_entity"`
-	HABedEntity        *string `json:"ha_bed_entity"`
-	HAFileEntity       *string `json:"ha_file_entity"`
-	HARemainingEntity  *string `json:"ha_remaining_entity"`
+	// Plug replaces the printer's plug when present; {"kind": ""} removes it.
+	Plug              *config.Plug `json:"plug"`
+	HAStateEntity     *string      `json:"ha_state_entity"`
+	HAProgressEntity  *string      `json:"ha_progress_entity"`
+	HANozzleEntity    *string      `json:"ha_nozzle_entity"`
+	HABedEntity       *string      `json:"ha_bed_entity"`
+	HAFileEntity      *string      `json:"ha_file_entity"`
+	HARemainingEntity *string      `json:"ha_remaining_entity"`
 }
 
 var errPrinterNotFound = errors.New("printer not found")
@@ -1468,6 +1621,10 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 			p.Name = name
 		}
 	}
+	if edit.Plug != nil {
+		g := *edit.Plug
+		p.Plug = normalizePlug(&g)
+	}
 
 	switch {
 	case p.IsCloud():
@@ -1501,6 +1658,20 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 				return nil, -1, err
 			}
 			p.PrusaLinkURL = v
+		}
+		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
+			p.APIKey = strings.TrimSpace(*edit.APIKey)
+		}
+		if edit.WebcamURL != nil {
+			p.WebcamURL = strings.TrimSpace(*edit.WebcamURL)
+		}
+	case p.Kind() == config.KindOctoPrint:
+		if edit.OctoPrintURL != nil {
+			v, err := required(edit.OctoPrintURL, "OctoPrint URL")
+			if err != nil {
+				return nil, -1, err
+			}
+			p.OctoPrintURL = v
 		}
 		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
 			p.APIKey = strings.TrimSpace(*edit.APIKey)
@@ -1624,10 +1795,13 @@ func handleEditPrinter(w http.ResponseWriter, r *http.Request, token string) {
 	configMutex.Unlock()
 
 	after := snapshot.Printers[idx]
-	if err := config.SaveConfig(snapshot); err != nil {
-		log.Printf("Warning: failed to save config: %v", err)
-	}
+	saveErr := config.SaveConfig(snapshot)
 	reconnectEditedPrinter(before, after, snapshot)
+	plugs.Sync(snapshot.Printers)
+	if saveErr != nil {
+		writeSaveFailed(w, saveErr)
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "printer": redactPrinter(after)})
 }
 
@@ -1640,10 +1814,15 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 	switch {
 	case after.IsCloud():
 		if renamed {
-			mqttpkg.RemovePrinterState(before.Name)
+			mqttpkg.RenameSession(before.Name, after.Name)
 		}
+		// syncCloud before the removal: it carries the live state over to the
+		// new name and unsubscribes the old one.
 		if renamed || before.IP != after.IP {
 			syncCloud(cfg)
+		}
+		if renamed {
+			mqttpkg.RemovePrinterState(before.Name)
 		}
 	case isBambuPrinterConfig(after):
 		if !renamed && mqttPrinter(before, cfg) == mqttPrinter(after, cfg) {
@@ -1652,6 +1831,7 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 		log.Printf("[%s] printer edited; restarting MQTT connection", after.Name)
 		mqttpkg.DisconnectPrinter(before.Name)
 		if renamed {
+			mqttpkg.RenameSession(before.Name, after.Name)
 			mqttpkg.RemovePrinterState(before.Name)
 		}
 		mqttpkg.ConnectPrinter(mqttPrinter(after, cfg))
@@ -1660,6 +1840,7 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 			return
 		}
 		if renamed {
+			lanCtrl.RenamePrinter(before.Name, after.Name) // a print in progress keeps its session
 			lanCtrl.RemovePrinter(before.Name)
 		}
 		lanCtrl.AddOrUpdatePrinter(after, cfg.APIKey, cfg.FoxTrack2APIKey)
@@ -1669,10 +1850,10 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 
 // httpConnFields lists what an HTTP printer's poll loop reads from its config,
 // so an edit that changes none of them leaves the loop running.
-func httpConnFields(p config.Printer) [12]string {
+func httpConnFields(p config.Printer) [13]string {
 	return [...]string{p.MoonrakerURL, p.APIKey, p.WebcamURL, p.PrusaLinkURL,
 		p.HomeAssistantURL, p.HomeAssistantToken, p.HAStateEntity, p.HAProgressEntity,
-		p.HANozzleEntity, p.HABedEntity, p.HAFileEntity, p.HARemainingEntity}
+		p.HANozzleEntity, p.HABedEntity, p.HAFileEntity, p.HARemainingEntity, p.OctoPrintURL}
 }
 
 // printerHistory returns the local print history for the printer named name,
@@ -1740,6 +1921,8 @@ func syncPrinterConnections(oldCfg, cfg *config.Config) {
 
 	lanCtrl.SyncPrinters(cfg.Printers, cfg.APIKey, cfg.FoxTrack2APIKey)
 	syncCloud(cfg)
+	plugs.Sync(cfg.Printers)
+	syncVirtualPrinter(cfg)
 }
 
 func printerIsBambu(name string) bool {
@@ -1783,7 +1966,7 @@ func handleHistoryByPrinter(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	name := strings.TrimPrefix(r.URL.Path, "/api/history/")
+	name := pathTail(r, "/api/history/")
 	name = strings.TrimSuffix(name, "/")
 	if decoded, err := url.PathUnescape(name); err == nil {
 		name = decoded
@@ -1806,7 +1989,7 @@ func isBambuPrinterConfig(p config.Printer) bool {
 		return false
 	}
 	if p.Kind() != config.KindBambu {
-		return false // a Moonraker, PrusaLink or Home Assistant address decides the kind
+		return false // a Moonraker, PrusaLink, OctoPrint or Home Assistant address decides the kind
 	}
 	if p.IsCloud() {
 		return true // the cloud reports the LAN code; its absence only disables the camera

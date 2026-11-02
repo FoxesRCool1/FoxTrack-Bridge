@@ -4,9 +4,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/eclipse/paho.mqtt.golang/packets"
 )
 
@@ -121,4 +123,86 @@ func TestCloudClientID_StableAndSane(t *testing.T) {
 	if newCloudClientID() == cloudClientID {
 		t.Error("a fresh id should differ; the process-wide one must stay fixed")
 	}
+}
+
+// fakeCloudClient records publishes; embedding the interface leaves every
+// other method nil, which these tests never reach.
+type fakeCloudClient struct {
+	mqtt.Client
+	published int
+}
+
+func (f *fakeCloudClient) Publish(string, byte, bool, interface{}) mqtt.Token {
+	f.published++
+	return nil
+}
+
+func TestCloudRename_KeepsStateAndAsksForDump(t *testing.T) {
+	fake := &fakeCloudClient{}
+	r := newCloudRunner(CloudSession{}, []Printer{{Name: "Old", Serial: "S9"}}, nil)
+	r.client = fake
+	UpdatePrinterState("Old", TelemetryData{Status: "printing", Progress: 42})
+	t.Cleanup(func() {
+		RemovePrinterState("Old")
+		RemovePrinterState("New")
+		clientMutex.Lock()
+		delete(printerClients, "New")
+		clientMutex.Unlock()
+	})
+	r.setPrinters([]Printer{{Name: "New", Serial: "S9"}}, nil)
+	if s := GetPrinterState("New"); s.Status != "printing" || s.Progress != 42 {
+		t.Errorf("renamed printer state = %+v, want the previous state carried over", s)
+	}
+	if _, ghost := GetPrintersState()["Old"]; ghost {
+		t.Error("the old name must not keep a state entry after a rename")
+	}
+	if fake.published != 1 {
+		t.Errorf("pushall publishes = %d, want 1", fake.published)
+	}
+}
+
+func TestCloudStop_DoesNotWaitOutConnect(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0") // accepts, never answers the CONNECT
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	r := newCloudRunner(CloudSession{Broker: "tcp://" + ln.Addr().String()}, nil, nil)
+	go r.loop()
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	stopCloudRunner(r)
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("stop took %v, want it to abort the connect wait promptly", d)
+	}
+}
+
+func TestCloudRetry_StaleSignalIsDropped(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() // nothing listens: the connect is refused at once
+	r := newCloudRunner(CloudSession{Broker: "tcp://" + addr}, nil, nil)
+	r.retry <- struct{}{} // left over from a retry that raced the backoff timer
+	go r.loop()
+	defer stopCloudRunner(r)
+	deadline := time.Now().Add(3 * time.Second)
+	for cloudStatusOf(r).State != CloudStateBackoff {
+		if time.Now().After(deadline) {
+			t.Fatal("never reached backoff")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if st := cloudStatusOf(r); st.State != CloudStateBackoff || st.Failures != 1 {
+		t.Errorf("status = %+v: the stale retry skipped the backoff wait", st)
+	}
+}
+
+func cloudStatusOf(r *cloudRunner) CloudStatus {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.status
 }

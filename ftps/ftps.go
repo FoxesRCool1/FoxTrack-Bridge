@@ -36,6 +36,10 @@ import (
 // ErrLogin means the printer refused the user name or access code.
 var ErrLogin = errors.New("ftps login refused")
 
+// ErrNotFound means the printer has no such directory or file (550 to LIST
+// or RETR).
+var ErrNotFound = errors.New("ftps: no such directory or file")
+
 // ErrStalled means the upload made no progress for Config.StallTimeout.
 var ErrStalled = errors.New("ftps upload stalled")
 
@@ -100,107 +104,22 @@ func Upload(ctx context.Context, cfg Config, localPath, remoteName string) (err 
 		}
 	}()
 
-	// One config for control and data. ServerName must be non-empty and equal
-	// on both: it is the session cache key (else ip:port, which differs).
-	tlsCfg := &tls.Config{
-		InsecureSkipVerify: true, // printers use a self-signed certificate
-		MinVersion:         tls.VersionTLS12,
-		MaxVersion:         tls.VersionTLS12,
-		ServerName:         cfg.Host,
-		ClientSessionCache: tls.NewLRUClientSessionCache(8),
-	}
-	if tlsCfg.ServerName == "" {
-		tlsCfg.ServerName = "printer"
-	}
-
-	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	raw, err := dialTCP(ctx, addr, cfg.StepTimeout)
+	c, tlsCfg, err := openControl(ctx, cfg, &conns)
 	if err != nil {
-		return fmt.Errorf("connect: %w", err)
-	}
-	if err := conns.add(raw); err != nil {
 		return err
 	}
-	ctl := tls.Client(raw, tlsCfg)
-	if err := conns.add(ctl); err != nil {
-		return err
-	}
-	if err := handshake(ctx, ctl, cfg.StepTimeout); err != nil {
-		return fmt.Errorf("tls handshake: %w", err)
-	}
-	c := &control{conn: ctl, tp: textproto.NewConn(ctl), step: cfg.StepTimeout}
-	defer func() { // best effort; the reply is not read
-		c.step = 2 * time.Second
-		c.send("QUIT")
-	}()
-
-	if code, msg, err := c.reply(); err != nil || code != 220 {
-		return replyErr("greeting", code, msg, err)
-	}
-	code, msg, err := c.cmd("USER %s", cfg.User)
-	if err != nil || (code != 331 && code != 230) {
-		return replyErr("USER", code, msg, err)
-	}
-	if code == 331 {
-		code, msg, err = c.cmd("PASS %s", cfg.Password)
-		if err != nil {
-			return replyErr("PASS", code, msg, err)
-		}
-		if code == 530 || code == 430 {
-			return fmt.Errorf("%w: %d %s", ErrLogin, code, msg)
-		}
-		if code != 230 {
-			return replyErr("PASS", code, msg, nil)
-		}
-	}
-	for _, step := range []struct{ cmd string }{{"PBSZ 0"}, {"PROT " + map[bool]string{true: "C", false: "P"}[cfg.ClearData]}, {"TYPE I"}} {
-		if code, msg, err := c.cmd("%s", step.cmd); err != nil || code != 200 {
-			return replyErr(step.cmd, code, msg, err)
-		}
-	}
+	defer c.quit()
 
 	// Delete first: the printer refuses STOR over an existing file (553), and
 	// Bridge always uploads under the same name. 550 = there was none.
-	code, msg, err = c.cmd("DELE %s", remoteName)
+	code, msg, err := c.cmd("DELE %s", remoteName)
 	if err != nil || (code != 250 && code != 550) {
 		return replyErr("DELE", code, msg, err)
 	}
 
-	// PASV: use only the port. Printers behind NAT or with odd addresses
-	// report a wrong host; Python's ftplib connects to the control host too.
-	code, msg, err = c.cmd("PASV")
-	if err != nil || code != 227 {
-		return replyErr("PASV", code, msg, err)
-	}
-	port, err := parsePASVPort(msg)
+	data, err := openData(ctx, cfg, c, &conns, tlsCfg, "STOR "+remoteName)
 	if err != nil {
-		return fmt.Errorf("PASV reply %q: %w", msg, err)
-	}
-	dataRaw, err := dialTCP(ctx, net.JoinHostPort(cfg.Host, strconv.Itoa(port)), cfg.StepTimeout)
-	if err != nil {
-		return fmt.Errorf("data connect: %w", err)
-	}
-	if err := conns.add(dataRaw); err != nil {
 		return err
-	}
-
-	// STOR first, then the data channel's TLS handshake (as ftplib does):
-	// the server starts its handshake only after the 150.
-	code, msg, err = c.cmd("STOR %s", remoteName)
-	if err != nil || (code != 150 && code != 125) {
-		return replyErr("STOR", code, msg, err)
-	}
-	var data net.Conn = dataRaw
-	if !cfg.ClearData {
-		dt := tls.Client(dataRaw, tlsCfg)
-		if err := conns.add(dt); err != nil {
-			return err
-		}
-		if err := handshake(ctx, dt, cfg.StepTimeout); err != nil {
-			return fmt.Errorf("data tls handshake: %w", err)
-		}
-		cfg.Logf("data connection resumed the control TLS session: %v", dt.ConnectionState().DidResume)
-		data = dt
 	}
 
 	start := time.Now()
@@ -234,8 +153,115 @@ func Upload(ctx context.Context, cfg Config, localPath, remoteName string) (err 
 	return nil
 }
 
-// QUIT is best effort only: closing the connections ends the session, and some
-// printers answer slowly although the file is already stored.
+// openControl dials the control connection, logs in and sets PBSZ, PROT and
+// TYPE I. Shared by Upload and List.
+func openControl(ctx context.Context, cfg Config, conns *connSet) (*control, *tls.Config, error) {
+	// One config for control and data. ServerName must be non-empty and equal
+	// on both: it is the session cache key (else ip:port, which differs).
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: true, // printers use a self-signed certificate
+		MinVersion:         tls.VersionTLS12,
+		MaxVersion:         tls.VersionTLS12,
+		ServerName:         cfg.Host,
+		ClientSessionCache: tls.NewLRUClientSessionCache(8),
+	}
+	if tlsCfg.ServerName == "" {
+		tlsCfg.ServerName = "printer"
+	}
+
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+	raw, err := dialTCP(ctx, addr, cfg.StepTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect: %w", err)
+	}
+	if err := conns.add(raw); err != nil {
+		return nil, nil, err
+	}
+	ctl := tls.Client(raw, tlsCfg)
+	if err := conns.add(ctl); err != nil {
+		return nil, nil, err
+	}
+	if err := handshake(ctx, ctl, cfg.StepTimeout); err != nil {
+		return nil, nil, fmt.Errorf("tls handshake: %w", err)
+	}
+	c := &control{conn: ctl, tp: textproto.NewConn(ctl), step: cfg.StepTimeout}
+
+	if code, msg, err := c.reply(); err != nil || code != 220 {
+		return nil, nil, replyErr("greeting", code, msg, err)
+	}
+	code, msg, err := c.cmd("USER %s", cfg.User)
+	if err != nil || (code != 331 && code != 230) {
+		return nil, nil, replyErr("USER", code, msg, err)
+	}
+	if code == 331 {
+		code, msg, err = c.cmd("PASS %s", cfg.Password)
+		if err != nil {
+			return nil, nil, replyErr("PASS", code, msg, err)
+		}
+		if code == 530 || code == 430 {
+			return nil, nil, fmt.Errorf("%w: %d %s", ErrLogin, code, msg)
+		}
+		if code != 230 {
+			return nil, nil, replyErr("PASS", code, msg, nil)
+		}
+	}
+	for _, step := range []struct{ cmd string }{{"PBSZ 0"}, {"PROT " + map[bool]string{true: "C", false: "P"}[cfg.ClearData]}, {"TYPE I"}} {
+		if code, msg, err := c.cmd("%s", step.cmd); err != nil || code != 200 {
+			return nil, nil, replyErr(step.cmd, code, msg, err)
+		}
+	}
+	return c, tlsCfg, nil
+}
+
+// openData sends PASV, dials the data port, sends verb (STOR x, LIST x) and
+// completes the data channel's TLS handshake after the 150, as ftplib does:
+// the server starts its handshake only then.
+func openData(ctx context.Context, cfg Config, c *control, conns *connSet, tlsCfg *tls.Config, verb string) (net.Conn, error) {
+	// PASV: use only the port. Printers behind NAT or with odd addresses
+	// report a wrong host; Python's ftplib connects to the control host too.
+	code, msg, err := c.cmd("PASV")
+	if err != nil || code != 227 {
+		return nil, replyErr("PASV", code, msg, err)
+	}
+	port, err := parsePASVPort(msg)
+	if err != nil {
+		return nil, fmt.Errorf("PASV reply %q: %w", msg, err)
+	}
+	dataRaw, err := dialTCP(ctx, net.JoinHostPort(cfg.Host, strconv.Itoa(port)), cfg.StepTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("data connect: %w", err)
+	}
+	if err := conns.add(dataRaw); err != nil {
+		return nil, err
+	}
+	code, msg, err = c.cmd("%s", verb)
+	if err == nil && code == 550 && (strings.HasPrefix(verb, "LIST") || strings.HasPrefix(verb, "RETR")) {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, msg)
+	}
+	if err != nil || (code != 150 && code != 125) {
+		return nil, replyErr(strings.Fields(verb)[0], code, msg, err)
+	}
+	if cfg.ClearData {
+		return dataRaw, nil
+	}
+	dt := tls.Client(dataRaw, tlsCfg)
+	if err := conns.add(dt); err != nil {
+		return nil, err
+	}
+	if err := handshake(ctx, dt, cfg.StepTimeout); err != nil {
+		return nil, fmt.Errorf("data tls handshake: %w", err)
+	}
+	cfg.Logf("data connection resumed the control TLS session: %v", dt.ConnectionState().DidResume)
+	return dt, nil
+}
+
+// quit is best effort only: closing the connections ends the session, and some
+// printers answer slowly although the file is already stored. The reply is
+// not read.
+func (c *control) quit() {
+	c.step = 2 * time.Second
+	c.send("QUIT")
+}
 
 // connSet is the list of open connections, closed together on ctx cancel.
 type connSet struct {
@@ -286,6 +312,9 @@ func (c *control) reply() (int, string, error) {
 }
 
 func (c *control) cmd(format string, args ...any) (int, string, error) {
+	if err := lineSafe(args); err != nil {
+		return 0, "", err
+	}
 	c.conn.SetWriteDeadline(time.Now().Add(c.step))
 	if err := c.tp.PrintfLine(format, args...); err != nil {
 		return 0, "", err
@@ -317,6 +346,9 @@ func (c *control) size(name string) (int64, error) {
 }
 
 func (c *control) send(format string, args ...any) error {
+	if err := lineSafe(args); err != nil {
+		return err
+	}
 	c.conn.SetWriteDeadline(time.Now().Add(c.step))
 	return c.tp.PrintfLine(format, args...)
 }
@@ -383,4 +415,15 @@ func copyWithStall(dst net.Conn, src io.Reader, stall time.Duration) (int64, err
 			return total, rerr
 		}
 	}
+}
+
+// lineSafe refuses a command argument with CR or LF: the server would read
+// the rest as a second command (RETR "a.3mf\r\nDELE x").
+func lineSafe(args []any) error {
+	for _, a := range args {
+		if s, ok := a.(string); ok && strings.ContainsAny(s, "\r\n") {
+			return errors.New("ftps: a line break in a command argument")
+		}
+	}
+	return nil
 }

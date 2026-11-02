@@ -3,9 +3,11 @@ package lan
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -173,6 +175,7 @@ func (c *Controller) recordEnd(name, fox2APIKey string, end *sessionEnd) {
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		PercentAtEnd:   end.percentAtEnd,
 		FilamentUsedMM: end.filamentUsedMM,
+		EnergyWh:       mqttpkg.PrintEnergy(name),
 	})
 }
 
@@ -190,6 +193,9 @@ type Controller struct {
 	relayLastT     map[string]int64
 	relayHeld      map[string]bool
 	relayLastTMu   sync.Mutex
+	relayQMu       sync.Mutex
+	relayBusy      map[string]bool
+	relayPending   map[string]*relayJob
 }
 
 func NewController() *Controller {
@@ -202,7 +208,58 @@ func NewController() *Controller {
 		snapInFlight: map[string]bool{},
 		relayLastT:   map[string]int64{},
 		relayHeld:    map[string]bool{},
+		relayBusy:    map[string]bool{},
+		relayPending: map[string]*relayJob{},
 	}
+}
+
+// relayJob is one telemetry post to FoxTrack, for either API key.
+type relayJob struct {
+	foxAPIKey, fox2APIKey string
+	payload               webhook.RelayPayload
+}
+
+// sendRelay is webhook.SendRelay; tests swap it.
+var sendRelay = webhook.SendRelay
+
+// queueRelay posts to FoxTrack off the poll loop, so a slow or failing
+// webhook (10 s timeout, twice) cannot stretch the 2 s poll. One post is in
+// flight per printer; while it runs only the newest later payload is kept,
+// since each payload is a full snapshot and replaces the one before it.
+func (c *Controller) queueRelay(name string, job relayJob) {
+	c.relayQMu.Lock()
+	if c.relayBusy[name] {
+		c.relayPending[name] = &job
+		c.relayQMu.Unlock()
+		return
+	}
+	c.relayBusy[name] = true
+	c.relayQMu.Unlock()
+
+	go func() {
+		for {
+			if job.foxAPIKey != "" {
+				if err := sendRelay(job.foxAPIKey, webhook.URL, name, name, job.payload); err != nil {
+					log.Printf("[%s] webhook error: %v", name, err)
+				}
+			}
+			if job.fox2APIKey != "" {
+				if err := sendRelay(job.fox2APIKey, webhook.RelayURLV2, name, name, job.payload); err != nil {
+					log.Printf("[%s] webhook error (v2): %v", name, err)
+				}
+			}
+			c.relayQMu.Lock()
+			next := c.relayPending[name]
+			delete(c.relayPending, name)
+			if next == nil {
+				delete(c.relayBusy, name)
+				c.relayQMu.Unlock()
+				return
+			}
+			c.relayQMu.Unlock()
+			job = *next
+		}
+	}()
 }
 
 // relayHeartbeatSec floors how often telemetry reaches FoxTrack, whether or not
@@ -249,6 +306,7 @@ func (c *Controller) SyncPrinters(printers []configpkg.Printer, foxAPIKey, fox2A
 		c.AddOrUpdatePrinter(p, foxAPIKey, fox2APIKey)
 	}
 
+	var gone []string
 	c.mu.Lock()
 	for name, stop := range c.cancelers {
 		if !keep[name] {
@@ -256,9 +314,13 @@ func (c *Controller) SyncPrinters(printers []configpkg.Printer, foxAPIKey, fox2A
 			delete(c.cancelers, name)
 			delete(c.printers, name)
 			delete(c.states, name)
+			gone = append(gone, name)
 		}
 	}
 	c.mu.Unlock()
+	for _, name := range gone {
+		c.forgetBookkeeping(name)
+	}
 }
 
 func (c *Controller) AddOrUpdatePrinter(p configpkg.Printer, foxAPIKey, fox2APIKey string) {
@@ -284,13 +346,63 @@ func (c *Controller) AddOrUpdatePrinter(p configpkg.Printer, foxAPIKey, fox2APIK
 
 func (c *Controller) RemovePrinter(name string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if stop, ok := c.cancelers[name]; ok {
 		close(stop)
 		delete(c.cancelers, name)
 	}
 	delete(c.printers, name)
 	delete(c.states, name)
+	c.mu.Unlock()
+	c.forgetBookkeeping(name)
+}
+
+// forgetBookkeeping drops a removed printer's print session and relay pacing,
+// so a printer later added under the same name starts clean.
+func (c *Controller) forgetBookkeeping(name string) {
+	c.sessionMu.Lock()
+	delete(c.sessions, name)
+	c.sessionMu.Unlock()
+	c.relayLastTMu.Lock()
+	delete(c.relayLastT, name)
+	delete(c.relayHeld, name)
+	c.relayLastTMu.Unlock()
+	c.snapLastTMu.Lock()
+	delete(c.snapLastT, name)
+	c.snapLastTMu.Unlock()
+	c.relayQMu.Lock()
+	delete(c.relayPending, name)
+	c.relayQMu.Unlock()
+}
+
+// RenamePrinter moves a printer's print session and relay pacing from oldName
+// to newName, so renaming a printer mid-print keeps the print going instead of
+// ending it as cancelled. Call it before RemovePrinter(oldName).
+func (c *Controller) RenamePrinter(oldName, newName string) {
+	if oldName == newName {
+		return
+	}
+	c.sessionMu.Lock()
+	if s, ok := c.sessions[oldName]; ok {
+		c.sessions[newName] = s
+		delete(c.sessions, oldName)
+	}
+	c.sessionMu.Unlock()
+	c.relayLastTMu.Lock()
+	if v, ok := c.relayLastT[oldName]; ok {
+		c.relayLastT[newName] = v
+		delete(c.relayLastT, oldName)
+	}
+	if v, ok := c.relayHeld[oldName]; ok {
+		c.relayHeld[newName] = v
+		delete(c.relayHeld, oldName)
+	}
+	c.relayLastTMu.Unlock()
+	c.snapLastTMu.Lock()
+	if v, ok := c.snapLastT[oldName]; ok {
+		c.snapLastT[newName] = v
+		delete(c.snapLastT, oldName)
+	}
+	c.snapLastTMu.Unlock()
 }
 
 func (c *Controller) GetStates() map[string]*mqttpkg.TelemetryData {
@@ -315,14 +427,45 @@ func (c *Controller) SendCommand(name, command string, args map[string]interface
 
 	switch p.Kind() {
 	case configpkg.KindPrusaLink:
+		if mqttpkg.IsConsoleCommand(command) {
+			return errPrusaNoConsole
+		}
 		return sendPrusaLinkCommand(p, command)
+	case configpkg.KindOctoPrint:
+		return sendOctoPrintCommand(p, command, args)
 	case configpkg.KindHomeAssistant:
 		return errReadOnly
 	}
 	return c.sendKlipperCommand(p, state, command, args)
 }
 
-func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name string) error {
+// snapshotURL is the still-image address the snapshot sender reads: the
+// webcam URL the user typed, else, for OctoPrint, the snapshot address the
+// server itself reports.
+func snapshotURL(p configpkg.Printer) string {
+	if u := strings.TrimSpace(p.WebcamURL); u != "" {
+		return u
+	}
+	if p.Kind() == configpkg.KindOctoPrint {
+		return octoPrintSnapshotURL(p)
+	}
+	return ""
+}
+
+// cameraTransport bounds only the wait for the camera to answer. An MJPEG
+// stream never ends, so a total client timeout would cut it every few seconds.
+var cameraTransport = &http.Transport{
+	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+	DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+	TLSHandshakeTimeout:   5 * time.Second,
+	ResponseHeaderTimeout: 8 * time.Second,
+	IdleConnTimeout:       90 * time.Second,
+}
+
+// cameraStillLimit caps how long a still image may take to arrive in full.
+var cameraStillLimit = 8 * time.Second
+
+func (c *Controller) ProxyCamera(w http.ResponseWriter, r *http.Request, name string) error {
 	c.mu.RLock()
 	p, ok := c.printers[name]
 	c.mu.RUnlock()
@@ -331,13 +474,31 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name st
 	}
 
 	candidates := cameraCandidates(p)
-	client := &http.Client{Timeout: 8 * time.Second, Transport: insecureTransport()}
+	// The API key goes to the printer's own host only: OctoPrint may name a
+	// webcam on another machine, and a redirect may lead anywhere. Go drops
+	// Authorization on a cross-host redirect but keeps a custom X-Api-Key.
+	apiBase := p.MoonrakerURL
+	if p.Kind() == configpkg.KindOctoPrint {
+		apiBase = p.OctoPrintURL
+	}
+	client := &http.Client{
+		Transport: cameraTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if !sameHost(req.URL.String(), apiBase) {
+				req.Header.Del("X-Api-Key")
+			}
+			return nil
+		},
+	}
 	for _, candidate := range candidates {
-		req, err := http.NewRequest("GET", candidate, nil)
+		req, err := http.NewRequestWithContext(r.Context(), "GET", candidate, nil)
 		if err != nil {
 			continue
 		}
-		if p.Kind() == configpkg.KindKlipper {
+		if (p.Kind() == configpkg.KindKlipper || p.Kind() == configpkg.KindOctoPrint) && sameHost(candidate, apiBase) {
 			applyMoonrakerAuth(req, p)
 		}
 		resp, err := client.Do(req)
@@ -354,6 +515,10 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name st
 		if contentType == "" {
 			contentType = "image/jpeg"
 		}
+		if !strings.HasPrefix(contentType, "multipart/") {
+			// A still image is bounded; only a multipart (MJPEG) stream may run on.
+			defer time.AfterFunc(cameraStillLimit, func() { resp.Body.Close() }).Stop()
+		}
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(http.StatusOK)
@@ -362,6 +527,21 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, _ *http.Request, name st
 	}
 
 	return fmt.Errorf("camera unavailable")
+}
+
+// storeState records a poll's result and returns the previous state. It
+// reports false, and stores nothing, when stop is no longer the printer's
+// registered canceler: the printer was removed (or replaced) while the poll was
+// in flight, and writing would bring a removed printer back.
+func (c *Controller) storeState(name string, stop <-chan struct{}, t *mqttpkg.TelemetryData) (*mqttpkg.TelemetryData, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cancelers[name] != stop {
+		return nil, false
+	}
+	prev := c.states[name]
+	c.states[name] = t
+	return prev, true
 }
 
 func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string, stop <-chan struct{}) {
@@ -390,30 +570,26 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 
 			t.PrinterID = p.Name
 			t.Timestamp = time.Now().Unix()
+			// The plug is read by its own poller; attach its latest state here so
+			// the dashboard and FoxTrack see it with the printer.
+			t.Plug = mqttpkg.PlugState(p.Name)
+			relayPayload.Print.Plug = t.Plug
+			relayPayload.Print.BridgeCapabilities = mqttpkg.WithPlugCaps(relayPayload.Print.BridgeCapabilities, t.Plug != nil)
 
 			// Capture previous state before overwriting, then detect print transitions.
-			c.mu.Lock()
-			prev := c.states[p.Name]
-			c.states[p.Name] = &t
-			c.mu.Unlock()
+			prev, ok := c.storeState(p.Name, stop, &t)
+			if !ok {
+				return // the printer was removed or replaced while this poll ran
+			}
 
 			if end := c.updateSession(p.Name, &t, err, time.Now().Unix()); end != nil {
 				go c.recordEnd(p.Name, fox2APIKey, end)
 			}
 			if err == nil && c.shouldRelay(p.Name, prev, &t, time.Now().Unix()) {
-				if foxAPIKey != "" {
-					if err := webhook.SendRelay(foxAPIKey, webhook.URL, p.Name, p.Name, relayPayload); err != nil {
-						log.Printf("[%s] webhook error: %v", p.Name, err)
-					}
-				}
-				if fox2APIKey != "" {
-					if err := webhook.SendRelay(fox2APIKey, webhook.RelayURLV2, p.Name, p.Name, relayPayload); err != nil {
-						log.Printf("[%s] webhook error (v2): %v", p.Name, err)
-					}
-				}
+				c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey, payload: relayPayload})
 			}
 
-			if fox2APIKey != "" && (t.Status == "printing" || t.Status == "paused") && strings.TrimSpace(p.WebcamURL) != "" {
+			if fox2APIKey != "" && (t.Status == "printing" || t.Status == "paused") && snapshotURL(p) != "" {
 				now := time.Now().Unix()
 				c.snapLastTMu.Lock()
 				eligible := now-c.snapLastT[p.Name] >= pace.SnapshotGap(now)
@@ -431,7 +607,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 					c.snapInFlightMu.Unlock()
 
 					if !busy {
-						webcamURL := strings.TrimSpace(p.WebcamURL)
+						webcamURL := snapshotURL(p)
 						name := p.Name
 						apiKey := fox2APIKey
 						go func() {
@@ -494,7 +670,8 @@ func sendJSONRequest(client *http.Client, method, u string, headers map[string]s
 	}
 	var out map[string]interface{}
 	// An empty body (PrusaLink answers 204 No Content) is a success, not a decode error.
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil && err != io.EOF {
+	// Capped: a misbehaving printer could stream without end inside the timeout.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJSONReply)).Decode(&out); err != nil && err != io.EOF {
 		return nil, err
 	}
 	return out, nil
@@ -505,6 +682,8 @@ func fetchTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.RelayPa
 	switch p.Kind() {
 	case configpkg.KindPrusaLink:
 		return fetchPrusaLinkTelemetry(p)
+	case configpkg.KindOctoPrint:
+		return fetchOctoPrintTelemetry(p)
 	case configpkg.KindHomeAssistant:
 		return fetchHomeAssistantTelemetry(p)
 	}
@@ -529,7 +708,7 @@ func klipperPrintHours(p configpkg.Printer) float64 {
 	klipperHoursMu.Unlock()
 
 	client := &http.Client{Timeout: 3 * time.Second, Transport: insecureTransport()}
-	m, err := sendJSONRequest(client, "GET", moonrakerURL(p, "/server/history/summary"), moonrakerAuthHeaders(p), nil)
+	m, err := sendJSONRequest(client, "GET", moonrakerURL(p, "/server/history/totals"), moonrakerAuthHeaders(p), nil)
 	klipperHoursMu.Lock()
 	defer klipperHoursMu.Unlock()
 	klipperHoursUpdated[p.Name] = time.Now() // mark updated even on error to avoid retry every poll
@@ -544,7 +723,7 @@ func klipperPrintHours(p configpkg.Printer) float64 {
 
 func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.RelayPayload, error) {
 	client := &http.Client{Timeout: 5 * time.Second, Transport: insecureTransport()}
-	u := moonrakerURL(p, "/printer/objects/query?print_stats&heater_bed&extruder&extruder1&extruder2&extruder3&toolhead&fan&display_status&virtual_sdcard")
+	u := moonrakerURL(p, "/printer/objects/query?print_stats&heater_bed&extruder&extruder1&extruder2&extruder3&toolhead&fan&display_status&virtual_sdcard&webhooks")
 	m, err := sendJSONRequest(client, "GET", u, moonrakerAuthHeaders(p), nil)
 	if err != nil {
 		return mqttpkg.TelemetryData{}, webhook.RelayPayload{}, err
@@ -602,6 +781,7 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 	fanSpeed := floatAny(anyFromMap(nestedMapAny(status, "fan"), "speed")) // 0.0-1.0
 	coolingFanPct := int(fanSpeed * 100)
 	filamentUsedMM := floatAny(anyFromMap(printStats, "filament_used"))
+	alarms := klipperAlarms(nestedMapAny(status, "webhooks"), printStats)
 
 	relay := webhook.RelayPayload{
 		Print: webhook.RelayPrint{
@@ -614,10 +794,11 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 			BedTargetTemper:    floatAny(anyFromMap(bed, "target")),
 			McRemainingTime:    remaining,
 			ActiveExtruder:     activeExtruderField,
+			Alarms:             alarms,
 			PrinterKind:        "klipper",
 			PrinterModel:       "Klipper",
 			BridgeVersion:      version.AppVersion,
-			BridgeCapabilities: []string{"print_file", "filament_use"},
+			BridgeCapabilities: []string{"print_file", "filament_use", "alarms", "console", "files"},
 		},
 	}
 
@@ -635,7 +816,33 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 		FilamentUsedMM:  filamentUsedMM,
 		TotalPrintHours: klipperPrintHours(p),
 		PrinterModel:    "Klipper",
+		Alarms:          alarms,
 	}, relay, nil
+}
+
+// klipperAlarms reads Klipper's own fault reports: webhooks.state "shutdown"
+// or "error" with state_message (a firmware shutdown, fatal), and
+// print_stats.state "error" with print_stats.message (the print failed,
+// serious). Both texts are stable while the fault lasts, which is what
+// FoxTrack keys a text-only alarm on.
+func klipperAlarms(webhooks, printStats map[string]interface{}) []webhook.RelayAlarm {
+	var out []webhook.RelayAlarm
+	switch lowerString(stringAny(anyFromMap(webhooks, "state"))) {
+	case "shutdown", "error":
+		msg := strings.TrimSpace(stringAny(anyFromMap(webhooks, "state_message")))
+		if msg == "" {
+			msg = "Klipper has shut down. Restart the firmware."
+		}
+		out = append(out, webhook.MessageAlarm(webhook.AlarmFatal, msg))
+	}
+	if lowerString(stringAny(anyFromMap(printStats, "state"))) == "error" {
+		msg := strings.TrimSpace(stringAny(anyFromMap(printStats, "message")))
+		if msg == "" {
+			msg = "The print stopped with an error."
+		}
+		out = append(out, webhook.MessageAlarm(webhook.AlarmSerious, msg))
+	}
+	return out
 }
 
 func mapKlipperState(state string) string {
@@ -721,6 +928,19 @@ func (c *Controller) sendKlipperCommand(p configpkg.Printer, state *mqttpkg.Tele
 		script := fmt.Sprintf("M106 S%d", s)
 		gcodeURL := moonrakerURL(p, "/printer/gcode/script?script="+url.QueryEscape(script))
 		_, err := sendJSONRequest(client, "POST", gcodeURL, headers, nil)
+		return err
+	case "set_nozzle_temp", "set_bed_temp", "home":
+		// The console (Bridge 2.5.2): the same G-code as Bambu, through Moonraker.
+		script, err := mqttpkg.ConsoleGcode(command, args)
+		if err != nil {
+			return err
+		}
+		gcodeURL := moonrakerURL(p, "/printer/gcode/script?script="+url.QueryEscape(script))
+		if command == "home" {
+			// Moonraker answers a script only once it has run, and G28 takes a minute.
+			client = &http.Client{Timeout: 2 * time.Minute, Transport: insecureTransport()}
+		}
+		_, err = sendJSONRequest(client, "POST", gcodeURL, headers, nil)
 		return err
 	case "light", "toggle_light", "light_on", "light_off":
 		desiredOn := false
@@ -824,6 +1044,18 @@ func cameraCandidates(p configpkg.Printer) []string {
 	if strings.TrimSpace(p.WebcamURL) != "" {
 		return []string{strings.TrimSpace(p.WebcamURL)}
 	}
+	if p.Kind() == configpkg.KindOctoPrint {
+		// OctoPrint says where its webcam is; OctoPi's default paths come next.
+		var out []string
+		if u := octoPrintStreamURL(p); u != "" {
+			out = append(out, u)
+		}
+		if u := octoPrintSnapshotURL(p); u != "" {
+			out = append(out, u)
+		}
+		base := strings.TrimRight(strings.TrimSpace(p.OctoPrintURL), "/")
+		return append(out, base+"/webcam/?action=stream", base+"/webcam/?action=snapshot")
+	}
 	if p.Kind() != configpkg.KindKlipper {
 		return nil // PrusaLink and Home Assistant have no stream to guess
 	}
@@ -883,6 +1115,10 @@ func getArgString(args map[string]interface{}, key string) string {
 	return strings.TrimSpace(s)
 }
 
+// maxJSONReply caps a printer's JSON reply. Moonraker's history and file
+// lists stay well under it.
+const maxJSONReply = 16 << 20
+
 func moonrakerURL(p configpkg.Printer, path string) string {
 	base := strings.TrimSpace(strings.TrimRight(p.MoonrakerURL, "/"))
 	if base == "" {
@@ -900,6 +1136,13 @@ func moonrakerAuthHeaders(p configpkg.Printer) map[string]string {
 		headers["X-Api-Key"] = p.APIKey
 	}
 	return headers
+}
+
+// sameHost reports whether two URLs name the same host and port.
+func sameHost(a, b string) bool {
+	ua, err1 := url.Parse(strings.TrimSpace(a))
+	ub, err2 := url.Parse(strings.TrimSpace(b))
+	return err1 == nil && err2 == nil && ua.Host != "" && strings.EqualFold(ua.Host, ub.Host)
 }
 
 func applyMoonrakerAuth(req *http.Request, p configpkg.Printer) {

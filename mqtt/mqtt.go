@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,13 @@ func (f *flexInt) UnmarshalJSON(b []byte) error {
 	n, _ := number(v)
 	*f = flexInt(n)
 	return nil
+}
+
+// setIf copies *src into dst when the field was present in the message.
+func setIf(dst *string, src *string) {
+	if src != nil {
+		*dst = *src
+	}
 }
 
 // number reads a decoded JSON number or numeric string ("1000", "98.5").
@@ -94,6 +102,11 @@ type TelemetryData struct {
 	TotalPrintHours float64 `json:"total_print_hours,omitempty"` // lifetime hours: from printer for Bambu/Klipper, Bridge-tracked otherwise
 	PrinterModel    string  `json:"printer_model,omitempty"`     // e.g. "X1 Carbon", "P1S", "Klipper"
 	ExternalSpool   *AmsSlot `json:"external_spool,omitempty"`   // Bambu vt_tray, Slot = ExternalSlot; nil until reported
+	// Alarms is what the printer reports as wrong right now (Bambu HMS and
+	// print_error, Klipper shutdowns, PrusaLink and OctoPrint error text).
+	Alarms []webhook.RelayAlarm `json:"alarms,omitempty"`
+	// Plug is the printer's smart plug, nil without one.
+	Plug *webhook.RelayPlug `json:"plug,omitempty"`
 }
 
 type BambuReport struct {
@@ -104,12 +117,12 @@ type BambuPrint struct {
 	Msg                int     `json:"msg"`
 	GcodeState         string  `json:"gcode_state"`
 	SubTaskName        string  `json:"subtask_name"`
-	McPercent          int     `json:"mc_percent"`
+	McPercent          *int     `json:"mc_percent"` // pointers: nil when absent, 0 is a real value
 	McPrintErrorCode   string  `json:"mc_print_error_code"`
-	NozzleTemper       float64 `json:"nozzle_temper"`
-	NozzleTargetTemper float64 `json:"nozzle_target_temper"`
-	BedTemper          float64 `json:"bed_temper"`
-	BedTargetTemper    float64 `json:"bed_target_temper"`
+	NozzleTemper       *float64 `json:"nozzle_temper"`
+	NozzleTargetTemper *float64 `json:"nozzle_target_temper"`
+	BedTemper          *float64 `json:"bed_temper"`
+	BedTargetTemper    *float64 `json:"bed_target_temper"`
 	Lights             []struct {
 		Node string `json:"node"`
 		Mode string `json:"mode"`
@@ -124,15 +137,15 @@ type BambuPrint struct {
 		AMS []struct {
 			ID   json.RawMessage `json:"id"` // raw AMS unit id: "0".."3", "128".. for an AMS HT (raw so an odd type never fails the message)
 			Tray []struct {
-				ID            string  `json:"id"`
-				Color         string  `json:"tray_color"` // 8-char RRGGBBAA
-				Material      string  `json:"tray_type"`
-				Remain        flexInt `json:"remain"`      // 0-100%, -1 when the printer does not know
-				Weight        flexInt `json:"tray_weight"` // grams, a string on current firmware
-				TagUID        string  `json:"tag_uid"`
-				TrayUUID      string  `json:"tray_uuid"`
-				TraySubBrands string  `json:"tray_sub_brands"`
-				TrayInfoIdx   string  `json:"tray_info_idx"`
+				ID            string   `json:"id"`
+				Color         *string  `json:"tray_color"` // 8-char RRGGBBAA
+				Material      *string  `json:"tray_type"`
+				Remain        *flexInt `json:"remain"`      // 0-100%, -1 when the printer does not know
+				Weight        *flexInt `json:"tray_weight"` // grams, a string on current firmware
+				TagUID        *string  `json:"tag_uid"`
+				TrayUUID      *string  `json:"tray_uuid"`
+				TraySubBrands *string  `json:"tray_sub_brands"`
+				TrayInfoIdx   *string  `json:"tray_info_idx"`
 			} `json:"tray"`
 		} `json:"ams"`
 		TrayNow string `json:"tray_now"` // currently loaded tray ("0"-"3"), "255" = none/external
@@ -172,6 +185,14 @@ var (
 	webhookHeld        = make(map[string]bool)
 	webhookNoKeyLogged = make(map[string]bool)
 	webhookLastSentMu  sync.Mutex
+
+	// Relay posts leave on goroutines, so each waits for the printer's previous
+	// post (relayTurn) and FoxTrack, which replaces status per post, never sees
+	// an older snapshot after a newer one. A non-terminal post that a newer one
+	// has queued behind is skipped (relaySeq): the newer is a full snapshot too.
+	relayTurn    = make(map[string]chan struct{})
+	relaySeq     = make(map[string]uint64)
+	relayOrderMu sync.Mutex
 
 	// sendRelay and sendHistory post to FoxTrack. Variables so tests can capture payloads.
 	sendRelay   = webhook.SendRelay
@@ -214,6 +235,7 @@ type printSession struct {
 	TempSamples []history.TempSample
 	lastSampleT int64     // unix time of last temp sample
 	lastSeen    int64     // unix time of the last report during the print
+	lastPercent int       // progress in the last report during the print
 	Spools      []AmsSlot // every slot at the start, paired with the end for filament use
 }
 
@@ -234,6 +256,18 @@ func InPrint(status string) bool {
 	return status == "printing" || status == "paused"
 }
 
+// Settled reports a status in which nothing moves or heats on its own: idle,
+// or a print that ended. The safety guards (plug off, home) go by this, not by
+// InPrint, so a status they do not know (Bambu PREPARE or SLICING while a
+// print starts, a word from Home Assistant) counts as busy.
+func Settled(status string) bool {
+	switch status {
+	case "idle", "finished", "error", "cancelled":
+		return true
+	}
+	return false
+}
+
 var (
 	activeSessions = make(map[string]*printSession)
 	sessionMu      sync.Mutex
@@ -249,6 +283,13 @@ func copyTelemetry(s *TelemetryData) *TelemetryData {
 	if s.ExternalSpool != nil {
 		ext := *s.ExternalSpool
 		c.ExternalSpool = &ext
+	}
+	if s.Alarms != nil {
+		c.Alarms = append([]webhook.RelayAlarm(nil), s.Alarms...)
+	}
+	if s.Plug != nil {
+		pl := *s.Plug
+		c.Plug = &pl
 	}
 	return &c
 }
@@ -305,17 +346,19 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 	}
 
 	// Find serial for the topic
+	// Copy what is needed under the lock: applyLightResult writes LightOn.
 	stateMutex.RLock()
-	state, hasState := printerStates[printerName]
+	lightWasOn := false
+	if state, ok := printerStates[printerName]; ok {
+		lightWasOn = state.LightOn
+	}
 	stateMutex.RUnlock()
-	_ = hasState
 
 	// We store serial in PrinterID only if set, so look it up from connected printer map
 	serial := getSerial(printerName)
 	if serial == "" {
 		return fmt.Errorf("serial not found for %q", printerName)
 	}
-	_ = state
 
 	// Over Bambu Cloud, current firmware rejects every command except the
 	// light as unverified. Refuse early so the printer never sees them.
@@ -390,7 +433,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 	case "light":
 		on := getBoolArg(args, "on")
 		if on == nil {
-			onVal := !(state != nil && state.LightOn)
+			onVal := !lightWasOn
 			on = &onVal
 		}
 		mode := "off"
@@ -403,7 +446,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 		return nil
 
 	case "toggle_light":
-		wantOn := !(state != nil && state.LightOn)
+		wantOn := !lightWasOn
 		mode := "off"
 		if wantOn {
 			mode = "on"
@@ -541,6 +584,14 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 	case "set_filament":
 		return setFilamentFromArgs(printerName, serial, args)
 
+	case "set_nozzle_temp", "set_bed_temp", "home":
+		// The console (Bridge 2.5.2): M104 / M140 / G28 as a gcode_line.
+		b, err := consolePayload(command, args)
+		if err != nil {
+			return err
+		}
+		payload = b
+
 	default:
 		return fmt.Errorf("unknown command: %q", command)
 	}
@@ -634,6 +685,17 @@ func DisconnectPrinter(name string) {
 	<-mc.done
 }
 
+// RenameSession moves a print in progress to the printer's new name, so a
+// rename mid-print still records the print. Call before RemovePrinterState(old).
+func RenameSession(oldName, newName string) {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+	if s, ok := activeSessions[oldName]; ok && oldName != newName {
+		activeSessions[newName] = s
+		delete(activeSessions, oldName)
+	}
+}
+
 // RemovePrinterState deletes all per-printer state this package keeps for the
 // named printer: telemetry, serial mapping, snapshot throttle, webhook dedup,
 // and any active print session. Call after DisconnectPrinter when the printer
@@ -666,6 +728,11 @@ func RemovePrinterState(name string) {
 	delete(webhookHeld, name)
 	delete(webhookNoKeyLogged, name)
 	webhookLastSentMu.Unlock()
+
+	relayOrderMu.Lock()
+	delete(relayTurn, name)
+	delete(relaySeq, name)
+	relayOrderMu.Unlock()
 
 	forgetPrintFileState(name)
 }
@@ -863,8 +930,28 @@ func UrgentChange(prev, curr *TelemetryData) bool {
 		prev.FileName != curr.FileName ||
 		prev.Error != curr.Error ||
 		prev.LightOn != curr.LightOn ||
-		filamentChanged(prev, curr)
+		filamentChanged(prev, curr) ||
+		alarmsChanged(prev.Alarms, curr.Alarms) ||
+		plugChanged(prev.Plug, curr.Plug)
 }
+
+// Plug state and print energy come from the plug package, which the server
+// wires in at startup; the mqtt package stays free of that import.
+var (
+	plugState   = func(name string) *webhook.RelayPlug { return nil }
+	printEnergy = func(name string) *float64 { return nil }
+)
+
+// SetPlugSource installs the smart plug lookups shared with the lan package.
+func SetPlugSource(state func(name string) *webhook.RelayPlug, energy func(name string) *float64) {
+	plugState, printEnergy = state, energy
+}
+
+// PlugState is the installed plug lookup, for the lan package.
+func PlugState(name string) *webhook.RelayPlug { return plugState(name) }
+
+// PrintEnergy is the installed print energy lookup, for the lan package.
+func PrintEnergy(name string) *float64 { return printEnergy(name) }
 
 func makeHandler(p Printer) mqtt.MessageHandler {
 	return func(_ mqtt.Client, msg mqtt.Message) {
@@ -886,10 +973,11 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		// Ignore messages that carry no print or system data at all.
 		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
 		vtTray, hasVtTray := parseVtTray(msg.Payload())
-		hasData := pr.GcodeState != "" || pr.NozzleTemper != 0 || pr.BedTemper != 0 || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != 0 || pr.McRemainingTime != 0 || hasVtTray
+		hasAlarmKeys := payloadHasAlarmKeys(msg.Payload())
+		hasData := pr.GcodeState != "" || pr.NozzleTemper != nil || pr.BedTemper != nil || pr.NozzleTargetTemper != nil || pr.BedTargetTemper != nil || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != nil || pr.McRemainingTime != 0 || hasVtTray || hasAlarmKeys
 		if !hasData {
 			if pr.Msg != 1 && !projectReply && hasPrintObject(msg.Payload()) {
-				log.Printf("[%s] MQTT skip (no usable data) | gcode=%q nozzle=%.1f bed=%.1f | payload: %.120s", p.Name, pr.GcodeState, pr.NozzleTemper, pr.BedTemper, msg.Payload())
+				log.Printf("[%s] MQTT skip (no usable data) | gcode=%q | payload: %.120s", p.Name, pr.GcodeState, msg.Payload())
 			}
 			return
 		}
@@ -913,26 +1001,27 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			fileName = ""
 		}
 
-		// Preserve temps when they are absent (reported as 0) in partial updates.
+		// Preserve temps and progress when absent in partial updates. An
+		// explicit 0 (target after cooldown, progress at print start) is real.
 		nozzleTemp := prev.NozzleTemp
-		if pr.NozzleTemper != 0 {
-			nozzleTemp = pr.NozzleTemper
+		if pr.NozzleTemper != nil {
+			nozzleTemp = *pr.NozzleTemper
 		}
 		nozzleTarget := prev.NozzleTarget
-		if pr.NozzleTargetTemper != 0 {
-			nozzleTarget = pr.NozzleTargetTemper
+		if pr.NozzleTargetTemper != nil {
+			nozzleTarget = *pr.NozzleTargetTemper
 		}
 		bedTemp := prev.BedTemp
-		if pr.BedTemper != 0 {
-			bedTemp = pr.BedTemper
+		if pr.BedTemper != nil {
+			bedTemp = *pr.BedTemper
 		}
 		bedTarget := prev.BedTarget
-		if pr.BedTargetTemper != 0 {
-			bedTarget = pr.BedTargetTemper
+		if pr.BedTargetTemper != nil {
+			bedTarget = *pr.BedTargetTemper
 		}
 		progress := prev.Progress
-		if pr.McPercent != 0 {
-			progress = pr.McPercent
+		if pr.McPercent != nil {
+			progress = *pr.McPercent
 		}
 		timeRemaining := prev.TimeRemaining
 		if pr.McRemainingTime != 0 {
@@ -963,43 +1052,64 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		}
 
 		// AMS: parse slot data; preserve previous when ams field is absent.
+		// A list in a report with gcode_state (pushall) is the full picture and
+		// rebuilds the slots; otherwise it is a delta and merges into the
+		// previous slots by unit id + tray id, fields it omits keep their value.
 		amsSlots := prev.AMS
 		if pr.Ams != nil {
 			if len(pr.Ams.AMS) > 0 {
-				// Full tray list present: rebuild slots from scratch.
-				amsSlots = nil
+				var oldSlots []AmsSlot
 				var trayRefs []trayRef
-				trayNow := -1
-				if n, err := strconv.Atoi(pr.Ams.TrayNow); err == nil && n < 254 {
-					trayNow = n
+				if pr.GcodeState == "" {
+					oldSlots = prev.AMS
+					trayRefs = getTrayRefs(p.Name)
 				}
+				amsSlots = append([]AmsSlot(nil), oldSlots...)
+				trayRefs = append([]trayRef(nil), trayRefs...)
 				for amsIdx, unit := range pr.Ams.AMS {
 					for i, tray := range unit.Tray {
-						globalSlot := amsIdx*4 + i
-						trayRefs = append(trayRefs, newTrayRef(globalSlot, amsIdx, i, strings.Trim(string(unit.ID), `"`), tray.ID))
-						color := tray.Color
-						if len(color) >= 6 {
-							color = color[:6] // strip alpha channel
+						ref := newTrayRef(amsIdx*4+i, amsIdx, i, strings.Trim(string(unit.ID), `"`), tray.ID)
+						if j := slices.IndexFunc(trayRefs, func(r trayRef) bool { return r.Unit == ref.Unit && r.Tray == ref.Tray }); j >= 0 {
+							ref.Slot = trayRefs[j].Slot // a known tray keeps its slot, wherever the delta lists it
+							trayRefs[j] = ref
+						} else {
+							trayRefs = append(trayRefs, ref)
 						}
-						amsSlots = append(amsSlots, AmsSlot{
-							Slot:          globalSlot,
-							Color:         color,
-							Material:      tray.Material,
-							Active:        globalSlot == trayNow,
-							Remaining:     int(tray.Remain),
-							TagUID:        tagID(tray.TagUID),
-							TrayUUID:      tagID(tray.TrayUUID),
-							TraySubBrands: tray.TraySubBrands,
-							TrayWeight:    int(tray.Weight),
-							TrayInfoIdx:   tray.TrayInfoIdx,
-						})
+						k := slices.IndexFunc(amsSlots, func(s AmsSlot) bool { return s.Slot == ref.Slot })
+						if k < 0 {
+							amsSlots = append(amsSlots, AmsSlot{Slot: ref.Slot})
+							k = len(amsSlots) - 1
+						}
+						sl := &amsSlots[k]
+						if tray.Color != nil {
+							sl.Color = *tray.Color
+							if len(sl.Color) >= 6 {
+								sl.Color = sl.Color[:6] // strip alpha channel
+							}
+						}
+						setIf(&sl.Material, tray.Material)
+						if tray.Remain != nil {
+							sl.Remaining = int(*tray.Remain)
+						}
+						if tray.Weight != nil {
+							sl.TrayWeight = int(*tray.Weight)
+						}
+						if tray.TagUID != nil {
+							sl.TagUID = tagID(*tray.TagUID)
+						}
+						if tray.TrayUUID != nil {
+							sl.TrayUUID = tagID(*tray.TrayUUID)
+						}
+						setIf(&sl.TraySubBrands, tray.TraySubBrands)
+						setIf(&sl.TrayInfoIdx, tray.TrayInfoIdx)
 					}
 				}
 				setTrayRefs(p.Name, trayRefs)
-			} else if pr.Ams.TrayNow != "" {
-				// Incremental update: only tray_now changed (e.g. at print start).
-				// Update Active flags on a copy of the existing slot list rather than
-				// mutating the previous state's slice in place.
+			}
+			if pr.Ams.TrayNow != "" {
+				// tray_now reported (a full list or alone, e.g. at print start):
+				// update Active on a copy rather than the previous state's slice.
+				// Absent, the previous Active flags stay.
 				trayNow := -1
 				if n, err := strconv.Atoi(pr.Ams.TrayNow); err == nil && n < 254 {
 					trayNow = n
@@ -1034,11 +1144,20 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			printerModel = mapMachineType(pr.MachineType)
 		}
 
+		// Deltas omit mc_print_error_code: keep the last one. "0" means no error.
+		errCode := prev.Error
+		if pr.McPrintErrorCode != "" {
+			errCode = pr.McPrintErrorCode
+		}
+		if errCode == "0" {
+			errCode = ""
+		}
+
 		t := TelemetryData{
 			Status:          status,
 			FileName:        fileName,
 			Progress:        progress,
-			Error:           pr.McPrintErrorCode,
+			Error:           errCode,
 			NozzleTemp:      nozzleTemp,
 			NozzleTarget:    nozzleTarget,
 			BedTemp:         bedTemp,
@@ -1052,6 +1171,8 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			CoolingFanPct:   coolingFanPct,
 			TotalPrintHours: totalPrintHours,
 			PrinterModel:    printerModel,
+			Alarms:          mergeAlarms(prev.Alarms, msg.Payload()),
+			Plug:            plugState(p.Name),
 		}
 
 		// Track print sessions for history (including periodic temp samples).
@@ -1075,15 +1196,18 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				TempSamples: []history.TempSample{{T: 0, NozzleTemp: nozzleTemp, BedTemp: bedTemp}},
 				lastSampleT: now,
 				lastSeen:    now,
+				lastPercent: progress,
 				Spools:      spoolsAt(amsSlots, extSpool),
 			}
 			sessionMu.Unlock()
-		} else if InPrint(prev.Status) && !InPrint(status) && sess != nil {
+		} else if sess != nil && !InPrint(status) && status != "connected" && status != "disconnected" {
+			// The print ended: seen live, or while the link was down (then the
+			// first real report after the reconnect shows it).
 			result := status
 			if result != "finished" && result != "error" {
 				result = "cancelled"
 			}
-			percentAtEnd := prev.Progress // progress is cleared in this report
+			percentAtEnd := sess.lastPercent // progress is cleared in this report
 			if result == "finished" {
 				percentAtEnd = 100
 			}
@@ -1120,12 +1244,14 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						Timestamp:    time.Now().UTC().Format(time.RFC3339),
 						PercentAtEnd: percentAtEnd,
 						Filaments:    filaments,
+						EnergyWh:     printEnergy(p.Name),
 					})
 				}
 			}()
 		} else {
 			if InPrint(status) && sess != nil {
 				sess.lastSeen = now
+				sess.lastPercent = progress
 			}
 			// Ongoing print: sample temps once per minute.
 			if status == "printing" && sess != nil {
@@ -1157,23 +1283,44 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		// sees the printer as alive.
 		terminal := status != prev.Status && (status == "finished" || status == "error")
 		relayNow := time.Now().Unix()
-		webhookLastSentMu.Lock()
-		sendWebhook, held := pace.Decide(
-			terminal || UrgentChange(prev, &t),
-			ShouldSendWebhook(prev, &t),
-			webhookHeld[p.Name],
-			relayNow-webhookLastSent[p.Name],
-			relayNow,
-		)
-		webhookHeld[p.Name] = held
-		if sendWebhook {
-			webhookLastSent[p.Name] = relayNow
+		// After a (re)connect the state restarts blank. Until a full report
+		// (one with gcode_state) is merged the snapshot would be empty, and
+		// FoxTrack replaces its stored status with each post: send nothing yet.
+		sendWebhook, held := false, false
+		if status != "connected" && status != "disconnected" {
+			webhookLastSentMu.Lock()
+			sendWebhook, held = pace.Decide(
+				terminal || UrgentChange(prev, &t),
+				ShouldSendWebhook(prev, &t),
+				webhookHeld[p.Name],
+				relayNow-webhookLastSent[p.Name],
+				relayNow,
+			)
+			webhookHeld[p.Name] = held
+			if sendWebhook {
+				webhookLastSent[p.Name] = relayNow
+			}
+			webhookLastSentMu.Unlock()
 		}
-		webhookLastSentMu.Unlock()
 
 		if sendWebhook {
 			send := sendRelay // read now, not in the goroutine: tests swap it
+			relayOrderMu.Lock()
+			relaySeq[p.Name]++
+			mySeq, prevTurn, myTurn := relaySeq[p.Name], relayTurn[p.Name], make(chan struct{})
+			relayTurn[p.Name] = myTurn
+			relayOrderMu.Unlock()
 			go func() {
+				defer close(myTurn)
+				if prevTurn != nil {
+					<-prevTurn
+				}
+				relayOrderMu.Lock()
+				superseded := relaySeq[p.Name] != mySeq
+				relayOrderMu.Unlock()
+				if superseded && !terminal {
+					return
+				}
 				b := lightOn
 				var relayAms []webhook.RelayAmsSlot
 				for _, s := range amsSlots {
@@ -1196,6 +1343,8 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						LightOn:            &b,
 						Ams:                relayAms,
 						ExternalSpool:      relayExternalSpool(extSpool),
+						Alarms:             t.Alarms,
+						Plug:               t.Plug,
 					},
 				}
 				stampRelayIdentity(&relayPayload.Print, p, t.PrinterModel)
@@ -1222,7 +1371,8 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			}()
 		}
 
-		if (t.Status == "printing" || t.Status == "paused") && p.FoxTrack2APIKey != "" {
+		// A cloud printer with no known IP has nothing to dial: no camera snapshot.
+		if (t.Status == "printing" || t.Status == "paused") && p.FoxTrack2APIKey != "" && p.IP != "" {
 			if snapshotDue(p.Name, time.Now().Unix()) {
 				snapInFlightMu.Lock()
 				busy := snapInFlight[p.Name]

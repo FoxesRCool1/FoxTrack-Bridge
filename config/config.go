@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -31,6 +32,74 @@ type Config struct {
 	// Optional and additive: a config without it keeps loading unchanged, and
 	// the assistant simply stays off.
 	AI *AI `json:"ai,omitempty"`
+	// VirtualPrinter is the OctoPrint look-alike that slicers upload to.
+	// Optional and additive: absent means off.
+	VirtualPrinter *VirtualPrinter `json:"virtual_printer,omitempty"`
+}
+
+// VirtualPrinter pretends to be an OctoPrint server on its own port, so
+// OrcaSlicer and PrusaSlicer can send a sliced file with their built-in
+// OctoPrint upload. The file goes to FoxTrack, never to a printer. APIKey is
+// what the user types into the slicer, so the dashboard shows it; it only
+// guards a LAN port and is not a FoxTrack secret.
+type VirtualPrinter struct {
+	Enabled bool   `json:"enabled,omitempty"`
+	Port    int    `json:"port,omitempty"` // default 8090
+	APIKey  string `json:"api_key,omitempty"`
+}
+
+// DefaultVirtualPrinterPort is used when Port is 0.
+const DefaultVirtualPrinterPort = 8090
+
+// PortOrDefault returns the port to listen on.
+func (v *VirtualPrinter) PortOrDefault() int {
+	if v == nil || v.Port <= 0 || v.Port > 65535 {
+		return DefaultVirtualPrinterPort
+	}
+	return v.Port
+}
+
+// NewVirtualPrinterKey makes the random key the slicer must send: 32 hex chars.
+func NewVirtualPrinterKey() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return hex.EncodeToString([]byte(time.Now().String()))[:32]
+	}
+	return hex.EncodeToString(b)
+}
+
+// Plug is the smart plug a printer is powered through. Address is a host or
+// host:port on the LAN; the Bridge never talks to a plug maker's cloud.
+type Plug struct {
+	Kind    string `json:"kind"` // "shelly" | "tasmota" | "kasa"
+	Address string `json:"address"`
+	// AutoOff turns the plug off after a print ends, once the printer has
+	// been idle for AutoOffDelayMinutes and the nozzle is cool.
+	AutoOff             bool `json:"auto_off,omitempty"`
+	AutoOffDelayMinutes int  `json:"auto_off_delay_minutes,omitempty"` // default 10
+}
+
+// Plug kinds.
+const (
+	PlugShelly  = "shelly"
+	PlugTasmota = "tasmota"
+	PlugKasa    = "kasa"
+)
+
+// DefaultAutoOffDelayMinutes is used when AutoOffDelayMinutes is 0.
+const DefaultAutoOffDelayMinutes = 10
+
+// Configured reports whether there is a plug to poll.
+func (g *Plug) Configured() bool {
+	return g != nil && strings.TrimSpace(g.Address) != "" && strings.TrimSpace(g.Kind) != ""
+}
+
+// Delay is the auto-off wait after a print.
+func (g *Plug) Delay() time.Duration {
+	if g == nil || g.AutoOffDelayMinutes <= 0 {
+		return time.Duration(DefaultAutoOffDelayMinutes) * time.Minute
+	}
+	return time.Duration(g.AutoOffDelayMinutes) * time.Minute
 }
 
 // AI holds the settings for the built-in assistant. The Bridge ships with none
@@ -123,6 +192,12 @@ type Printer struct {
 	HABedEntity        string `json:"ha_bed_entity,omitempty"`
 	HAFileEntity       string `json:"ha_file_entity,omitempty"`
 	HARemainingEntity  string `json:"ha_remaining_entity,omitempty"`
+	// OctoPrintURL marks an OctoPrint printer, e.g. http://octopi.local.
+	// APIKey is sent as X-Api-Key, as for PrusaLink.
+	OctoPrintURL string `json:"octoprint_url,omitempty"`
+	// Plug is the smart plug this printer is powered through, if any.
+	// Optional and additive: a printer without it keeps loading unchanged.
+	Plug *Plug `json:"plug,omitempty"`
 }
 
 // Printer kinds, as sent to FoxTrack in printer_kind.
@@ -130,6 +205,7 @@ const (
 	KindBambu         = "bambu"
 	KindKlipper       = "klipper"
 	KindPrusaLink     = "prusalink"
+	KindOctoPrint     = "octoprint"
 	KindHomeAssistant = "home_assistant"
 )
 
@@ -141,6 +217,8 @@ func (p Printer) Kind() string {
 		return KindKlipper
 	case strings.TrimSpace(p.PrusaLinkURL) != "":
 		return KindPrusaLink
+	case strings.TrimSpace(p.OctoPrintURL) != "":
+		return KindOctoPrint
 	case strings.TrimSpace(p.HomeAssistantURL) != "":
 		return KindHomeAssistant
 	}
@@ -154,11 +232,16 @@ func (p Printer) KindLabel() string {
 		return "Klipper"
 	case KindPrusaLink:
 		return "PrusaLink"
+	case KindOctoPrint:
+		return "OctoPrint"
 	case KindHomeAssistant:
 		return "Home Assistant"
 	}
 	return "Bambu Lab"
 }
+
+// HasPlug reports whether a smart plug is set for this printer.
+func (p Printer) HasPlug() bool { return p.Plug.Configured() }
 
 // ConnectionCloud marks a Bambu printer reached through Bambu Cloud.
 const ConnectionCloud = "cloud"
@@ -201,6 +284,10 @@ func (c *Config) Clone() *Config {
 			if names := c.Printers[i].PreviousNames; names != nil {
 				out.Printers[i].PreviousNames = append([]string(nil), names...)
 			}
+			if g := c.Printers[i].Plug; g != nil {
+				cp := *g
+				out.Printers[i].Plug = &cp
+			}
 		}
 	}
 	if c.BambuCloud != nil {
@@ -210,6 +297,10 @@ func (c *Config) Clone() *Config {
 	if c.AI != nil {
 		ai := *c.AI
 		out.AI = &ai
+	}
+	if c.VirtualPrinter != nil {
+		vp := *c.VirtualPrinter
+		out.VirtualPrinter = &vp
 	}
 	return &out
 }
@@ -232,11 +323,16 @@ func configPath() string {
 	return filepath.Join(base, "FoxTrack-Bridge", "config.json")
 }
 
+// ErrCorrupt wraps a config file that was read but could not be parsed. Only
+// then may the caller move the file aside; any other read error (permissions,
+// a directory in the way) must not cost the user a good file.
+var ErrCorrupt = errors.New("config file is corrupt")
+
 func LoadConfig() (*Config, error) {
 	preferredPath := configPath()
+	legacyPath := legacyConfigPath()
 	data, err := os.ReadFile(preferredPath)
 	if errors.Is(err, os.ErrNotExist) {
-		legacyPath := legacyConfigPath()
 		legacyData, legacyErr := os.ReadFile(legacyPath)
 		if legacyErr != nil {
 			return nil, err
@@ -249,7 +345,18 @@ func LoadConfig() (*Config, error) {
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		// A corrupt preferred file with a good legacy one behind it: keep the
+		// corrupt file as a backup and carry on from the legacy copy, which
+		// the save below migrates back to the preferred path.
+		legacyData, legacyErr := os.ReadFile(legacyPath)
+		if legacyErr != nil || preferredPath == legacyPath || json.Unmarshal(legacyData, &cfg) != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		}
+		backup, berr := backupFile(preferredPath)
+		if berr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		}
+		log.Printf("ERROR: %s failed to load (%v); it was backed up to %s and the older config at %s is used instead", preferredPath, err, backup, legacyPath)
 	}
 
 	backfilled := false
@@ -360,7 +467,19 @@ func BackupCorrupt() (string, error) {
 		}
 		p = legacy
 	}
-	backup := p + ".corrupt-" + time.Now().Format("20060102-150405")
+	return backupFile(p)
+}
+
+// backupFile renames p to p.corrupt-<timestamp>, never over an existing backup.
+func backupFile(p string) (string, error) {
+	base := p + ".corrupt-" + time.Now().Format("20060102-150405")
+	backup := base
+	for i := 2; ; i++ {
+		if _, err := os.Lstat(backup); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		backup = fmt.Sprintf("%s-%d", base, i)
+	}
 	if err := os.Rename(p, backup); err != nil {
 		return "", err
 	}

@@ -285,6 +285,7 @@
                         <option value="bambu_cloud">Bambu Lab (cloud, experimental)</option>
                         <option value="klipper">Klipper / Moonraker</option>
                         <option value="prusalink">Prusa (PrusaLink)</option>
+                        <option value="octoprint">OctoPrint</option>
                         <option value="home_assistant">Home Assistant (read-only)</option>
                     </select>
                     <i class="fas fa-chevron-down"></i>
@@ -315,6 +316,10 @@
                 <div id="fieldPrusaLinkUrl" class="hidden">
                     <label for="pPrusaLinkUrl" class="field-label">PrusaLink URL</label>
                     <input type="text" id="pPrusaLinkUrl" autocomplete="off" class="field" placeholder="http://192.168.1.50">
+                </div>
+                <div id="fieldOctoPrintUrl" class="hidden">
+                    <label for="pOctoPrintUrl" class="field-label">OctoPrint URL</label>
+                    <input type="text" id="pOctoPrintUrl" autocomplete="off" class="field" placeholder="http://octopi.local">
                 </div>
                 <div id="fieldHomeAssistant" class="hidden space-y-3">
                     <div>
@@ -367,6 +372,37 @@
                     <label for="pWebcamUrl" class="field-label">Webcam URL <span class="font-normal">(optional)</span></label>
                     <input type="text" id="pWebcamUrl" autocomplete="off" class="field" placeholder="http://192.168.1.120/webcam/?action=stream">
                     <p id="webcamHint" class="text-xs text-text-2 mt-1.5">Leave blank to auto-detect. Set this if the camera button doesn't work.</p>
+                </div>
+                <!-- Smart plug: optional for every printer the Bridge controls. -->
+                <div id="fieldPlug" class="hidden border-t border-border pt-3 space-y-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <span class="field-label mb-0">Smart plug <span class="font-normal">(optional)</span></span>
+                        <button type="button" id="plugTestBtn" onclick="testPlug()" class="btn-ghost btn-xs">Check plug</button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-[10rem_minmax(0,1fr)] gap-3">
+                        <div>
+                            <label for="pPlugKind" class="field-label">Type</label>
+                            <div class="select-wrap">
+                                <select id="pPlugKind" class="field" onchange="onPlugKindChange()">
+                                    <option value="">None</option>
+                                    <option value="shelly">Shelly</option>
+                                    <option value="tasmota">Tasmota</option>
+                                    <option value="kasa">Kasa (older firmware)</option>
+                                </select>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="pPlugAddress" class="field-label">Plug address</label>
+                            <input type="text" id="pPlugAddress" autocomplete="off" class="field" placeholder="192.168.1.80">
+                        </div>
+                    </div>
+                    <div id="plugAutoOffRow" class="hidden flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+                        <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" id="pPlugAutoOff" class="w-4 h-4 rounded"> Turn the plug off after a print</label>
+                        <span class="inline-flex items-center gap-1.5 text-text-2 whitespace-nowrap">after <input type="number" id="pPlugDelay" min="1" max="240" value="10" class="field py-1 text-sm" style="width:4.5rem"> min idle and cool</span>
+                    </div>
+                    <p id="plugTestResult" class="hidden text-xs leading-relaxed" role="status" aria-live="polite"></p>
+                    <p class="text-xs text-text-2">The Bridge reads the plug on your network, never through the maker's cloud. FoxTrack shows the watts and the energy each print used, and can switch the plug from the printer's controls.</p>
                 </div>
                 <div class="flex items-center gap-2 pt-1 flex-wrap">
                     <button onclick="testConnection()" id="testBtn" class="btn-outline btn-lg">Test connection</button>
@@ -637,6 +673,31 @@
                 <ul id="deviceUrls" class="space-y-2"></ul>
                 <p id="deviceDocker" class="hidden mt-3 text-xs leading-relaxed text-text-2">Running in Docker. Use the host's address and the mapped port.</p>
             </section>
+            <section id="virtualPrinterCard" class="rounded-lg border border-border bg-panel p-5">
+                <div class="flex items-start justify-between gap-3 mb-1">
+                    <h2 class="font-heading text-xl font-medium leading-tight">Virtual printer</h2>
+                    <button id="vpToggle" onclick="toggleVirtualPrinter()" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Enable the virtual printer">
+                        <span class="switch-thumb"></span>
+                    </button>
+                </div>
+                <p class="text-sm leading-relaxed text-text-2 mb-4">The Bridge can look like an OctoPrint printer to OrcaSlicer and PrusaSlicer. Add a printer host of type OctoPrint in the slicer with the address and key below. Files you send go to FoxTrack, Printers page, From the slicer. Print them from FoxTrack.</p>
+                <p id="vpStandalone" class="hidden text-sm leading-relaxed text-text-2">Connect the Bridge to FoxTrack first (the FoxTrack card above). The virtual printer sends files to FoxTrack, so it has nowhere to send them until then.</p>
+                <div id="vpDetails" class="hidden space-y-3">
+                    <div>
+                        <span class="field-label">Address for the slicer</span>
+                        <ul id="vpUrls" class="space-y-2"></ul>
+                        <p id="vpUrlsNone" class="hidden text-xs text-text-2">No network address found yet. Use this computer's IP address with port <span id="vpPortText"></span>.</p>
+                    </div>
+                    <div>
+                        <span class="field-label">API key</span>
+                        <div class="flex items-center gap-2">
+                            <div class="min-w-0 flex-1 rounded-md border border-border bg-panel-2 px-3 py-1.5"><code id="vpKey" class="field-mono wrap-any"></code></div>
+                            <button type="button" onclick="copyVirtualPrinterKey()" class="btn-outline shrink-0">Copy</button>
+                        </div>
+                    </div>
+                    <p id="vpStatus" class="text-xs text-text-2"></p>
+                </div>
+            </section>
             <section id="assistantCard" class="rounded-lg border border-border bg-panel p-5">
                 <div class="flex items-start justify-between gap-3 mb-1">
                     <h2 class="font-heading text-xl font-medium leading-tight">Assistant <span class="font-sans align-middle inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Experimental</span></h2>
@@ -803,6 +864,11 @@ const brands = {
         fields: { prusaLinkUrl: true, klipperKey: true, webcamUrl: true },
         keyLabel: 'PrusaLink API key', keyPlaceholder: 'PrusaLink API key'
     },
+    octoprint: {
+        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Enter the OctoPrint address (for example http://octopi.local) and an API key. In OctoPrint, make one under Settings, Application Keys, or copy the global key under Settings, API. The webcam is found from OctoPrint\'s own settings; set a URL only if the camera button does not work.</div>',
+        fields: { octoPrintUrl: true, klipperKey: true, webcamUrl: true },
+        keyLabel: 'OctoPrint API key', keyPlaceholder: 'OctoPrint API key'
+    },
     home_assistant: {
         instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Read-only: FoxTrack sees the status but cannot pause, stop or start a print. Create a long-lived access token on your Home Assistant profile page, then enter the entity IDs of your printer\'s sensors.</div>',
         fields: { homeAssistant: true, webcamUrl: true }
@@ -810,10 +876,12 @@ const brands = {
 };
 
 // Printer kinds the Bridge reaches over HTTP and FoxTrack knows by name.
-const NAME_KEYED_BRANDS = ['klipper', 'prusalink', 'home_assistant'];
+const NAME_KEYED_BRANDS = ['klipper', 'prusalink', 'octoprint', 'home_assistant'];
+// Printer types that can have a smart plug: every one the Bridge talks to itself.
+const PLUG_BRANDS = ['bambu', 'klipper', 'prusalink', 'octoprint'];
 
 function escHtml(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return (str == null ? '' : String(str)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function formatRemaining(minutes) {
@@ -870,11 +938,12 @@ function printerBrand(p) {
     if (isCloudPrinter(p)) return 'bambu_cloud';
     if (p && p.moonraker_url) return 'klipper';
     if (p && p.prusalink_url) return 'prusalink';
+    if (p && p.octoprint_url) return 'octoprint';
     if (p && p.home_assistant_url) return 'home_assistant';
     return (p && p.serial && (p.lan_code || p.lan_code_set)) ? 'bambu' : 'klipper';
 }
 
-const BRAND_LABELS = { bambu_cloud: 'Bambu cloud', bambu: 'Bambu', klipper: 'Klipper', prusalink: 'PrusaLink', home_assistant: 'Home Assistant' };
+const BRAND_LABELS = { bambu_cloud: 'Bambu cloud', bambu: 'Bambu', klipper: 'Klipper', prusalink: 'PrusaLink', octoprint: 'OctoPrint', home_assistant: 'Home Assistant' };
 function printerTypeLabel(p) { return BRAND_LABELS[printerBrand(p)]; }
 
 let toastTimer = null;
@@ -895,6 +964,9 @@ function toast(msg, type = 'success') {
 
 async function apiFetch(url, options = {}) {
     let res;
+    // Every write carries a JSON Content-Type and a body, even an empty one: the
+    // server refuses cross-site writes that lack them.
+    if ((options.method || 'GET').toUpperCase() !== 'GET' && options.body == null) options = { ...options, body: '{}' };
     try { res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options }); }
     catch (_) { throw new Error("Can't reach the Bridge. Is it still running?"); }
     if (!res.ok) {
@@ -1031,6 +1103,7 @@ function showView(view) {
     if (view === 'settings') {
         if (foxtrackTokenSet) checkFoxTrack(); else setFoxTrackStatus('', '', '');
         loadNetwork();
+        loadVirtualPrinter();
     }
 }
 
@@ -1065,8 +1138,9 @@ async function toggleAutoUpdate() {
     try {
         // Flipping the switch is an explicit statement about auto_update, so it
         // is always sent, unlike a Settings save, which leaves it alone when
-        // the dashboard has not managed to read the stored value yet.
-        await apiFetch('/api/config', { method:'POST', body:JSON.stringify(buildSettingsPayload({ includeAutoUpdate: true })) });
+        // the dashboard has not managed to read the stored value yet. Only that
+        // key goes: the key inputs may hold half-typed tokens.
+        await apiFetch('/api/config', { method:'POST', body:JSON.stringify({ auto_update: !previous }) });
     } catch (e) {
         applyAutoUpdateState(previous);
         toast("Couldn't save the setting: " + e.message, 'error');
@@ -1442,7 +1516,7 @@ function goToSettingsCard(cardId, focusId) {
 // ── Network scan (GET /api/discover) ──
 
 const DISCOVERY_TTL_MS = 60000;
-const DISCOVERY_TYPES = ['bambu', 'klipper', 'prusalink'];
+const DISCOVERY_TYPES = ['bambu', 'klipper', 'prusalink', 'octoprint'];
 const discovery = { printers: [], notes: [], at: 0, loading: false, failed: false, promise: null };
 let pickedDisc = null;     // the found printer that filled the add form
 let pickedDiscKey = '';    // ...and its key, to highlight the row
@@ -1496,7 +1570,7 @@ function discSub(row) {
 // Added already: the scan said so, or a saved printer has the same serial or address.
 function discAdded(row) {
     if (row.added) return true;
-    return configuredPrinters.some(p => (row.serial && p.serial === row.serial) || (row.url && (p.moonraker_url === row.url || p.prusalink_url === row.url)));
+    return configuredPrinters.some(p => (row.serial && p.serial === row.serial) || (row.url && (p.moonraker_url === row.url || p.prusalink_url === row.url || p.octoprint_url === row.url)));
 }
 function discIsCloud(row) { return row.type === 'bambu' && row.connect === 'cloud'; }
 
@@ -1527,7 +1601,7 @@ function renderWelcomeScan() {
             + '</div>'
             + (discAdded(r)
                 ? '<span class="badge-muted inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"><i class="fas fa-check-circle"></i> Added</span>'
-                : '<button type="button" onclick="addDiscovered(' + i + ')" class="btn-outline shrink-0" aria-label="Add ' + name + '">Add</button>')
+                : '<button type="button" onclick="addDiscovered(this.dataset.k)" data-k="' + escHtml(discKey(r)) + '" class="btn-outline shrink-0" aria-label="Add ' + name + '">Add</button>')
             + '</div>';
     }).join('');
     if (!d.loading && !d.failed && !rows.length) {
@@ -1550,7 +1624,7 @@ function renderModalScan() {
     const rows = d.printers.map((r, i) => ({ r, i })).filter(x => !discAdded(x.r));
     if (rows.length) {
         list.innerHTML = '<div class="max-h-44 space-y-1.5 overflow-y-auto">' + rows.map(({ r, i }) =>
-            '<button type="button" onclick="pickDiscovered(' + i + ')" aria-pressed="' + (discKey(r) === pickedDiscKey) + '" class="disc-row flex w-full items-center gap-2.5 rounded-md border border-border px-3 py-2 text-left">'
+            '<button type="button" onclick="pickDiscovered(this.dataset.k)" data-k="' + escHtml(discKey(r)) + '" aria-pressed="' + (discKey(r) === pickedDiscKey) + '" class="disc-row flex w-full items-center gap-2.5 rounded-md border border-border px-3 py-2 text-left">'
             + '<i class="fas fa-print shrink-0 text-text-2"></i>'
             + '<span class="min-w-0 flex-1"><span class="block truncate text-sm">' + escHtml(discName(r)) + ' <span class="text-xs text-text-2">' + escHtml(discSub(r)) + '</span></span>'
             + (discIsCloud(r) ? '<span class="block text-xs leading-relaxed text-text-2">Needs LAN-only mode on the printer.</span>' : '')
@@ -1580,14 +1654,15 @@ function applyDiscovered(row) {
     set('pKlipperKey', '');
     if (row.type === 'bambu') { set('pIp', row.ip); set('pSerial', row.serial); }
     else if (row.type === 'klipper') set('pMoonrakerUrl', row.url || (row.ip ? 'http://' + row.ip + ':7125' : ''));
+    else if (row.type === 'octoprint') set('pOctoPrintUrl', row.url || (row.ip ? 'http://' + row.ip : ''));
     else set('pPrusaLinkUrl', row.url || (row.ip ? 'http://' + row.ip : ''));
-    const required = { bambu: ['pName', 'pIp', 'pSerial', 'pLanCode'], klipper: ['pName', 'pMoonrakerUrl'], prusalink: ['pName', 'pPrusaLinkUrl', 'pKlipperKey'] }[row.type];
+    const required = { bambu: ['pName', 'pIp', 'pSerial', 'pLanCode'], klipper: ['pName', 'pMoonrakerUrl'], prusalink: ['pName', 'pPrusaLinkUrl', 'pKlipperKey'], octoprint: ['pName', 'pOctoPrintUrl', 'pKlipperKey'] }[row.type];
     const next = required.find(id => !document.getElementById(id).value.trim());
     document.getElementById(next || 'connectBtn').focus();
     renderModalScan();
 }
-function pickDiscovered(i) { const r = discovery.printers[i]; if (r) applyDiscovered(r); }
-function addDiscovered(i) { const r = discovery.printers[i]; if (r) openAddPrinterModal(r); }
+function pickDiscovered(k) { const r = discovery.printers.find(x => discKey(x) === k); if (r) applyDiscovered(r); }
+function addDiscovered(k) { const r = discovery.printers.find(x => discKey(x) === k); if (r) openAddPrinterModal(r); }
 
 // ── First-run welcome ──
 
@@ -1803,6 +1878,115 @@ function renderFirstPrinterCard() {
 }
 function dismissFirstPrinterCard() { flagSet(FLAG_FIRST_DISMISSED); renderFirstPrinterCard(); }
 
+// ── Smart plug fields on the printer form ──
+
+function plugFromForm() {
+    const kind = (document.getElementById('pPlugKind') || {}).value || '';
+    const address = ((document.getElementById('pPlugAddress') || {}).value || '').trim();
+    const autoOff = !!(document.getElementById('pPlugAutoOff') || {}).checked;
+    const delay = parseInt((document.getElementById('pPlugDelay') || {}).value, 10);
+    return { kind, address, auto_off: autoOff, auto_off_delay_minutes: delay > 0 ? delay : 10 };
+}
+
+function fillPlugFields(plug) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v; el.classList.remove(FIELD_ERROR_CLASS); } };
+    set('pPlugKind', plug && plug.kind ? plug.kind : '');
+    set('pPlugAddress', plug && plug.address ? plug.address : '');
+    set('pPlugDelay', plug && plug.auto_off_delay_minutes > 0 ? plug.auto_off_delay_minutes : 10);
+    const cb = document.getElementById('pPlugAutoOff');
+    if (cb) cb.checked = !!(plug && plug.auto_off);
+    const res = document.getElementById('plugTestResult');
+    if (res) { res.textContent = ''; res.classList.add('hidden'); }
+    onPlugKindChange();
+}
+
+function onPlugKindChange() {
+    const kind = (document.getElementById('pPlugKind') || {}).value || '';
+    const row = document.getElementById('plugAutoOffRow');
+    if (row) row.classList.toggle('hidden', !kind);
+    const btn = document.getElementById('plugTestBtn');
+    if (btn) btn.classList.toggle('hidden', !kind);
+    const addr = document.getElementById('pPlugAddress');
+    if (addr) addr.placeholder = kind === 'kasa' ? '192.168.1.80 (port 9999)' : '192.168.1.80';
+}
+
+async function testPlug() {
+    const plug = plugFromForm();
+    const res = document.getElementById('plugTestResult');
+    const btn = document.getElementById('plugTestBtn');
+    if (!res) return;
+    res.classList.remove('hidden');
+    res.className = 'text-xs leading-relaxed text-text-2';
+    res.textContent = 'Checking the plug…';
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiFetch('/api/plug/test', { method: 'POST', body: JSON.stringify({ kind: plug.kind, address: plug.address }) });
+        res.className = 'text-xs leading-relaxed ' + (r.ok ? 'text-text' : 'text-danger');
+        res.textContent = r.message || (r.ok ? 'Plug found.' : 'The plug did not answer.');
+    } catch (e) {
+        res.className = 'text-xs leading-relaxed text-danger';
+        res.textContent = friendlyError(e.message);
+    } finally { if (btn) btn.disabled = false; }
+}
+
+// ── Virtual printer (GET /api/virtual-printer, saved through /api/config) ──
+
+let virtualPrinterInfo = null;
+
+async function loadVirtualPrinter() {
+    try { virtualPrinterInfo = await apiFetch('/api/virtual-printer'); } catch (_) { virtualPrinterInfo = null; }
+    renderVirtualPrinterCard();
+}
+
+function renderVirtualPrinterCard() {
+    const card = document.getElementById('virtualPrinterCard');
+    if (!card) return;
+    const vp = virtualPrinterInfo;
+    const toggle = document.getElementById('vpToggle');
+    const connected = !!(vp && vp.connected);
+    const enabled = !!(vp && vp.enabled);
+    if (toggle) {
+        toggle.setAttribute('aria-checked', enabled && connected);
+        toggle.disabled = !connected;
+        toggle.title = connected ? '' : 'Connect the Bridge to FoxTrack first';
+    }
+    document.getElementById('vpStandalone').classList.toggle('hidden', connected);
+    document.getElementById('vpDetails').classList.toggle('hidden', !(connected && enabled));
+    if (!(connected && enabled)) return;
+    const urls = Array.isArray(vp.urls) ? vp.urls : [];
+    document.getElementById('vpUrls').innerHTML = urls.map((u, i) =>
+        '<li class="flex items-center gap-2">'
+        + '<div class="min-w-0 flex-1 rounded-md border border-border bg-panel-2 px-3 py-1.5"><code id="vpUrl' + i + '" class="field-mono wrap-any">' + escHtml(u) + '</code></div>'
+        + '<button type="button" onclick="copyVirtualPrinterUrl(' + i + ')" class="btn-outline shrink-0">Copy</button>'
+        + '</li>').join('');
+    document.getElementById('vpUrlsNone').classList.toggle('hidden', urls.length > 0);
+    document.getElementById('vpPortText').textContent = vp.port;
+    document.getElementById('vpKey').textContent = vp.api_key || '';
+    document.getElementById('vpStatus').textContent = vp.running
+        ? 'Listening on port ' + vp.port + '. In the slicer: host type OctoPrint, this address, this key.'
+        : 'Port ' + vp.port + ' could not be opened. Another program may use it; see the Bridge log.';
+}
+
+async function toggleVirtualPrinter() {
+    const vp = virtualPrinterInfo || {};
+    if (!vp.connected) return;
+    const enabled = !vp.enabled;
+    try {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ virtual_printer: { enabled, port: vp.port || 8090 } }) });
+        toast(enabled ? 'Virtual printer on' : 'Virtual printer off');
+    } catch (e) { toast("Couldn't save: " + friendlyError(e.message), 'error'); }
+    await loadVirtualPrinter();
+}
+
+async function copyVirtualPrinterKey() {
+    const el = document.getElementById('vpKey');
+    toast(await copyText(el.textContent, el) ? 'API key copied' : 'Select the key and copy it by hand', 'info');
+}
+async function copyVirtualPrinterUrl(i) {
+    const el = document.getElementById('vpUrl' + i);
+    toast(await copyText(el.textContent, el) ? 'Address copied' : 'Select the address and copy it by hand', 'info');
+}
+
 // ── Open on another device (GET /api/network) ──
 
 let networkInfo = null;
@@ -1889,6 +2073,8 @@ function openEditPrinterModal(id) {
     document.getElementById('pMoonrakerUrl').value = printer.moonraker_url || '';
     document.getElementById('pWebcamUrl').value = printer.webcam_url || '';
     document.getElementById('pPrusaLinkUrl').value = printer.prusalink_url || '';
+    document.getElementById('pOctoPrintUrl').value = printer.octoprint_url || '';
+    fillPlugFields(printer.plug);
     document.getElementById('pHaUrl').value = printer.home_assistant_url || '';
     Object.entries(HA_FIELDS).forEach(([id, key]) => { document.getElementById(id).value = printer[key] || ''; });
     if (printer.lan_code_set) document.getElementById('pLanCode').placeholder = 'Saved. Leave blank to keep it';
@@ -1907,7 +2093,8 @@ function closeAddPrinterModal() {
     document.getElementById('fieldBrand').classList.remove('hidden');
     document.getElementById('pNameHint').classList.add('hidden');
     Object.entries(SECRET_PLACEHOLDERS).forEach(([id, text]) => { const el=document.getElementById(id); if(el) el.placeholder=text; });
-    ['pName','pIp','pMoonrakerUrl','pSerial','pLanCode','pKlipperKey','pWebcamUrl','pPrusaLinkUrl','pHaUrl','pHaToken',...Object.keys(HA_FIELDS)].forEach(id => { const el=document.getElementById(id); if(el) { el.value=''; el.classList.remove(FIELD_ERROR_CLASS); } });
+    ['pName','pIp','pMoonrakerUrl','pSerial','pLanCode','pKlipperKey','pWebcamUrl','pPrusaLinkUrl','pOctoPrintUrl','pHaUrl','pHaToken',...Object.keys(HA_FIELDS)].forEach(id => { const el=document.getElementById(id); if(el) { el.value=''; el.classList.remove(FIELD_ERROR_CLASS); } });
+    fillPlugFields(null);
     document.getElementById('pBrand').value = '';
     document.getElementById('brandInstructions').classList.add('hidden');
     document.getElementById('printerFields').classList.add('hidden');
@@ -1944,7 +2131,9 @@ function onBrandChange() {
     const wc = document.getElementById('fieldWebcamUrl');
     cfg.fields.webcamUrl ? (wc.classList.remove('hidden'), wc.style.display='') : (wc.classList.add('hidden'), wc.style.display='none');
     document.getElementById('fieldPrusaLinkUrl').classList.toggle('hidden', !cfg.fields.prusaLinkUrl);
+    document.getElementById('fieldOctoPrintUrl').classList.toggle('hidden', !cfg.fields.octoPrintUrl);
     document.getElementById('fieldHomeAssistant').classList.toggle('hidden', !cfg.fields.homeAssistant);
+    document.getElementById('fieldPlug').classList.toggle('hidden', !PLUG_BRANDS.includes(brand));
     // Only Moonraker has webcam paths to guess.
     document.getElementById('webcamHint').classList.toggle('hidden', brand !== 'klipper');
     document.getElementById('labelKlipperKey').innerHTML = cfg.keyLabel ? escHtml(cfg.keyLabel) : 'Moonraker API key <span class="font-normal">(optional)</span>';
@@ -2026,6 +2215,7 @@ function readPrinterForm({ forTest = false } = {}) {
     const klipperKey = val('pKlipperKey');
     const webcamUrl = val('pWebcamUrl');
     const prusaLinkUrl = val('pPrusaLinkUrl');
+    const octoPrintUrl = val('pOctoPrintUrl');
     const ha = { home_assistant_url: val('pHaUrl'), home_assistant_token: val('pHaToken') };
     Object.entries(HA_FIELDS).forEach(([id, key]) => { ha[key] = val(id); });
     const errEl = document.getElementById('addPrinterError');
@@ -2049,6 +2239,14 @@ function readPrinterForm({ forTest = false } = {}) {
         // An edit may leave the key blank to keep the saved one.
         if (!editingPrinterId) { markField('pKlipperKey', !klipperKey); if (!klipperKey) invalid = true; }
     }
+    if (brand === 'octoprint') {
+        markField('pOctoPrintUrl', !octoPrintUrl); if (!octoPrintUrl) invalid = true;
+        if (!editingPrinterId) { markField('pKlipperKey', !klipperKey); if (!klipperKey) invalid = true; }
+    }
+    // A plug type without an address (or the other way round) is half a plug.
+    const plug = PLUG_BRANDS.includes(brand) ? plugFromForm() : null;
+    if (plug && plug.kind && !plug.address) { markField('pPlugAddress', true); invalid = true; }
+    if (plug && !plug.kind && plug.address) { markField('pPlugKind', true); invalid = true; }
     if (brand === 'home_assistant') {
         markField('pHaUrl', !ha.home_assistant_url); if (!ha.home_assistant_url) invalid = true;
         markField('pHaState', !ha.ha_state_entity); if (!ha.ha_state_entity) invalid = true;
@@ -2064,14 +2262,19 @@ function readPrinterForm({ forTest = false } = {}) {
         if (brand === 'bambu') Object.assign(payload, { ip, serial, lan_code: lanCode });
         else if (brand === 'bambu_cloud') payload.ip = ip;
         else if (brand === 'prusalink') Object.assign(payload, { prusalink_url: prusaLinkUrl, api_key: klipperKey, webcam_url: webcamUrl });
+        else if (brand === 'octoprint') Object.assign(payload, { octoprint_url: octoPrintUrl, api_key: klipperKey, webcam_url: webcamUrl });
         else if (brand === 'home_assistant') Object.assign(payload, { webcam_url: webcamUrl }, ha);
         else Object.assign(payload, { moonraker_url: moonrakerUrl, api_key: klipperKey, webcam_url: webcamUrl });
+        // The plug is sent as a whole: {kind: ""} removes it.
+        if (plug) payload.plug = plug.kind ? plug : { kind: '' };
     } else {
         payload = { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl };
         // The newer types send only their own fields, so a URL typed under another
         // type before switching can never decide what kind of printer this is.
         if (brand === 'prusalink') payload = { name, prusalink_url: prusaLinkUrl, api_key: klipperKey, webcam_url: webcamUrl };
+        if (brand === 'octoprint') payload = { name, octoprint_url: octoPrintUrl, api_key: klipperKey, webcam_url: webcamUrl };
         if (brand === 'home_assistant') payload = { name, webcam_url: webcamUrl, ...ha };
+        if (plug && plug.kind) payload.plug = plug;
         if (brand === 'bambu_cloud') {
             const picked = document.querySelector('input[name="cloudDevice"]:checked');
             if (!picked) { showAddPrinterError('Pick a printer from your Bambu account'); return null; }
@@ -2148,7 +2351,7 @@ async function runPrinterCheck(payload) {
 // A wrong code or serial: put the cursor on the field to fix.
 function focusCheckField(r, brand) {
     const byCode = {
-        auth: { bambu: 'pLanCode', klipper: 'pKlipperKey', prusalink: 'pKlipperKey', home_assistant: 'pHaToken' },
+        auth: { bambu: 'pLanCode', klipper: 'pKlipperKey', prusalink: 'pKlipperKey', octoprint: 'pKlipperKey', home_assistant: 'pHaToken' },
         serial: { bambu: 'pSerial' },
         not_found: { home_assistant: 'pHaState' },
     };
@@ -2322,7 +2525,7 @@ function sendControlEncoded(enc,cmd,payload) { sendControl(decodePrinterId(enc),
 function confirmStopEncoded(enc) { confirmStop(decodePrinterId(enc)); }
 function startPrintEncoded(enc) { startPrint(decodePrinterId(enc)); }
 
-const CONTROL_DONE = { pause:'Print paused', resume:'Print resumed', stop:'Print stopped', start:'Print started', print_speed:'Speed changed', toggle_light:'Light switched' };
+const CONTROL_DONE = { pause:'Print paused', resume:'Print resumed', stop:'Print stopped', start:'Print started', print_speed:'Speed changed', toggle_light:'Light switched', plug_on:'Plug turned on', plug_off:'Plug turned off', home:'Homing' };
 
 // Resolves true when the printer took the command (failures are toasted here).
 async function sendControl(id, command, payload) {
@@ -2594,11 +2797,18 @@ function collectHooks(el) {
         camUnavailable: el.querySelector('.cam-unavailable'),
         fanPanel: el.querySelector('.fan-panel'),
         fanButtons: Array.from(el.querySelectorAll('.fan-btn')),
+        tempsPanel: el.querySelector('.temps-panel'), // Bambu LAN, Klipper, OctoPrint
+        tempNozzle: el.querySelector('.temp-nozzle'),
+        tempBed: el.querySelector('.temp-bed'),
+        homeBtn: el.querySelector('.home-btn'),
         speedPanel: el.querySelector('.speed-panel'), // Bambu only; null on Klipper cards
         speedButtons: Array.from(el.querySelectorAll('.speed-btn')), // Bambu only; empty on Klipper cards
         amsContainer: el.querySelector('.ams-container'), // Bambu only; null on Klipper cards
         gcodePanel: el.querySelector('.gcode-panel'), // Bambu + advancedMode only
         gcodeInput: el.querySelector('.gcode-input'),
+        alarmList: el.querySelector('.alarm-list'),
+        plugText: el.querySelector('.plug-text'),   // only on a card whose printer has a plug
+        plugBtn: el.querySelector('.plug-btn'),
     };
 }
 
@@ -2686,6 +2896,17 @@ function patchCard(entry, printer) {
         hooks.errorText.title = errLine.title;
         hooks.errorText.classList.toggle('hidden', !error);
     }
+    if (hooks.alarmList) {
+        const alarms = live && Array.isArray(live.alarms) ? live.alarms : [];
+        const html = alarmsInnerHTML(alarms);
+        if (hooks.alarmList._html !== html) { hooks.alarmList.innerHTML = html; hooks.alarmList._html = html; }
+        hooks.alarmList.classList.toggle('hidden', !alarms.length);
+    }
+    if (hooks.plugText) {
+        const plug = live && live.plug ? live.plug : null;
+        hooks.plugText.textContent = plugLineText(plug);
+        if (hooks.plugBtn) applyPlugButton(hooks.plugBtn, plug, status);
+    }
 
     const filamentUsedMM = live && live.filament_used_mm > 0 ? live.filament_used_mm : null;
     const showFilament = status === 'printing' && filamentUsedMM !== null;
@@ -2695,6 +2916,9 @@ function patchCard(entry, printer) {
     }
 
     [hooks.stopBtn, hooks.startBtn].forEach(b => { if (b) b.disabled = dis; });
+    if (hooks.homeBtn) hooks.homeBtn.disabled = dis || status === 'printing' || status === 'paused';
+    if (hooks.tempNozzle) hooks.tempNozzle.placeholder = nozzleTgt !== null ? Math.round(nozzleTgt) : '0';
+    if (hooks.tempBed) hooks.tempBed.placeholder = bedTgt !== null ? Math.round(bedTgt) : '0';
     if (hooks.pauseBtn) hooks.pauseBtn.disabled = status !== 'printing';
     if (hooks.resumeBtn) hooks.resumeBtn.disabled = status !== 'paused';
 
@@ -2749,6 +2973,60 @@ function patchCard(entry, printer) {
 // The error line of a card. A raw Go error ("Get "http://...": context deadline
 // exceeded") is only shown, in a tooltip, when the printer is offline and the
 // friendly text replaced it.
+// ── Alarms and smart plug on a card ──
+
+const BAMBU_HMS_WIKI = 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/';
+
+// One line per alarm, worst first, at most three. Bambu HMS codes link to the
+// Bambu wiki page that explains them.
+function alarmsInnerHTML(alarms) {
+    const rank = { fatal: 0, serious: 1, common: 2, info: 3 };
+    const sorted = alarms.slice().sort((a, b) => (rank[a.severity] ?? 2) - (rank[b.severity] ?? 2)).slice(0, 3);
+    return sorted.map(a => {
+        const serious = a.severity === 'fatal' || a.severity === 'serious';
+        const text = a.message ? a.message : (a.source === 'hms' ? 'HMS ' + (a.code || '') : 'Code ' + (a.code || ''));
+        const link = a.source === 'hms' && a.code
+            ? ' <a href="' + BAMBU_HMS_WIKI + encodeURIComponent(a.code) + '" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">What it means</a>'
+            : '';
+        return '<p class="wrap-any text-[11px] ' + (serious ? 'text-danger' : 'text-text-2') + '" title="' + escHtml(a.code || '') + '"><i class="fas fa-triangle-exclamation mr-1"></i>' + escHtml(text) + link + '</p>';
+    }).join('') + (alarms.length > 3 ? '<p class="text-[11px] text-text-2">and ' + (alarms.length - 3) + ' more</p>' : '');
+}
+
+function plugLineText(plug) {
+    if (!plug) return 'Plug: waiting for the first reading';
+    if (!plug.reachable) return 'Plug not answering (last seen ' + (plug.on ? 'on' : 'off') + ')';
+    let s = 'Plug ' + (plug.on ? 'on' : 'off');
+    if (plug.on && typeof plug.watts === 'number') s += ' · ' + (plug.watts >= 100 ? Math.round(plug.watts) : plug.watts.toFixed(1)) + ' W';
+    if (plug.auto_off) s += ' · off after the print';
+    return s;
+}
+
+// Off is refused while the printer prints or is paused, so the button says so.
+function plugButtonState(plug, status) {
+    const on = !!(plug && plug.on);
+    const busy = status === 'printing' || status === 'paused';
+    return { label: on ? 'Plug off' : 'Plug on', cmd: on ? 'plug_off' : 'plug_on', disabled: !plug || !plug.reachable || (on && busy), title: on && busy ? 'Stop the print first' : '' };
+}
+
+function plugButtonHTML(enc, plug, status) {
+    const st = plugButtonState(plug, status);
+    return '<button ' + (st.disabled ? 'disabled ' : '') + 'onclick="sendPlugEncoded(\'' + enc + '\')" class="plug-btn btn-outline" title="' + escHtml(st.title) + '"><i class="fas fa-plug mr-1"></i>' + st.label + '</button>';
+}
+
+function applyPlugButton(btn, plug, status) {
+    const st = plugButtonState(plug, status);
+    btn.disabled = st.disabled;
+    btn.title = st.title;
+    btn.innerHTML = '<i class="fas fa-plug mr-1"></i>' + st.label;
+}
+
+function sendPlugEncoded(enc) {
+    const id = decodePrinterId(enc);
+    const live = liveStatus[id] || {};
+    const st = plugButtonState(live.plug, live.status);
+    sendControl(id, st.cmd);
+}
+
 function errorLineParts(status, error) {
     if (!error) return { text: '', title: '' };
     const friendly = status === 'disconnected' ? friendlyError(error) : error;
@@ -2813,10 +3091,12 @@ function cardInnerHTML(printer, live) {
     const isCloud = isCloudPrinter(printer);
     const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
     const typeLabel = printerTypeLabel(printer);
-    // PrusaLink: pause, resume and stop only. Home Assistant: read-only.
+    // PrusaLink and OctoPrint: pause, resume and stop only. Home Assistant: read-only.
     const brand = printerBrand(printer);
-    const noExtras = brand === 'prusalink' || brand === 'home_assistant';
+    const noExtras = brand === 'prusalink' || brand === 'octoprint' || brand === 'home_assistant';
     const readOnly = brand === 'home_assistant';
+    const plug = live && live.plug ? live.plug : null;
+    const alarms = live && Array.isArray(live.alarms) ? live.alarms : [];
 
     const sel = removeMode && selectedForRemoval.has(printer.id);
     const checkbox = removeMode
@@ -2900,6 +3180,26 @@ function cardInnerHTML(printer, live) {
         + '</div></div>'
         : '';
 
+    // Temps panel (Bridge 2.5.2): nozzle and bed targets, home. Not over Bambu
+    // Cloud (the printer refuses them), not PrusaLink (no API call for it),
+    // not Home Assistant (read-only).
+    const hasConsole = !removeMode && !isCloud && !readOnly && brand !== 'prusalink';
+    const tempInput = (cls, max, tgt, cmd) =>
+        '<div class="w-24 shrink-0"><input class="' + cls + ' field" type="number" inputmode="numeric" min="0" max="' + max + '" step="1" placeholder="' + (tgt !== null ? Math.round(tgt) : 0) + '"'
+        + ' aria-label="Target in degrees Celsius, 0 to ' + max + '" onkeydown="if(event.key===\'Enter\')setTempEncoded(\'' + enc + '\',\'' + cmd + '\')"></div>'
+        + '<button ' + dis + 'onclick="setTempEncoded(\'' + enc + '\',\'' + cmd + '\')" class="btn-outline">Set</button>';
+    const homeDis = (dis || status === 'printing' || status === 'paused') ? 'disabled ' : '';
+    const tempsPanel = hasConsole ?
+        '<div id="temps-' + enc + '" class="temps-panel hidden border-t border-border px-4 py-3">'
+        + '<div class="flex flex-wrap items-center gap-2">'
+        + '<span class="text-[11px] text-text-2">Nozzle</span>' + tempInput('temp-nozzle', 350, nozzleTgt, 'set_nozzle_temp')
+        + '<span class="text-[11px] text-text-2 ml-2">Bed</span>' + tempInput('temp-bed', 120, bedTgt, 'set_bed_temp')
+        + '<button ' + homeDis + 'onclick="sendControlEncoded(\'' + enc + '\',\'home\')" class="home-btn btn-outline ml-2" title="Home X, Y and Z">Home</button>'
+        + '</div>'
+        + '<p class="text-[11px] text-text-2 mt-2">0 turns a heater off. Home is off while a print runs.</p>'
+        + '</div>'
+        : '';
+
     const controls = removeMode ? '' :
         '<div class="flex flex-wrap items-end justify-between gap-3 mt-3">'
         + '<div class="flex flex-wrap gap-1.5">'
@@ -2910,6 +3210,8 @@ function cardInnerHTML(printer, live) {
             + '<button ' + (status === 'paused' ? '' : 'disabled ') + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
             + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger">Stop</button>')
         + (noExtras ? '' : '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '">' + lightHtml + '</button>')
+        + (printer.plug ? plugButtonHTML(enc, plug, status) : '')
+        + (hasConsole ? '<button onclick="toggleTemps(\'' + enc + '\')" class="btn-outline"><i class="fas fa-thermometer mr-1"></i>Temps</button>' : '')
         + camControls
         + ((isCloud || noExtras) ? '' :
             '<button onclick="toggleFan(\'' + enc + '\')" class="btn-outline"><i class="fas fa-fan mr-1"></i>Fan</button>'
@@ -2927,7 +3229,7 @@ function cardInnerHTML(printer, live) {
         + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>'
         + (isBambu
             ? 'Camera unavailable. The Bridge camera works with A1 and P1 series printers. Check the IP address and LAN access code.'
-            : 'Camera unavailable. Check the webcam service or URL.')
+            : (brand === 'octoprint' ? 'Camera unavailable. Check the webcam settings in OctoPrint, or enter the webcam URL on this printer.' : 'Camera unavailable. Check the webcam service or URL.'))
         + '</div>'
         + '</div>';
 
@@ -2973,6 +3275,8 @@ function cardInnerHTML(printer, live) {
         + '</div>'
         + '</div>'
         + '<p class="error-text wrap-any mt-2 text-[11px] text-danger' + (error ? '' : ' hidden') + '" title="' + escHtml(errorLineParts(status, error).title) + '">' + escHtml(errorLineParts(status, error).text) + '</p>'
+        + '<div class="alarm-list mt-2 space-y-1' + (alarms.length ? '' : ' hidden') + '">' + alarmsInnerHTML(alarms) + '</div>'
+        + (printer.plug ? '<p class="plug-line mt-2 text-[11px] text-text-2"><i class="fas fa-plug mr-1"></i><span class="plug-text">' + escHtml(plugLineText(plug)) + '</span></p>' : '')
         + '<div class="filament-wrap flex items-center gap-3 mt-2' + ((status==='printing' && filamentUsedMM !== null) ? '' : ' hidden') + '">'
         + '<span class="text-[11px] text-text-2"><i class="fas fa-ruler-horizontal mr-1"></i><span class="filament-value">' + (filamentUsedMM !== null ? (filamentUsedMM >= 1000 ? (filamentUsedMM/1000).toFixed(1)+'m' : Math.round(filamentUsedMM)+'mm') : '') + '</span></span>'
         + '</div>'
@@ -2981,21 +3285,27 @@ function cardInnerHTML(printer, live) {
         + camPanel
         + speedPanel
         + fanPanel
+        + tempsPanel
         + gcodePanel;
 }
 
 // ── Status poll ───────────────────────────────────────────────────────────────
 
+let pollSeq = 0, pollApplied = 0;
 async function pollStatus() {
+    const seq = ++pollSeq;
     try {
         const data = await apiFetch('/api/status');
-        if (!configEverLoaded) await loadConfig(); // the Bridge may have been starting
+        // Retry a failed load too: after a printer rename the old name would stay in configuredPrinters.
+        if (!configEverLoaded || configLoadFailed) await loadConfig(); // the Bridge may have been starting
+        if (seq < pollApplied) return; // a newer poll already landed
+        pollApplied = seq;
         prevLiveStatus = liveStatus;
         liveStatus = data || {};
         detectStatusTransitions();
         setBridgeStatus(true);
         renderPrinters();
-    } catch (_) { setBridgeStatus(false); renderPrinters(); }
+    } catch (_) { if (seq < pollApplied) return; setBridgeStatus(false); renderPrinters(); }
 }
 
 // ── Relay health ──────────────────────────────────────────────────────────────
@@ -3159,6 +3469,35 @@ async function setFanSpeedEncoded(enc, pct) {
         renderPrinters();
         pollStatus();
     }
+}
+
+// ── Temps panel: nozzle and bed targets, home (Bridge 2.5.2) ───────────────────
+
+function toggleTemps(enc) {
+    const entry = printerCardEls.get(decodePrinterId(enc));
+    const panel = entry && entry.hooks.tempsPanel;
+    if (!panel) return;
+    panel.classList.toggle('hidden');
+}
+
+async function setTempEncoded(enc, cmd) {
+    const id = decodePrinterId(enc);
+    const entry = printerCardEls.get(id);
+    const inp = entry && (cmd === 'set_bed_temp' ? entry.hooks.tempBed : entry.hooks.tempNozzle);
+    if (!inp) return;
+    const max = cmd === 'set_bed_temp' ? 120 : 350;
+    const text = inp.value.trim();
+    if (!/^\d{1,3}$/.test(text) || Number(text) > max) {
+        toast('Enter a whole number from 0 to ' + max + '.', 'error');
+        inp.focus();
+        return;
+    }
+    try {
+        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/' + cmd, { method:'POST', body:JSON.stringify({ celsius: Number(text) }) });
+        toast((cmd === 'set_bed_temp' ? 'Bed' : 'Nozzle') + (Number(text) === 0 ? ' heater off' : ' set to ' + text + ' °C'));
+        inp.value = '';
+        setTimeout(pollStatus, 1500);
+    } catch (e) { toast("Couldn't set the temperature: " + friendlyError(e.message), 'error'); }
 }
 
 // ── Gcode console ─────────────────────────────────────────────────────────────
@@ -3553,6 +3892,7 @@ async function restartForUpdate() {
     await loadConfig();
     renderPrinters();
     loadNetwork();   // not awaited: the addresses only matter to Settings and one card
+    loadVirtualPrinter();
     if (foxtrackLinked()) checkFoxTrack();   // feeds the top-bar FoxTrack chip
     setInterval(() => { if (foxtrackLinked()) checkFoxTrack(); }, 300000);
     await pollStatus();

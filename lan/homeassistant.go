@@ -60,7 +60,7 @@ func fetchHomeAssistantTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, we
 	if s, unit, err := get(p.HARemainingEntity); err == nil {
 		t.TimeRemaining = haMinutes(s, unit, time.Now())
 	}
-	return t, relayFor(t, configpkg.KindHomeAssistant, nil), nil
+	return t, relayFor(t, configpkg.KindHomeAssistant, []string{"alarms"}), nil
 }
 
 // haNumber reads a numeric entity state; "unavailable" and the like read as 0.

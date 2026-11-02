@@ -26,6 +26,8 @@ var (
 	errPrusaUnreachable = errors.New("Bridge could not reach the printer while sending the file. Check that the printer is on and PrusaLink is enabled.")
 	errPrusaRefused     = errors.New("The printer refused the file. Check that a USB drive is in the printer and has free space.")
 	errNoPrusaJob       = errors.New("The printer has no print running.")
+	// PrusaLink's API has no temperature or homing call.
+	errPrusaNoConsole = errors.New("This printer does not take temperature commands from the Bridge.")
 )
 
 func prusaLinkURL(p configpkg.Printer, path string) string {
@@ -63,8 +65,36 @@ func fetchPrusaLinkTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhoo
 		BedTarget:     floatAny(printer["target_bed"]),
 		TimeRemaining: max(0, int(floatAny(job["time_remaining"]))/60),
 		PrinterModel:  "PrusaLink",
+		Alarms:        prusaLinkAlarms(printer),
 	}
-	return t, relayFor(t, configpkg.KindPrusaLink, []string{"print_file"}), nil
+	if t.Status == "disconnected" {
+		// PrusaLink answered but has lost the printer: a failed poll, so a
+		// running print gets pollGrace instead of ending as cancelled.
+		return t, webhook.RelayPayload{}, fmt.Errorf("PrusaLink reports the printer as %q", stringAny(printer["state"]))
+	}
+	return t, relayFor(t, configpkg.KindPrusaLink, []string{"print_file", "alarms"}), nil
+}
+
+// prusaLinkAlarms reads the printer's own fault text: /api/v1/status carries
+// status_printer {ok, message} (firmware 5.x), and the state word ERROR or
+// ATTENTION. A fault is one serious alarm with that text.
+func prusaLinkAlarms(printer map[string]interface{}) []webhook.RelayAlarm {
+	sp := nestedMap(printer, "status_printer")
+	msg := strings.TrimSpace(stringAny(sp["message"]))
+	okV, hasOK := sp["ok"].(bool)
+	state := strings.ToUpper(strings.TrimSpace(stringAny(printer["state"])))
+	faulted := (hasOK && !okV) || state == "ERROR" || state == "ATTENTION"
+	if !faulted {
+		return nil
+	}
+	if msg == "" {
+		if state == "ATTENTION" {
+			msg = "The printer needs attention. Check its screen."
+		} else {
+			msg = "The printer reports an error. Check its screen."
+		}
+	}
+	return []webhook.RelayAlarm{webhook.MessageAlarm(webhook.AlarmSerious, msg)}
 }
 
 // sendPrusaLinkCommand runs pause, resume or stop on the current job. The job
@@ -198,10 +228,12 @@ func relayFor(t mqttpkg.TelemetryData, kind string, caps []string) webhook.Relay
 		BedTemper:          t.BedTemp,
 		BedTargetTemper:    t.BedTarget,
 		McRemainingTime:    t.TimeRemaining,
+		Alarms:             t.Alarms,
+		Plug:               t.Plug,
 		PrinterKind:        kind,
 		PrinterModel:       t.PrinterModel,
 		BridgeVersion:      version.AppVersion,
-		BridgeCapabilities: caps,
+		BridgeCapabilities: mqttpkg.WithPlugCaps(caps, t.Plug != nil),
 	}}
 }
 

@@ -29,9 +29,12 @@ import (
 type fakeServer struct {
 	ln       net.Listener
 	password string
-	final    string // reply sent after the data connection closes; "" = never send one
-	pasvHost string // host written in the 227 reply
-	drop     int    // bytes the server loses from the end of an upload
+	final    string              // reply sent after the data connection closes; "" = never send one
+	pasvHost string              // host written in the 227 reply
+	drop     int                 // bytes the server loses from the end of an upload
+	listing  map[string][]string // LIST <dir> -> ls -l lines
+	files    map[string][]byte   // RETR <path> -> content
+	cutList  string              // non-empty: LIST ends with a cut-off TLS record, no close_notify, then this reply
 
 	mu       sync.Mutex
 	stored   map[string][]byte
@@ -197,6 +200,80 @@ func (s *fakeServer) serve(c net.Conn, dataCfg *tls.Config) {
 			if s.final != "" {
 				say("%s", s.final)
 			}
+		case "LIST":
+			s.mu.Lock()
+			s.verbs = append(s.verbs, "LIST "+arg)
+			lines, ok := s.listing[strings.TrimPrefix(arg, "-a ")]
+			s.mu.Unlock()
+			if !ok {
+				say("550 Failed to open directory.")
+				continue
+			}
+			dc, err := pasv.Accept()
+			if err != nil {
+				say("425 no data connection")
+				continue
+			}
+			say("150 Here comes the directory listing.")
+			var tc net.Conn = dc
+			cc := &cutConn{Conn: dc}
+			if !clear {
+				tt := tls.Server(cc, dataCfg)
+				if err := tt.Handshake(); err != nil {
+					dc.Close()
+					continue
+				}
+				if !tt.ConnectionState().DidResume {
+					tt.Close()
+					say("522 SSL connection failed: session reuse required")
+					continue
+				}
+				tc = tt
+			}
+			for _, l := range lines {
+				fmt.Fprintf(tc, "%s\r\n", l)
+			}
+			if s.cutList != "" {
+				cc.cut = true
+				fmt.Fprint(tc, "-rw-rw-rw-    1 0        0  1 Oct 29 10:21 lost.3mf\r\n")
+				dc.Close()
+				say("%s", s.cutList)
+				continue
+			}
+			tc.Close()
+			say("226 Directory send OK.")
+		case "RETR":
+			s.mu.Lock()
+			s.verbs = append(s.verbs, "RETR "+arg)
+			body, ok := s.files[arg]
+			s.mu.Unlock()
+			if !ok {
+				say("550 Failed to open file.")
+				continue
+			}
+			dc, err := pasv.Accept()
+			if err != nil {
+				say("425 no data connection")
+				continue
+			}
+			say("150 Opening BINARY mode data connection.")
+			var tc net.Conn = dc
+			if !clear {
+				tt := tls.Server(dc, dataCfg)
+				if err := tt.Handshake(); err != nil {
+					dc.Close()
+					continue
+				}
+				if !tt.ConnectionState().DidResume {
+					tt.Close()
+					say("522 SSL connection failed: session reuse required")
+					continue
+				}
+				tc = tt
+			}
+			tc.Write(body)
+			tc.Close()
+			say("226 Transfer complete.")
 		case "SIZE":
 			s.mu.Lock()
 			b, ok := s.stored[arg]
@@ -404,5 +481,30 @@ func TestConnSet_AddAfterCloseAllClosesConn(t *testing.T) {
 	}
 	if _, err := b.Write([]byte("x")); err == nil {
 		t.Fatal("conn added after closeAll was left open")
+	}
+}
+
+// cutConn drops the last byte of each write once cut is set: the peer sees a
+// TLS record that ends early, then EOF.
+type cutConn struct {
+	net.Conn
+	cut bool
+}
+
+func (c *cutConn) Write(p []byte) (int, error) {
+	if c.cut && len(p) > 1 {
+		_, err := c.Conn.Write(p[:len(p)-1])
+		return len(p), err
+	}
+	return c.Conn.Write(p)
+}
+
+// A CR or LF in an argument would let the server read a second command.
+func TestLineSafe(t *testing.T) {
+	if err := lineSafe([]any{"a.3mf\r\nDELE x"}); err == nil {
+		t.Fatal("CRLF accepted")
+	}
+	if err := lineSafe([]any{"cache/a b.3mf", 42}); err != nil {
+		t.Fatalf("plain name refused: %v", err)
 	}
 }

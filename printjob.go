@@ -283,6 +283,14 @@ func finishPrintFile(apiKey string, cmd bridgeCommand, p config.Printer, isBambu
 	} else {
 		logf("done, the printer has started the file")
 	}
+	ackWithRetry(apiKey, result, logf)
+}
+
+// ackWithRetry reports a result to FoxTrack, retrying along printAckBackoff
+// until it lands or FoxTrack answers 404 (taken by another Bridge, or
+// expired). The command id is already marked seen, so a lost ack is never
+// delivered again.
+func ackWithRetry(apiKey string, result bridgeCommandResult, logf func(string, ...interface{})) {
 	for attempt := 0; ; attempt++ {
 		ackErr := ackBridgeCommand(apiKey, result)
 		if ackErr == nil {
@@ -415,7 +423,7 @@ func runPrintJob(ctx context.Context, logf func(string, ...interface{}), args ma
 	case a.format == "gcode_3mf" && !isBambu:
 		return fmt.Errorf("This file is for a Bambu Lab printer, but %s is a %s printer.", p.Name, p.KindLabel())
 	case a.format == "gcode" && isBambu:
-		return fmt.Errorf("This file is a plain G-code file for a Klipper or PrusaLink printer, but %s is a Bambu Lab printer.", p.Name)
+		return fmt.Errorf("This file is a plain G-code file for a Klipper, PrusaLink or OctoPrint printer, but %s is a Bambu Lab printer.", p.Name)
 	case isBambu && p.IsCloud():
 		return errPrintCloud
 	}
