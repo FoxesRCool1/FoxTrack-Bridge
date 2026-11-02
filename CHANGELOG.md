@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v2.8.0
+
+v2.7.0 below was never released on its own. Everything in it ships in v2.8.0.
 
 **Printer console: temperatures and home**
 - FoxTrack's opened printer, and the card's new Temps panel, can set the
@@ -25,6 +27,36 @@
   unless FoxTrack names a `plate`.
 
 **Fixes**
+- Security: the dashboard answers only to a LAN name or address (an IP,
+  localhost, a name with no dot, .local, .lan, .home.arpa, .internal, or this
+  computer's name). A web page can no longer reach it by pointing its own
+  domain at your computer (DNS rebinding). Behind a reverse proxy on a real
+  domain, list that name in `FOXTRACK_BRIDGE_ALLOWED_HOSTS` (comma-separated).
+- Security: the connection check uses a saved access code, API key or token
+  only for the saved printer's own address, so it can no longer be sent to
+  another host.
+- Security: a file name with a line break or a quote is refused, so it can no
+  longer slip a second command to a Bambu printer's FTP server or into a
+  Klipper print command.
+- Security: the OctoPrint API key goes only to OctoPrint itself, never to a
+  webcam on another machine or along a redirect.
+- Security: another web site can no longer start a network scan.
+- Safety: Plug off, auto-off and Home are refused while a Bambu print is
+  starting (PREPARE, SLICING) and whenever the printer's state is unknown. With
+  the printer unreachable, a remembered state older than 2 minutes no longer
+  counts.
+- Console commands run beside the command loop: a Klipper Home no longer holds
+  up pause and stop for the other printers, and a lost reply to FoxTrack no
+  longer runs the command a second time.
+- The connection check no longer blames the serial number when a Bambu printer
+  is only slow to answer.
+- OctoPrint: one slow reply no longer drops the webcam address and model for
+  5 minutes.
+- Smart plug check: the watts read right (it showed 10 W for 100 W).
+- Network scan: a saved OctoPrint printer, or one saved with spaces around its
+  address, shows as added; a Bambu printer found by its certificate gets a
+  name; a printer that moved to a remembered address is no longer hidden.
+- Printer replies are capped at 16 MB.
 - Safety: a smart plug can no longer be switched off, or auto-off, while the
   Bridge has lost the printer mid-print. With the printer unreachable the
   Bridge goes by the last state it saw, and refuses if it never saw one.
@@ -57,7 +89,7 @@
   saves half-typed tokens.
 - Virtual printer: read timeouts, upload size and concurrency limits.
 
-## v2.7.0
+## v2.7.0 (not released on its own; ships in v2.8.0)
 
 **OctoPrint printers**
 - Printers run by OctoPrint can be added with their address and an API key.

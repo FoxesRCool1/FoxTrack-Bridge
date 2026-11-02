@@ -18,3 +18,19 @@ func TestTelemetryReporting(t *testing.T) {
 		t.Error("nil telemetry reported as live")
 	}
 }
+
+func TestFormatWatts(t *testing.T) {
+	for _, tc := range []struct {
+		in   float64
+		want string
+	}{
+		{0, "0"},
+		{100, "100"},
+		{2000, "2000"},
+		{12.34, "12.3"},
+	} {
+		if got := formatWatts(tc.in); got != tc.want {
+			t.Errorf("formatWatts(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

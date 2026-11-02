@@ -855,8 +855,31 @@ func TestHome_RefusedWhilePrintingButTempsAreNot(t *testing.T) {
 	if err := executeBridgeCommand(temp); errors.Is(err, errHomeWhilePrinting) {
 		t.Fatalf("a temperature change must not be blocked: %v", err)
 	}
+	// A Bambu print that is starting reports PREPARE: still a print.
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "PREPARE"})
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
+		t.Fatalf("home while preparing: err = %v", err)
+	}
+	// Link up, no report yet: unknown, so refused.
+	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "connected"})
+	if err := executeBridgeCommand(home); !errors.Is(err, errHomeUnknown) {
+		t.Fatalf("home with no report: err = %v", err)
+	}
 	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "idle"})
-	if err := executeBridgeCommand(home); errors.Is(err, errHomeWhilePrinting) {
+	if err := executeBridgeCommand(home); errors.Is(err, errHomeWhilePrinting) || errors.Is(err, errHomeUnknown) {
 		t.Fatalf("home while idle must not be blocked: %v", err)
+	}
+}
+
+// A console command runs off the poll loop and is deduped on its id: the
+// same pending command fetched twice runs and acks once.
+func TestConsoleCommand_RunsOnceAndAcks(t *testing.T) {
+	e := newPrintEnv(t)
+	cmd := bridgeCommand{ID: "c1", ExternalID: "Voron", Command: "set_bed_temp", Args: map[string]interface{}{"celsius": 60.0}}
+	startConsoleCommand("test-key", cmd)
+	startConsoleCommand("test-key", cmd)
+	printJobs.wg.Wait()
+	if e.count("ack:") != 1 {
+		t.Fatalf("events = %v", e.snapshot())
 	}
 }

@@ -182,16 +182,22 @@ func rememberBambu(found []discoveredPrinter, now time.Time) []discoveredPrinter
 	return out
 }
 
-// dedupeSort drops repeats by IP (and by serial for Bambu), keeping the first
-// seen, then orders by type and IP.
+// dedupeSort drops repeats by IP (and by serial for Bambu), then orders by
+// type and IP. When two entries share an IP, the later one wins: the input is
+// remembered sightings first, then this scan's finds, so a live printer that
+// took an old printer's IP is not hidden by the remembered entry.
 func dedupeSort(in []discoveredPrinter) []discoveredPrinter {
 	out := []discoveredPrinter{}
 	seen := map[string]bool{}
 	for _, p := range in {
-		if seen["ip:"+p.IP] || (p.Serial != "" && seen["sn:"+strings.ToLower(p.Serial)]) {
+		key := "ip:" + p.IP
+		if seen[key] || (p.Serial != "" && seen["sn:"+strings.ToLower(p.Serial)]) {
+			if j := indexByIP(out, p.IP); j >= 0 {
+				out[j] = p
+			}
 			continue
 		}
-		seen["ip:"+p.IP] = true
+		seen[key] = true
 		if p.Serial != "" {
 			seen["sn:"+strings.ToLower(p.Serial)] = true
 		}
@@ -208,12 +214,23 @@ func dedupeSort(in []discoveredPrinter) []discoveredPrinter {
 	return out
 }
 
+// indexByIP finds the index of the entry with ip in out, or -1.
+func indexByIP(out []discoveredPrinter, ip string) int {
+	for i, p := range out {
+		if p.IP == ip {
+			return i
+		}
+	}
+	return -1
+}
+
 // markAdded flags the printers a saved printer already covers, matched by IP,
-// by serial, or by the host of its Moonraker or PrusaLink URL.
+// by serial, or by the host of its Moonraker, PrusaLink or OctoPrint URL.
 func markAdded(found []discoveredPrinter, saved []config.Printer) {
 	hosts, serials := map[string]bool{}, map[string]bool{}
 	for _, p := range saved {
-		for _, h := range []string{p.IP, urlHost(p.MoonrakerURL), urlHost(p.PrusaLinkURL)} {
+		for _, h := range []string{p.IP, urlHost(p.MoonrakerURL), urlHost(p.PrusaLinkURL), urlHost(p.OctoPrintURL)} {
+			h = strings.ToLower(strings.TrimSpace(h))
 			if h != "" {
 				hosts[h] = true
 			}
@@ -223,7 +240,7 @@ func markAdded(found []discoveredPrinter, saved []config.Printer) {
 		}
 	}
 	for i := range found {
-		found[i].Added = hosts[found[i].IP] || (found[i].Serial != "" && serials[strings.ToLower(found[i].Serial)])
+		found[i].Added = hosts[strings.ToLower(strings.TrimSpace(found[i].IP))] || (found[i].Serial != "" && serials[strings.ToLower(found[i].Serial)])
 	}
 }
 
@@ -441,7 +458,10 @@ func scanTargets(nets []*net.IPNet, limit int) []string {
 func discoverHost(ctx context.Context, c *http.Client, ip string, open func(port int) bool) (discoveredPrinter, bool) {
 	if open(8883) {
 		if serial, ok := discoverBambuTLS(ctx, ip); ok {
-			return discoveredPrinter{Type: "bambu", Model: bambuSerialModel(serial), IP: ip, Serial: serial}, true
+			// A TCP find has no announcement to read the name or connect mode
+			// from, so the IP stands in for the name, like an unnamed SSDP
+			// sighting.
+			return discoveredPrinter{Type: "bambu", Name: ip, Model: bambuSerialModel(serial), IP: ip, Serial: serial, Connect: "lan"}, true
 		}
 	}
 	if open(7125) {

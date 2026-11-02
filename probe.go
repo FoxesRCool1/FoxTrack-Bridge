@@ -107,7 +107,10 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 // older dashboard's {"ip"}-only body: it asks for a reachability check of a
 // Bambu printer, with no serial number or access code to test.
 func probePrinter(ctx context.Context, p config.Printer, reachOnly bool) probeResult {
-	if saved, ok := savedPrinter(p.ID); ok {
+	// A saved secret fills a blank field only when the test goes to the saved
+	// printer's own address. Otherwise anyone who can reach the dashboard could
+	// name a saved printer's id and their own host, and receive its secret.
+	if saved, ok := savedPrinter(p.ID); ok && sameEndpoint(saved, p) {
 		keep := func(v *string, savedValue string) {
 			if strings.TrimSpace(*v) == "" {
 				*v = savedValue
@@ -407,7 +410,11 @@ func probeBambuMQTT(addr, ip, serial, code string) probeResult {
 		default:
 		}
 	})
-	if !sub.WaitTimeout(wait(3*time.Second)) || sub.Error() != nil {
+	if !sub.WaitTimeout(wait(3 * time.Second)) {
+		// A slow printer, not proof of a wrong serial.
+		return probeResultOf(probeOK, "Connected. The access code works.", "The printer did not answer in time, so the serial number is not confirmed.")
+	}
+	if sub.Error() != nil {
 		return badSerial
 	}
 	if st, ok := sub.(*paho.SubscribeToken); ok && st.Result()[topic] == 0x80 {
@@ -442,4 +449,29 @@ func probeURL(p config.Printer) string {
 		return trim(p.HomeAssistantURL) + "/api/"
 	}
 	return ""
+}
+
+// printerEndpoint is where a printer's checks connect: its URL for the HTTP
+// kinds, its IP for Bambu Lab. Case and a trailing slash do not count.
+func printerEndpoint(p config.Printer) string {
+	var v string
+	switch p.Kind() {
+	case config.KindKlipper:
+		v = p.MoonrakerURL
+	case config.KindPrusaLink:
+		v = p.PrusaLinkURL
+	case config.KindOctoPrint:
+		v = p.OctoPrintURL
+	case config.KindHomeAssistant:
+		v = p.HomeAssistantURL
+	default:
+		v = p.IP
+	}
+	return strings.TrimRight(strings.ToLower(strings.TrimSpace(v)), "/")
+}
+
+// sameEndpoint reports whether a test of p goes to the saved printer itself.
+func sameEndpoint(saved, p config.Printer) bool {
+	return saved.Kind() == p.Kind() && printerEndpoint(p) != "" &&
+		printerEndpoint(saved) == printerEndpoint(p)
 }

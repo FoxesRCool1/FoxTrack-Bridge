@@ -142,6 +142,8 @@ func TestBadFileName_OnlyADotDotSegment(t *testing.T) {
 	for name, bad := range map[string]bool{
 		"v1..2.3mf": false, "cache/v1..2.3mf": false, "..": true, "../x.3mf": true,
 		"cache/../x.3mf": true, `cache\x.3mf`: true, "cache/x.3mf": false,
+		// A line break or quote would start a second FTP or printer command.
+		"a.3mf\r\nDELE /x.3mf": true, "a\n.3mf": true, `a".3mf`: true, "a\x7f.3mf": true,
 	} {
 		if badFileName(name) != bad {
 			t.Errorf("badFileName(%q) = %v, want %v", name, !bad, bad)

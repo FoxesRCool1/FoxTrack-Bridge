@@ -3,6 +3,7 @@ package lan
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -473,13 +474,31 @@ func (c *Controller) ProxyCamera(w http.ResponseWriter, r *http.Request, name st
 	}
 
 	candidates := cameraCandidates(p)
-	client := &http.Client{Transport: cameraTransport}
+	// The API key goes to the printer's own host only: OctoPrint may name a
+	// webcam on another machine, and a redirect may lead anywhere. Go drops
+	// Authorization on a cross-host redirect but keeps a custom X-Api-Key.
+	apiBase := p.MoonrakerURL
+	if p.Kind() == configpkg.KindOctoPrint {
+		apiBase = p.OctoPrintURL
+	}
+	client := &http.Client{
+		Transport: cameraTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if !sameHost(req.URL.String(), apiBase) {
+				req.Header.Del("X-Api-Key")
+			}
+			return nil
+		},
+	}
 	for _, candidate := range candidates {
 		req, err := http.NewRequestWithContext(r.Context(), "GET", candidate, nil)
 		if err != nil {
 			continue
 		}
-		if p.Kind() == configpkg.KindKlipper || p.Kind() == configpkg.KindOctoPrint {
+		if (p.Kind() == configpkg.KindKlipper || p.Kind() == configpkg.KindOctoPrint) && sameHost(candidate, apiBase) {
 			applyMoonrakerAuth(req, p)
 		}
 		resp, err := client.Do(req)
@@ -651,7 +670,8 @@ func sendJSONRequest(client *http.Client, method, u string, headers map[string]s
 	}
 	var out map[string]interface{}
 	// An empty body (PrusaLink answers 204 No Content) is a success, not a decode error.
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil && err != io.EOF {
+	// Capped: a misbehaving printer could stream without end inside the timeout.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJSONReply)).Decode(&out); err != nil && err != io.EOF {
 		return nil, err
 	}
 	return out, nil
@@ -1095,6 +1115,10 @@ func getArgString(args map[string]interface{}, key string) string {
 	return strings.TrimSpace(s)
 }
 
+// maxJSONReply caps a printer's JSON reply. Moonraker's history and file
+// lists stay well under it.
+const maxJSONReply = 16 << 20
+
 func moonrakerURL(p configpkg.Printer, path string) string {
 	base := strings.TrimSpace(strings.TrimRight(p.MoonrakerURL, "/"))
 	if base == "" {
@@ -1112,6 +1136,13 @@ func moonrakerAuthHeaders(p configpkg.Printer) map[string]string {
 		headers["X-Api-Key"] = p.APIKey
 	}
 	return headers
+}
+
+// sameHost reports whether two URLs name the same host and port.
+func sameHost(a, b string) bool {
+	ua, err1 := url.Parse(strings.TrimSpace(a))
+	ub, err2 := url.Parse(strings.TrimSpace(b))
+	return err1 == nil && err2 == nil && ua.Host != "" && strings.EqualFold(ua.Host, ub.Host)
 }
 
 func applyMoonrakerAuth(req *http.Request, p configpkg.Printer) {

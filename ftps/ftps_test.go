@@ -498,3 +498,13 @@ func (c *cutConn) Write(p []byte) (int, error) {
 	}
 	return c.Conn.Write(p)
 }
+
+// A CR or LF in an argument would let the server read a second command.
+func TestLineSafe(t *testing.T) {
+	if err := lineSafe([]any{"a.3mf\r\nDELE x"}); err == nil {
+		t.Fatal("CRLF accepted")
+	}
+	if err := lineSafe([]any{"cache/a b.3mf", 42}); err != nil {
+		t.Fatalf("plain name refused: %v", err)
+	}
+}

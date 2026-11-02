@@ -160,8 +160,10 @@ func ListPrinterFiles(ctx context.Context, p Printer) ([]PrinterFile, error) {
 
 // badFileName reports a path that leaves the printer's file folders: a ".."
 // segment (not just two dots inside a name like "v1..2.3mf") or a backslash.
+// A control character (CR, LF) or a quote is refused too: the name goes into
+// FTP commands and printer commands, where it could start a second command.
 func badFileName(name string) bool {
-	if strings.Contains(name, `\`) {
+	if strings.Contains(name, `\`) || strings.ContainsAny(name, `"`) || hasControl(name) {
 		return true
 	}
 	for _, seg := range strings.Split(name, "/") {
@@ -230,4 +232,9 @@ func PrintPrinterFile(ctx context.Context, p Printer, name string, plate int) er
 	}
 	logf("print started after %s", time.Since(published).Round(time.Second))
 	return nil
+}
+
+// hasControl reports a control character (below space, or DEL) in s.
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }

@@ -121,7 +121,11 @@ func unixToRFC3339(sec float64) string {
 // Refused while the printer prints or is paused (PrintReady).
 func (c *Controller) PrintFile(name, file string) error {
 	file = strings.TrimPrefix(strings.TrimSpace(file), "/")
-	if file == "" || slices.Contains(strings.Split(file, "/"), "..") {
+	// A quote or a control character (CR, LF) could close the file name in
+	// the printer's G-code command and start another one.
+	if file == "" || slices.Contains(strings.Split(file, "/"), "..") ||
+		strings.ContainsAny(file, "\"\\") ||
+		strings.IndexFunc(file, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
 		return errors.New("Pick a file from the printer's list.")
 	}
 	if err := c.PrintReady(name); err != nil {

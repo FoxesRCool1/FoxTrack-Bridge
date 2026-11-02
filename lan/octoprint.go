@@ -274,13 +274,17 @@ func octoPrintInfo(p configpkg.Printer) octoInfo {
 	}
 	client := &http.Client{Timeout: 4 * time.Second, Transport: insecureTransport()}
 	headers := moonrakerAuthHeaders(p)
-	info := octoInfo{fetchedAt: time.Now()}
+	// Start from the cached answer: a failed read keeps its fields, so one
+	// slow reply does not drop the webcam and model for 5 minutes.
+	info := cached
+	info.fetchedAt = time.Now()
 	if m, err := sendJSONRequest(client, "GET", key+"/api/settings", headers, nil); err == nil {
 		webcam := nestedMap(m, "webcam")
 		info.snapshotURL = resolveOctoCamURL(key, stringAny(webcam["snapshotUrl"]))
 		info.streamURL = resolveOctoCamURL(key, stringAny(webcam["streamUrl"]))
 	}
 	if m, err := sendJSONRequest(client, "GET", key+"/api/printerprofiles", headers, nil); err == nil {
+		info.model = ""
 		for _, v := range nestedMap(m, "profiles") {
 			prof, _ := v.(map[string]interface{})
 			if def, _ := prof["default"].(bool); def {

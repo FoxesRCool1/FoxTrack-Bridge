@@ -308,8 +308,18 @@ func guardWrites(next http.Handler) http.Handler {
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		}
+		if !hostAllowed(r.Host) {
+			http.Error(w, "unknown host name; set FOXTRACK_BRIDGE_ALLOWED_HOSTS to allow it", http.StatusForbidden)
+			return
+		}
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			// A scan floods the network, so another site may not start one
+			// with an <img> tag.
+			if r.URL.Path == "/api/discover" && !writeAllowed(r) {
+				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -337,6 +347,38 @@ func writeAllowed(r *http.Request) bool {
 	}
 	return isFoxTrackWebOrigin(origin) &&
 		(strings.HasPrefix(r.URL.Path, "/api/control/") || strings.HasPrefix(r.URL.Path, "/api/camera/"))
+}
+
+// hostAllowed blocks DNS rebinding: a public site whose name was re-pointed
+// at this computer sends its own name as Host, and the browser then treats
+// the dashboard as that site (same-origin), so the write guard would pass.
+// Allowed: IP addresses, localhost, a name with no dot, the LAN-only suffixes
+// (.local, .lan, .home.arpa, .internal, .localhost), this computer's name, and
+// any name in FOXTRACK_BRIDGE_ALLOWED_HOSTS (comma-separated, for a reverse
+// proxy on a real domain). Public names cannot end in those suffixes.
+func hostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "" || net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+		return true
+	}
+	for _, suffix := range []string{".local", ".lan", ".home.arpa", ".internal", ".localhost"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	if name, err := os.Hostname(); err == nil && strings.EqualFold(host, name) {
+		return true
+	}
+	for _, h := range strings.Split(os.Getenv("FOXTRACK_BRIDGE_ALLOWED_HOSTS"), ",") {
+		if h = strings.TrimSpace(h); h != "" && strings.EqualFold(host, h) {
+			return true
+		}
+	}
+	return false
 }
 
 // sameOrigin reports whether a browser Origin header names this server.

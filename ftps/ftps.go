@@ -312,6 +312,9 @@ func (c *control) reply() (int, string, error) {
 }
 
 func (c *control) cmd(format string, args ...any) (int, string, error) {
+	if err := lineSafe(args); err != nil {
+		return 0, "", err
+	}
 	c.conn.SetWriteDeadline(time.Now().Add(c.step))
 	if err := c.tp.PrintfLine(format, args...); err != nil {
 		return 0, "", err
@@ -343,6 +346,9 @@ func (c *control) size(name string) (int64, error) {
 }
 
 func (c *control) send(format string, args ...any) error {
+	if err := lineSafe(args); err != nil {
+		return err
+	}
 	c.conn.SetWriteDeadline(time.Now().Add(c.step))
 	return c.tp.PrintfLine(format, args...)
 }
@@ -409,4 +415,15 @@ func copyWithStall(dst net.Conn, src io.Reader, stall time.Duration) (int64, err
 			return total, rerr
 		}
 	}
+}
+
+// lineSafe refuses a command argument with CR or LF: the server would read
+// the rest as a second command (RETR "a.3mf\r\nDELE x").
+func lineSafe(args []any) error {
+	for _, a := range args {
+		if s, ok := a.(string); ok && strings.ContainsAny(s, "\r\n") {
+			return errors.New("ftps: a line break in a command argument")
+		}
+	}
+	return nil
 }

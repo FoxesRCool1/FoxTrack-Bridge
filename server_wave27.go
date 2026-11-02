@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,7 +61,16 @@ func wirePlugs() {
 		if !ok || s == nil {
 			return false, 0, false
 		}
-		return mqttpkg.InPrint(s.Status), s.NozzleTemp, true
+		// Busy unless settled: a Bambu print that is starting (PREPARE) must
+		// keep its power.
+		busy := !mqttpkg.Settled(s.Status)
+		// A nozzle reading of exactly 0 is a missing one (a room is never at
+		// 0 C): unknown, so the plug stays on. Home Assistant printers often
+		// report no nozzle at all; there status alone decides.
+		if s.NozzleTemp == 0 && !busy && !printerIsHomeAssistant(name) {
+			return false, 0, false
+		}
+		return busy, s.NozzleTemp, true
 	})
 	mqttpkg.SetPlugSource(plugs.Current, plugs.PrintEnergy)
 }
@@ -129,16 +140,17 @@ func handlePlugTest(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := "Plug found, " + state + "."
 	if reading.Watts != nil {
-		msg = "Plug found, " + state + ", " + strings.TrimSuffix(strings.TrimSuffix(jsonNumber(*reading.Watts), "0"), ".") + " W now."
+		msg = "Plug found, " + state + ", " + formatWatts(*reading.Watts) + " W now."
 	} else {
 		msg += " It has no energy meter, so FoxTrack will not see watts or kWh."
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "message": msg, "on": reading.On, "watts": reading.Watts, "has_meter": reading.Watts != nil})
 }
 
-func jsonNumber(f float64) string {
-	b, _ := json.Marshal(float64(int(f*10)) / 10)
-	return string(b)
+// formatWatts renders a wattage for a user-facing message: one decimal place
+// at most, so 100 -> "100", 12.34 -> "12.3", 0 -> "0".
+func formatWatts(w float64) string {
+	return strconv.FormatFloat(math.Round(w*10)/10, 'f', -1, 64)
 }
 
 // syncVirtualPrinter starts or stops the virtual printer to match cfg. The
@@ -222,4 +234,16 @@ func runPlugCommandForFoxTrack(name, command string) error {
 		return errPlugNotSet
 	}
 	return err
+}
+
+// printerIsHomeAssistant reports a saved printer read through Home Assistant.
+func printerIsHomeAssistant(name string) bool {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	for _, p := range configStore.Printers {
+		if p.Name == name {
+			return p.Kind() == config.KindHomeAssistant
+		}
+	}
+	return false
 }

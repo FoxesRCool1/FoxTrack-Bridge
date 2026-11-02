@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	configpkg "foxtrack-bridge/config"
 	"foxtrack-bridge/webhook"
@@ -138,5 +139,37 @@ func TestResolveOctoCamURL_LoopbackAndRelative(t *testing.T) {
 		if got := resolveOctoCamURL(base, in); got != want {
 			t.Errorf("resolve(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// One failed /api/settings read keeps the cached webcam address.
+func TestOctoPrintInfo_FailedReadKeepsCache(t *testing.T) {
+	fail := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail {
+			http.Error(w, "busy", http.StatusInternalServerError)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/settings":
+			w.Write([]byte(`{"webcam":{"snapshotUrl":"/webcam/?action=snapshot"}}`))
+		case "/api/printerprofiles":
+			w.Write([]byte(`{"profiles":{"a":{"default":true,"name":"Ender 3"}}}`))
+		}
+	}))
+	defer srv.Close()
+	p := configpkg.Printer{OctoPrintURL: srv.URL}
+	first := octoPrintInfo(p)
+	if first.snapshotURL == "" || first.model != "Ender 3" {
+		t.Fatalf("first read = %+v", first)
+	}
+	octoInfoMu.Lock()
+	c := octoInfoCache[srv.URL]
+	c.fetchedAt = time.Now().Add(-10 * time.Minute)
+	octoInfoCache[srv.URL] = c
+	octoInfoMu.Unlock()
+	fail = true
+	if got := octoPrintInfo(p); got.snapshotURL != first.snapshotURL || got.model != "Ender 3" {
+		t.Fatalf("after a failed read = %+v, want the cached fields", got)
 	}
 }

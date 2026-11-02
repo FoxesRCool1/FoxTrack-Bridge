@@ -256,6 +256,18 @@ func InPrint(status string) bool {
 	return status == "printing" || status == "paused"
 }
 
+// Settled reports a status in which nothing moves or heats on its own: idle,
+// or a print that ended. The safety guards (plug off, home) go by this, not by
+// InPrint, so a status they do not know (Bambu PREPARE or SLICING while a
+// print starts, a word from Home Assistant) counts as busy.
+func Settled(status string) bool {
+	switch status {
+	case "idle", "finished", "error", "cancelled":
+		return true
+	}
+	return false
+}
+
 var (
 	activeSessions = make(map[string]*printSession)
 	sessionMu      sync.Mutex

@@ -53,6 +53,7 @@ type entry struct {
 	// last printer status the poller saw while the printer was reporting; Set
 	// falls back to it when the printer cannot be asked (link down)
 	known       bool
+	knownAt     time.Time // when known and lastNozzleC were last read
 	lastNozzleC float64
 
 	// auto off
@@ -69,7 +70,11 @@ var (
 	ErrPrinting = errors.New("The printer is printing. Stop the print first.")
 	ErrHot      = errors.New("The hotend is still hot. Try again in a few minutes.")
 	ErrNoPlug   = errors.New("This printer has no smart plug set in the Bridge.")
-	ErrUnknown  = errors.New("Can't confirm the printer is idle, so the plug stays on. Use the plug's own app to switch it off.")
+	// staleState is how old a remembered printer state may be for the
+	// plug_off guard to use it while the printer link is down.
+	staleState = 2 * time.Minute
+
+	ErrUnknown = errors.New("Can't confirm the printer is idle, so the plug stays on. Use the plug's own app to switch it off.")
 )
 
 // Default is the manager the server uses.
@@ -168,9 +173,11 @@ func (m *Manager) Set(ctx context.Context, name string, on bool) error {
 		}
 		if !ok {
 			// The printer cannot be asked (link down): go by the last state
-			// the poller saw, and refuse when there never was one.
+			// the poller saw, and refuse when there never was one or it is
+			// older than staleState (a print may have started on the printer's
+			// own screen since).
 			m.mu.Lock()
-			if e, found := m.plugs[name]; found && e.known {
+			if e, found := m.plugs[name]; found && e.known && m.now().Sub(e.knownAt) <= staleState {
 				inPrint, nozzle, ok = e.inPrint, e.lastNozzleC, true
 			}
 			m.mu.Unlock()
@@ -290,7 +297,7 @@ func (m *Manager) poll(name string) {
 	turnOff := false
 	// No status (printer link down) changes nothing: it is not a print end.
 	if haveStatus {
-		e.known, e.lastNozzleC = true, nozzle
+		e.known, e.knownAt, e.lastNozzleC = true, m.now(), nozzle
 		switch {
 		case inPrint && !e.inPrint:
 			m.beginPrint(e)

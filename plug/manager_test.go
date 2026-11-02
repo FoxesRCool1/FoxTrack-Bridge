@@ -196,6 +196,24 @@ func TestSet_OffWithPrinterLinkDownUsesLastKnownState(t *testing.T) {
 	}
 }
 
+// A remembered state goes stale: a print may have started on the printer's
+// own screen while the link was down.
+func TestSet_OffWithPrinterLinkDownRefusesStaleState(t *testing.T) {
+	m, _, switches, now := fakeManager(t)
+	addNoLoop(m, plugged(false))
+	ok := true
+	m.SetStatusSource(func(string) (bool, float64, bool) { return false, 30, ok })
+	m.poll("P1") // seen idle and cool
+	ok = false
+	*now = now.Add(staleState + time.Second)
+	if err := m.Set(context.Background(), "P1", false); !errors.Is(err, ErrUnknown) {
+		t.Fatalf("stale state: err = %v", err)
+	}
+	if len(*switches) != 0 {
+		t.Fatalf("switches = %v", *switches)
+	}
+}
+
 func TestPoll_LinkDownMidPrintKeepsPrintAndEnergy(t *testing.T) {
 	m, reading, switches, now := fakeManager(t)
 	addNoLoop(m, plugged(true))

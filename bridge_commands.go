@@ -122,6 +122,10 @@ func pollBridgeCommands() {
 					startFilesCommand(apiKey, cmd)
 					continue
 				}
+				if isConsoleCommand(cmd.Command) {
+					startConsoleCommand(apiKey, cmd)
+					continue
+				}
 				execErr := executeBridgeCommand(cmd)
 				if errors.Is(execErr, errNoMatchingPrinter) {
 					// Not our command. Leave it pending for another Bridge instance.
@@ -208,7 +212,45 @@ func ackBridgeCommand(apiKey string, result bridgeCommandResult) error {
 	return nil
 }
 
+// isConsoleCommand reports the printer console commands. They run off the
+// poll loop: a Klipper home answers only when G28 is done (up to 2 minutes),
+// which would hold up pause and stop for every other printer.
+func isConsoleCommand(command string) bool {
+	return command == "home" || command == "set_nozzle_temp" || command == "set_bed_temp"
+}
+
+// startConsoleCommand runs on the poll loop: match, dedupe, go. Deduped on the
+// command id and acked with retries like the files commands, so a lost ack
+// never runs a second G28 or re-applies a temperature the user since changed.
+func startConsoleCommand(apiKey string, cmd bridgeCommand) {
+	if printJobs.hasSeen(cmd.ID) {
+		return
+	}
+	p, _, _, ok := findBridgePrinter(cmd.ExternalID)
+	if !ok {
+		return // another Bridge's printer: leave it pending
+	}
+	printJobs.markSeen(cmd.ID)
+	printJobs.wg.Add(1)
+	go func() {
+		defer printJobs.wg.Done()
+		result := bridgeCommandResult{CommandID: cmd.ID, Status: "done"}
+		if err := executeBridgeCommand(cmd); err != nil {
+			result.Status = "failed"
+			result.ErrorMessage = truncateChars(err.Error(), maxErrorChars)
+			log.Printf("[bridge-commands] %s %s/%s failed: %v", cmd.ID, p.Name, cmd.Command, err)
+		} else {
+			log.Printf("[bridge-commands] %s %s/%s done", cmd.ID, p.Name, cmd.Command)
+		}
+		ackWithRetry(apiKey, result, func(format string, a ...interface{}) {
+			log.Printf("[bridge-commands] %s %s/%s: %s", cmd.ID, p.Name, cmd.Command, fmt.Sprintf(format, a...))
+		})
+	}()
+}
+
 var errHomeWhilePrinting = errors.New("The printer is printing. Home it when the print has finished.")
+
+var errHomeUnknown = errors.New("The printer is not reporting its state, so it is not homed. Try again when it shows as connected.")
 
 // refuseHomeMidPrint stops a home command while a print runs: G28 mid-print
 // drives the toolhead into the part. Temperatures stay allowed: users tune
@@ -217,7 +259,13 @@ func refuseHomeMidPrint(name, command string) error {
 	if command != "home" {
 		return nil
 	}
-	if s, ok := printerLiveState(name); ok && s != nil && mqttpkg.InPrint(s.Status) {
+	// Allowed only when the printer reports a settled state: a print that is
+	// starting (Bambu PREPARE) or a printer not reporting yet may be mid-print.
+	s, ok := printerLiveState(name)
+	if !ok || s == nil {
+		return errHomeUnknown
+	}
+	if !mqttpkg.Settled(s.Status) {
 		return errHomeWhilePrinting
 	}
 	return nil
