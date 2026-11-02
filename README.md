@@ -398,6 +398,7 @@ Bambu printers can also be added through your Bambu account instead of LAN mode.
 What cloud printers can do:
 
 - Status, temperatures, progress, AMS and the light toggle work.
+- A smart plug works too: the Bridge switches it on your network, not through the cloud. Set it on the printer's pencil, under **Smart plug**.
 - Pause, stop, speed, fan and GCode do **not** work over the cloud. Bambu's 2025+ firmware rejects every command except the light from third-party clients, so those buttons are hidden. Use LAN mode for full control.
 - The camera works when the printer is on the same network as the Bridge. The account hands back the printer's LAN access code, and the printer reports its own LAN address, so nothing needs typing. You can also enter the IP when adding the printer.
 

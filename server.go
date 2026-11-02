@@ -481,7 +481,12 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 			dropped = append(dropped, name)
 			continue
 		}
-		byID[id] = v
+		// The plug has its own poller: read it now, so a printer the plug
+		// switched off (no reports, so no plug on its last one) still shows the
+		// plug and its Plug on button.
+		c := *v
+		c.Plug = mqttpkg.PlugState(name)
+		byID[id] = &c
 	}
 	if len(dropped) > 0 {
 		log.Printf("[status] dropped live status for %d printer(s) with no matching config entry: %v", len(dropped), dropped)
