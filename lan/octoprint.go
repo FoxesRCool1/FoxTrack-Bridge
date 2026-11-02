@@ -140,7 +140,7 @@ func octoPrintAlarms(state map[string]interface{}) []webhook.RelayAlarm {
 }
 
 // sendOctoPrintCommand runs pause, resume or stop on the current job, and the
-// console commands (Bridge 2.8) on the printer: nozzle and bed targets through
+// console commands (Bridge 2.5.2) on the printer: nozzle and bed targets through
 // /api/printer/tool and /api/printer/bed, home through /api/printer/printhead.
 func sendOctoPrintCommand(p configpkg.Printer, command string, args map[string]interface{}) error {
 	path, body, err := octoPrintCommandRequest(command, args)

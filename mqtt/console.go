@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// The printer console (Bridge 2.8, FoxTrack migration 20261031000290): the
+// The printer console (Bridge 2.5.2, FoxTrack migration 20261031000290): the
 // nozzle and bed targets and homing, sent by FoxTrack as bridge_commands
 // set_nozzle_temp / set_bed_temp (args {"celsius": n}) and home. Every driver
 // maps them through ConsoleGcode or its own API; the range check lives here

@@ -930,7 +930,7 @@ func (c *Controller) sendKlipperCommand(p configpkg.Printer, state *mqttpkg.Tele
 		_, err := sendJSONRequest(client, "POST", gcodeURL, headers, nil)
 		return err
 	case "set_nozzle_temp", "set_bed_temp", "home":
-		// The console (Bridge 2.8): the same G-code as Bambu, through Moonraker.
+		// The console (Bridge 2.5.2): the same G-code as Bambu, through Moonraker.
 		script, err := mqttpkg.ConsoleGcode(command, args)
 		if err != nil {
 			return err

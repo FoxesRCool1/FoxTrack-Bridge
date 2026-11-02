@@ -1,8 +1,8 @@
 # Changelog
 
-## v2.8.0
+## v2.5.2
 
-v2.7.0 below was never released on its own. Everything in it ships in v2.8.0.
+The v2.7.0 notes below were never released on their own. Everything in them ships in v2.5.2.
 
 **Printer console: temperatures and home**
 - FoxTrack's opened printer, and the card's new Temps panel, can set the
@@ -89,7 +89,7 @@ v2.7.0 below was never released on its own. Everything in it ships in v2.8.0.
   saves half-typed tokens.
 - Virtual printer: read timeouts, upload size and concurrency limits.
 
-## v2.7.0 (not released on its own; ships in v2.8.0)
+## v2.7.0 notes (never released on their own; ship in v2.5.2)
 
 **OctoPrint printers**
 - Printers run by OctoPrint can be added with their address and an API key.

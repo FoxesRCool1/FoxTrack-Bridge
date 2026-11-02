@@ -585,7 +585,7 @@ func SendCommandWithArgs(printerName, command string, args map[string]interface{
 		return setFilamentFromArgs(printerName, serial, args)
 
 	case "set_nozzle_temp", "set_bed_temp", "home":
-		// The console (Bridge 2.8): M104 / M140 / G28 as a gcode_line.
+		// The console (Bridge 2.5.2): M104 / M140 / G28 as a gcode_line.
 		b, err := consolePayload(command, args)
 		if err != nil {
 			return err

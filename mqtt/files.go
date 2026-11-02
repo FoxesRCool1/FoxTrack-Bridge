@@ -13,7 +13,7 @@ import (
 	"foxtrack-bridge/ftps"
 )
 
-// Files on the printer (Bridge 2.8, FoxTrack migration 20261031000291):
+// Files on the printer (Bridge 2.5.2, FoxTrack migration 20261031000291):
 // FoxTrack sends list_files and gets the list back in the command's result;
 // print_printer_file {name} starts one of them. The shape here is what every
 // driver returns and what FoxTrack reads.

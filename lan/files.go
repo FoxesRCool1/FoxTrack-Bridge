@@ -13,7 +13,7 @@ import (
 	mqttpkg "foxtrack-bridge/mqtt"
 )
 
-// Files on the printer (Bridge 2.8): Klipper lists Moonraker's gcodes root,
+// Files on the printer (Bridge 2.5.2): Klipper lists Moonraker's gcodes root,
 // OctoPrint its local storage. PrusaLink and Home Assistant are not listed.
 
 var (

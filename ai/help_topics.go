@@ -260,7 +260,7 @@ PrusaLink and Home Assistant printers are not listed; FoxTrack hides the section
 
 Print is refused while the printer prints or is paused, and while the Bridge is sending another file to that printer. A Bambu printer over the cloud cannot list or print files; switch it to LAN mode.
 
-This section is in FoxTrack, not in the Bridge dashboard. It needs FoxTrack Bridge 2.8 or later.`,
+This section is in FoxTrack, not in the Bridge dashboard. It needs FoxTrack Bridge 2.5.2 or later.`,
 	},
 	{
 		ID:       "add-octoprint",

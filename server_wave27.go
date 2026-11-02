@@ -18,7 +18,7 @@ import (
 	"foxtrack-bridge/webhook"
 )
 
-// Bridge 2.7: smart plugs and the virtual printer. Both read the config the
+// Bridge 2.5.2: smart plugs and the virtual printer. Both read the config the
 // same way the printer connections do and are re-synced from
 // syncPrinterConnections, so every config path (Settings save, add, edit,
 // delete) keeps them current.

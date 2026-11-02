@@ -3180,7 +3180,7 @@ function cardInnerHTML(printer, live) {
         + '</div></div>'
         : '';
 
-    // Temps panel (Bridge 2.8): nozzle and bed targets, home. Not over Bambu
+    // Temps panel (Bridge 2.5.2): nozzle and bed targets, home. Not over Bambu
     // Cloud (the printer refuses them), not PrusaLink (no API call for it),
     // not Home Assistant (read-only).
     const hasConsole = !removeMode && !isCloud && !readOnly && brand !== 'prusalink';
@@ -3471,7 +3471,7 @@ async function setFanSpeedEncoded(enc, pct) {
     }
 }
 
-// ── Temps panel: nozzle and bed targets, home (Bridge 2.8) ───────────────────
+// ── Temps panel: nozzle and bed targets, home (Bridge 2.5.2) ───────────────────
 
 function toggleTemps(enc) {
     const entry = printerCardEls.get(decodePrinterId(enc));

@@ -11,7 +11,7 @@ import (
 	mqttpkg "foxtrack-bridge/mqtt"
 )
 
-// Files on the printer (Bridge 2.8). Two bridge_commands run off the poll
+// Files on the printer (Bridge 2.5.2). Two bridge_commands run off the poll
 // loop, like print_file, because an FTPS listing or a print start can take
 // seconds and would hold up pause and stop for the other printers:
 //
