@@ -1138,7 +1138,9 @@ document.addEventListener('keydown', e => {
     }
 });
 
-function statusMeta(status) {
+function statusMeta(status, plug) {
+    // Offline with its plug off: the plug cut the power.
+    if (status === 'disconnected' && plug && plug.reachable && !plug.on) return { label:'Powered off', dot:'bg-text-2', badge:'badge-muted' };
     // Status colour is the one place a hue is allowed: accent for activity,
     // amber for paused, the link blue for done, danger for errors, muted for
     // everything quiet. Pills are border + text, never a fill.
@@ -3016,7 +3018,7 @@ function patchCard(entry, printer) {
     const hooks = entry.hooks;
     const live = liveStatus[printer.id] || null;
     const status = live && live.status ? live.status : 'connecting';
-    const meta = statusMeta(status);
+    const meta = statusMeta(status, live && live.plug);
     const isCloud = isCloudPrinter(printer);
     const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
     const dis = (status === 'disconnected' || status === 'connecting');
@@ -3252,7 +3254,7 @@ function amsSlotsInnerHTML(amsSlots, ext, canEdit, enc, printerName) {
 // called from patchCard.
 function cardInnerHTML(printer, live) {
     const status = live && live.status ? live.status : 'connecting';
-    const meta = statusMeta(status);
+    const meta = statusMeta(status, live && live.plug);
     const file = live && live.file_name ? live.file_name : '';
     const progress = live && typeof live.progress === 'number' ? live.progress : 0;
     const error = live && live.error ? live.error : '';

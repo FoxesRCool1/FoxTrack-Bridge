@@ -9,6 +9,13 @@
 - The dashboard card shows the plug, and its Plug on button, while the printer
   itself is off or not reporting. Before, it waited for a printer report that
   never came once the plug had cut the power.
+- FoxTrack keeps seeing a printer its plug switched off: while the printer is
+  quiet and the plug is off, the Bridge reports the plug itself every minute
+  (gcode_state OFFLINE, only the plug commands), and once more when the plug
+  comes back on. FoxTrack shows Powered off and Turn plug on keeps working;
+  before, the printer went to Bridge offline with every button off.
+- The dashboard shows such a printer as Powered off instead of its last
+  state (a Bambu account printer kept showing Idle).
 
 **Dashboard**
 - Settings has a section list (FoxTrack, Bambu Cloud, Virtual printer,
