@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.5.3
 
 **Smart plugs**
 - A Bambu printer added through a Bambu account can now have a smart plug:
@@ -17,10 +17,9 @@
 - The dashboard shows such a printer as Powered off instead of its last
   state (a Bambu account printer kept showing Idle).
 
-**Dashboard**
-- Settings has a section list (FoxTrack, Bambu Cloud, Virtual printer,
-  Assistant, General) and shows one section at a time.
-- Shorter text everywhere. Setup help sits behind an (i) beside the field.
+**Other changes**
+- Settings has been revamped to be simpler and cleaner.
+- Shorter and condensed text everywhere.
 - Printer cards show Pause, Resume, Stop and Start print only when they
   apply. The light button always reads Light; its colour shows on or off.
 - Colours match the FoxTrack web app again.
