@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.5.3
+
+**Smart plugs**
+- A Bambu printer added through a Bambu account can now have a smart plug:
+  the Smart plug section shows on its edit form. The plug is switched on your
+  network, so it works the same as on a LAN printer.
+- The dashboard card shows the plug, and its Plug on button, while the printer
+  itself is off or not reporting. Before, it waited for a printer report that
+  never came once the plug had cut the power.
+- FoxTrack keeps seeing a printer its plug switched off: while the printer is
+  quiet and the plug is off, the Bridge reports the plug itself every minute
+  (gcode_state OFFLINE, only the plug commands), and once more when the plug
+  comes back on. FoxTrack shows Powered off and Turn plug on keeps working;
+  before, the printer went to Bridge offline with every button off.
+- The dashboard shows such a printer as Powered off instead of its last
+  state (a Bambu account printer kept showing Idle).
+
+**Other changes**
+- Settings has been revamped to be simpler and cleaner.
+- Shorter and condensed text everywhere.
+- Printer cards show Pause, Resume, Stop and Start print only when they
+  apply. The light button always reads Light; its colour shows on or off.
+- Colours match the FoxTrack web app again.
+
 ## v2.5.2
 
 The v2.7.0 notes below were never released on their own. Everything in them ships in v2.5.2.

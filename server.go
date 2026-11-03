@@ -107,6 +107,7 @@ func StartServer(port int) {
 
 	mqttpkg.OnCloudAuthFailed = expireCloudToken
 	wirePlugs()
+	startPlugRelay()
 	syncPrinterConnections(nil, cfg)
 
 	// Units shipped before v2.3.1 used Restart=on-failure, so the clean exit an
@@ -481,7 +482,19 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 			dropped = append(dropped, name)
 			continue
 		}
-		byID[id] = v
+		// The plug has its own poller: read it now, so a printer the plug
+		// switched off (no reports, so no plug on its last one) still shows the
+		// plug and its Plug on button.
+		c := *v
+		c.Plug = mqttpkg.PlugState(name)
+		// A quiet printer whose plug is off has no power: show it offline,
+		// not the last state it reported (a Bambu account printer keeps that
+		// state, since the account connection stays up).
+		if pl := c.Plug; pl != nil && pl.Reachable && !pl.On &&
+			!(telemetryReporting(v) && time.Now().Unix()-v.Timestamp < int64(plugRelayQuiet/time.Second)) {
+			c = mqttpkg.TelemetryData{Status: "disconnected", PrinterID: v.PrinterID, Timestamp: v.Timestamp, Plug: pl}
+		}
+		byID[id] = &c
 	}
 	if len(dropped) > 0 {
 		log.Printf("[status] dropped live status for %d printer(s) with no matching config entry: %v", len(dropped), dropped)

@@ -283,11 +283,11 @@ The network scan finds OctoPrint on port 80 and port 5000. The Bridge checks rea
 		ID:       "smart-plugs",
 		Title:    "Smart plugs: watts, energy per print, auto off",
 		Keywords: []string{"plug", "smart plug", "shelly", "tasmota", "kasa", "power", "watts", "energy", "kwh", "electricity", "auto off", "turn off", "switch"},
-		Body: `A printer can be powered through a smart plug the Bridge reads and switches over your network. Supported: Shelly (Gen1, Gen2 and Plus), Tasmota, and Kasa plugs on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) is not supported yet; the plug check says so. No maker's cloud is ever called.
+		Body: `A printer can be powered through a smart plug the Bridge reads and switches over your network. Supported: Shelly (Gen1, Gen2 and Plus), Tasmota, and Kasa plugs on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) is not supported yet; the plug check says so. No maker's cloud is ever called. It works for every printer type the Bridge controls, a Bambu printer added through a Bambu account included.
 
 To set one: open the printer's pencil (edit) or add it, scroll to Smart plug, choose the type, enter the plug's address on your network, and click "Check plug". The check reports on or off and the watts if the plug has an energy meter.
 
-The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button. "Plug off" is disabled while the printer prints or is paused, and refused while the nozzle is above 50 C, so a print is never cut.
+The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button, also while the printer itself is switched off. "Plug off" is disabled while the printer prints or is paused, and refused while the nozzle is above 50 C, so a print is never cut.
 
 "Turn the plug off after a print": once a print ends (finished, stopped or failed), the Bridge waits the number of minutes you set (10 by default) with the printer idle and the nozzle under 50 C, then turns the plug off. A new print in that time cancels it. The log says "plug turned off after the print".
 

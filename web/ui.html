@@ -29,11 +29,11 @@
             --border: rgb(60 45 30 / 14%);
             --text: #2b2118;
             --text-2: rgb(43 33 24 / 70%);
-            --accent: #5c6a42;
+            --accent: #596640;
             --accent-2: #4a5436;
-            --link: #4a6d8c;
-            --danger: #a8503f;
-            --warning: #a8783f;
+            --link: #43647f;
+            --danger: #94432f;
+            --warning: #765426;
             --radius: 12px;
             --blur: 0px;
         }
@@ -42,14 +42,14 @@
             --bg: #1a1a1c;
             --panel: rgb(255 255 255 / 5%);
             --panel-2: rgb(255 255 255 / 9%);
-            --surface: rgb(38 38 41 / 96%);
+            --surface: rgb(38 38 40);
             --border: rgb(255 255 255 / 10%);
             --text: #f2f2f0;
             --text-2: rgb(242 242 240 / 60%);
-            --accent: #7b8fa6;
-            --accent-2: #5f7188;
+            --accent: #8698ad;
+            --accent-2: #71849c;
             --link: #9db3c9;
-            --danger: #c9705f;
+            --danger: #e08a7b;
             --warning: #d1a25a;
             --radius: 12px;
             --blur: 16px;
@@ -177,8 +177,40 @@
         .wrap-any { overflow-wrap: anywhere; min-width: 0; }
         /* Phones: the top bar keeps the page name, status and buttons. */
         @media (max-width: 480px) { .crumb-app, #footerVersion { display: none; } }
+        /* Phones: stat tiles drop their icon, cards drop the printer type
+           chip, so the numbers and the printer name keep their room. */
+        @media (max-width: 640px) { .stat-icon { display: none !important; } }
+        @media (max-width: 480px) { .type-badge { display: none; } }
         /* The external spool sits apart from the AMS slots. */
         .ams-ext { border-left: 1px solid var(--border); padding-left: .5rem; margin-left: .25rem; }
+
+        /* (i) help tip: help someone needs once, out of everyone else's way.
+           A mouse hover opens it, a click or tap pins it, Escape or a click
+           elsewhere closes it. Takes no height in its row (negative margin);
+           a 32px hit area on touch screens. One shared popover, #tipPop. */
+        .info-tip { position: relative; display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; margin: -.375rem -.25rem; padding: .25rem; border: 0; border-radius: 9999px; background: transparent; color: var(--text-2); font-size: .875rem; line-height: 1; vertical-align: middle; cursor: help; }
+        .info-tip:hover, .info-tip[aria-expanded="true"] { color: var(--text); }
+        @media (pointer: coarse) { .info-tip::before { content: ''; position: absolute; inset: -5px; } }
+        #tipPop { position: fixed; z-index: 210; max-width: 18rem; padding: .5rem .75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: .75rem; line-height: 1.6; box-shadow: 0 4px 16px rgb(0 0 0 / 12%); }
+        #tipPop a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+        #tipPop p + p { margin-top: .375rem; }
+        /* Label row with an (i): the same height with or without one. */
+        .label-row { display: flex; align-items: center; gap: .25rem; margin-bottom: .375rem; }
+        .label-row > .field-label { margin-bottom: 0; }
+
+        /* Settings: section nav (a sidebar on desktop, a chip strip on
+           narrower screens), the web app's settings layout. */
+        .set-nav-row { position: relative; display: flex; align-items: center; width: 100%; height: 2rem; padding: 0 .75rem; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-2); font-size: .875rem; text-align: left; cursor: pointer; }
+        .set-nav-row:hover { background: var(--panel); color: var(--text); }
+        .set-nav-row[aria-current="page"] { background: var(--panel); color: var(--text); font-weight: 500; }
+        .set-nav-row[aria-current="page"]::before { content: ''; position: absolute; left: 0; top: 50%; height: 1rem; width: 2px; transform: translateY(-50%); border-radius: 9999px; background: var(--accent); }
+        .set-chip { height: 1.75rem; flex-shrink: 0; white-space: nowrap; padding: 0 .75rem; border-radius: 9999px; border: 1px solid var(--border); background: transparent; color: var(--text-2); font-size: .75rem; cursor: pointer; }
+        .set-chip:hover { color: var(--text); }
+        .set-chip[aria-current="page"] { border-color: var(--accent); color: var(--text); }
+        /* Not Tailwind's hidden md:block: .hidden is !important here. */
+        .set-nav-desktop { display: none; }
+        @media (min-width: 768px) { .set-nav-desktop { display: block; } }
+        .eyebrow { font-family: 'Cormorant Garamond', 'Times New Roman', Georgia, serif; font-size: .875rem; text-transform: uppercase; letter-spacing: .35em; color: var(--text-2); }
 
         #logPanel { transition: transform 250ms cubic-bezier(0.4,0,0.2,1); }
         #assistantPanel { transition: transform 250ms cubic-bezier(0.4,0,0.2,1); }
@@ -194,6 +226,9 @@
     </style>
 </head>
 <body class="bg-bg text-text font-sans min-h-screen">
+
+<!-- The one (i) tip popover; see the help tips script. -->
+<div id="tipPop" class="hidden" role="tooltip"></div>
 
 <!-- Toast -->
 <div id="toast" class="fixed top-4 right-4 hidden" style="z-index:200" role="status" aria-live="polite">
@@ -266,7 +301,7 @@
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        <p id="printerModalSubtitle" class="text-sm leading-relaxed text-text-2 mb-4">Connect a printer to FoxTrack Bridge.</p>
+        <p id="printerModalSubtitle" class="text-sm leading-relaxed text-text-2 mb-4">Pick one found on your network, or fill in the details.</p>
         <!-- Add mode only: printers the network scan found. Picking one fills the form. -->
         <div id="modalDiscover" class="mb-4">
             <div class="flex items-center justify-between mb-1.5 min-h-[2rem]">
@@ -303,7 +338,7 @@
                 <div>
                     <label for="pName" class="field-label">Printer name</label>
                     <input type="text" id="pName" autocomplete="off" class="field" placeholder="e.g. Studio P1S">
-                    <p id="pNameHint" class="hidden text-xs text-text-2 mt-1.5">FoxTrack knows this printer by its name. If you rename it, link it again in FoxTrack.</p>
+                    <p id="pNameHint" class="hidden text-xs text-text-2 mt-1.5">Renaming means linking it again in FoxTrack.</p>
                 </div>
                 <div id="fieldIp">
                     <label for="pIp" id="labelIp" class="field-label">IP address</label>
@@ -351,9 +386,11 @@
                         <input type="text" id="pHaFile" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_filename">
                     </div>
                     <div>
-                        <label for="pHaRemaining" class="field-label">Time left entity <span class="font-normal">(optional)</span></label>
+                        <div class="label-row">
+                            <label for="pHaRemaining" class="field-label">Time left entity <span class="font-normal">(optional)</span></label>
+                            <button type="button" class="info-tip" aria-label="About the time left entity" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Seconds, minutes or hours (read from the entity's unit), or a finish time.</span>
+                        </div>
                         <input type="text" id="pHaRemaining" autocomplete="off" class="field field-mono" placeholder="sensor.prusa_mk4_print_finish">
-                        <p class="text-xs text-text-2 mt-1.5">Seconds, minutes or hours (read from the entity's unit), or a finish time.</p>
                     </div>
                 </div>
                 <div id="fieldSerial">
@@ -371,12 +408,13 @@
                 <div id="fieldWebcamUrl" class="hidden">
                     <label for="pWebcamUrl" class="field-label">Webcam URL <span class="font-normal">(optional)</span></label>
                     <input type="text" id="pWebcamUrl" autocomplete="off" class="field" placeholder="http://192.168.1.120/webcam/?action=stream">
-                    <p id="webcamHint" class="text-xs text-text-2 mt-1.5">Leave blank to auto-detect. Set this if the camera button doesn't work.</p>
+                    <p id="webcamHint" class="text-xs text-text-2 mt-1.5">Leave blank to find it automatically.</p>
                 </div>
                 <!-- Smart plug: optional for every printer the Bridge controls. -->
                 <div id="fieldPlug" class="hidden border-t border-border pt-3 space-y-3">
                     <div class="flex items-center justify-between gap-3">
-                        <span class="field-label mb-0">Smart plug <span class="font-normal">(optional)</span></span>
+                        <span class="flex items-center gap-1"><span class="field-label mb-0">Smart plug <span class="font-normal">(optional)</span></span>
+                            <button type="button" class="info-tip" aria-label="About smart plugs" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Shelly, Tasmota or Kasa (older firmware). The Bridge reads the plug on your network, never through the maker's cloud. FoxTrack shows its watts and the energy each print used, and can switch it.</span></span>
                         <button type="button" id="plugTestBtn" onclick="testPlug()" class="btn-ghost btn-xs">Check plug</button>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-[10rem_minmax(0,1fr)] gap-3">
@@ -398,11 +436,10 @@
                         </div>
                     </div>
                     <div id="plugAutoOffRow" class="hidden flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-                        <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" id="pPlugAutoOff" class="w-4 h-4 rounded"> Turn the plug off after a print</label>
-                        <span class="inline-flex items-center gap-1.5 text-text-2 whitespace-nowrap">after <input type="number" id="pPlugDelay" min="1" max="240" value="10" class="field py-1 text-sm" style="width:4.5rem"> min idle and cool</span>
+                        <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" id="pPlugAutoOff" class="w-4 h-4 rounded"> Turn off after a print</label>
+                        <span class="inline-flex items-center gap-1.5 text-text-2 whitespace-nowrap">wait <input type="number" id="pPlugDelay" min="1" max="240" value="10" class="field py-1 text-sm" style="width:4.5rem" aria-label="Minutes to wait"> min, once cool</span>
                     </div>
                     <p id="plugTestResult" class="hidden text-xs leading-relaxed" role="status" aria-live="polite"></p>
-                    <p class="text-xs text-text-2">The Bridge reads the plug on your network, never through the maker's cloud. FoxTrack shows the watts and the energy each print used, and can switch the plug from the printer's controls.</p>
                 </div>
                 <div class="flex items-center gap-2 pt-1 flex-wrap">
                     <button onclick="testConnection()" id="testBtn" class="btn-outline btn-lg">Test connection</button>
@@ -502,7 +539,7 @@
     <!-- Stat tiles (hidden on settings) -->
     <div id="statCardsRow" class="px-5 pt-5 pb-2 grid grid-cols-3 gap-3 shrink-0">
         <div class="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-3">
-            <div class="w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
+            <div class="stat-icon w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
                 <i class="fas fa-print"></i>
             </div>
             <div class="min-w-0">
@@ -511,7 +548,7 @@
             </div>
         </div>
         <div class="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-3">
-            <div class="w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
+            <div class="stat-icon w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
                 <i class="fas fa-layer-group"></i>
             </div>
             <div class="min-w-0">
@@ -520,7 +557,7 @@
             </div>
         </div>
         <div class="rounded-lg border border-border bg-panel px-4 py-3 flex items-center gap-3">
-            <div id="statErrorIcon" class="w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
+            <div id="statErrorIcon" class="stat-icon w-9 h-9 rounded-md border border-border flex items-center justify-center text-text-2 shrink-0">
                 <i class="fas fa-circle-exclamation"></i>
             </div>
             <div class="min-w-0">
@@ -583,208 +620,258 @@
         </div>
     </div>
 
-    <!-- View: Settings -->
-    <div id="view-settings" class="hidden px-5 pt-5 pb-5">
-        <div class="max-w-2xl space-y-3">
-            <section id="foxtrackCard" class="rounded-lg border border-border bg-panel p-5">
-                <div class="flex items-start justify-between gap-3 mb-1">
-                    <h2 class="font-heading text-xl font-medium leading-tight">FoxTrack <span class="font-sans text-xs text-text-2">optional</span></h2>
+    <!-- View: Settings. One section at a time, picked from the section nav
+         (the web app's settings layout). Help text sits behind (i) tips. -->
+    <div id="view-settings" class="hidden px-5 pt-5 pb-10">
+        <div class="flex flex-col gap-6 md:flex-row md:gap-8">
+            <nav aria-label="Settings sections" class="w-full md:w-48 md:shrink-0">
+                <div class="flex gap-1.5 overflow-x-auto pb-1 md:hidden">
+                    <button type="button" class="set-chip" data-set-tab="foxtrack" onclick="showSettingsTab('foxtrack')">FoxTrack</button>
+                    <button type="button" class="set-chip" data-set-tab="cloud" onclick="showSettingsTab('cloud')">Bambu Cloud</button>
+                    <button type="button" class="set-chip" data-set-tab="virtual" onclick="showSettingsTab('virtual')">Virtual printer</button>
+                    <button type="button" class="set-chip" data-set-tab="assistant" onclick="showSettingsTab('assistant')">Assistant</button>
+                    <button type="button" class="set-chip" data-set-tab="general" onclick="showSettingsTab('general')">General</button>
                 </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-2">The Bridge works fully on its own, with no FoxTrack account. Connecting adds live status from anywhere, print history, and starting prints from FoxTrack. It needs a FoxTrack Pro or Farm plan.</p>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">In FoxTrack, open Settings &gt; Integrations &gt; FoxTrack Bridge, click Generate token, copy it, and paste it here. It saves and checks itself. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Setup guide</a></p>
-                <div class="flex items-center justify-between gap-3 mb-1.5">
-                    <label for="foxtrack2ApiKey" class="field-label mb-0">Bridge token</label>
-                    <a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0">
-                        Get a token <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
-                    </a>
+                <div class="set-nav-desktop">
+                    <p class="eyebrow mb-2 px-3">Connect</p>
+                    <ul class="space-y-0.5">
+                        <li><button type="button" class="set-nav-row" data-set-tab="foxtrack" onclick="showSettingsTab('foxtrack')">FoxTrack</button></li>
+                        <li><button type="button" class="set-nav-row" data-set-tab="cloud" onclick="showSettingsTab('cloud')">Bambu Cloud</button></li>
+                    </ul>
+                    <p class="eyebrow mb-2 mt-8 px-3">Bridge</p>
+                    <ul class="space-y-0.5">
+                        <li><button type="button" class="set-nav-row" data-set-tab="virtual" onclick="showSettingsTab('virtual')">Virtual printer</button></li>
+                        <li><button type="button" class="set-nav-row" data-set-tab="assistant" onclick="showSettingsTab('assistant')">Assistant</button></li>
+                        <li><button type="button" class="set-nav-row" data-set-tab="general" onclick="showSettingsTab('general')">General</button></li>
+                    </ul>
                 </div>
-                <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field" placeholder="Paste the token (starts with ftb_)" oninput="onTokenInput(event, this, saveApiKeys)">
-                <p id="foxtrackStatus" class="hidden mt-2 text-xs flex items-center gap-1.5" role="status" aria-live="polite">
-                    <span id="foxtrackStatusDot" class="w-1.5 h-1.5 rounded-full shrink-0"></span>
-                    <span id="foxtrackStatusText" class="min-w-0"></span>
-                </p>
-                <div id="legacyKeyRow" class="hidden mt-4">
-                    <label for="apiKey" class="field-label">FoxTrack (legacy)</label>
-                    <input type="password" id="apiKey" autocomplete="off" class="field" placeholder="Paste API key (optional)">
-                </div>
-                <div class="mt-4 flex justify-end">
-                    <button id="saveApiKeysBtn" onclick="saveApiKeys()" class="btn-primary btn-lg">Save</button>
-                </div>
-            </section>
-            <section id="cloudCard" class="rounded-lg border border-border bg-panel p-5">
-                <div class="flex items-start justify-between gap-3 mb-1">
-                    <h2 class="font-heading text-xl font-medium leading-tight">Bambu Cloud <span class="font-sans align-middle inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Experimental</span></h2>
-                    <span id="cloudMqtt" class="hidden text-xs text-text-2 flex items-center gap-1.5 mt-1 shrink-0"><span class="cloud-dot w-1.5 h-1.5 rounded-full bg-text-2"></span><span class="cloud-text">Off</span></span>
-                </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">This feature is experimental. Link your Bambu account to add printers that are not in LAN mode. Cloud printers report status and can toggle the light; every other control needs LAN mode. The Bridge keeps one connection for the whole account and backs off slowly after errors, so the account stays inside Bambu's limits.</p>
-                <div id="cloudUnlinked">
-                    <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_10rem] gap-3">
+            </nav>
+
+            <div class="min-w-0 flex-1 max-w-2xl">
+                <!-- FoxTrack -->
+                <section id="foxtrackCard" data-settings-tab="foxtrack" class="rounded-lg border border-border bg-panel p-6">
+                    <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">FoxTrack <span class="font-sans inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Optional</span></h2>
+                    <p class="mt-1.5 text-sm text-text-2">See your printers in FoxTrack from anywhere, with print history. Needs the Pro or Farm plan.</p>
+                    <div class="mt-5">
+                        <div class="label-row">
+                            <label for="foxtrack2ApiKey" class="field-label">Bridge token</label>
+                            <button type="button" class="info-tip" aria-label="Where to get the token" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">In FoxTrack, open Settings, Integrations, FoxTrack Bridge and click Generate token. Paste it here: it saves and checks itself. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener">Setup guide</a></span>
+                            <a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="ml-auto text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0">Get a token <i class="fas fa-arrow-up-right-from-square text-[10px]"></i></a>
+                        </div>
+                        <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field" placeholder="ftb_…" oninput="onTokenInput(event, this, saveApiKeys)">
+                        <p id="foxtrackStatus" class="hidden mt-2 text-xs flex items-center gap-1.5" role="status" aria-live="polite">
+                            <span id="foxtrackStatusDot" class="w-1.5 h-1.5 rounded-full shrink-0"></span>
+                            <span id="foxtrackStatusText" class="min-w-0"></span>
+                        </p>
+                    </div>
+                    <div id="legacyKeyRow" class="hidden mt-5">
+                        <label for="apiKey" class="field-label">FoxTrack key (legacy)</label>
+                        <input type="password" id="apiKey" autocomplete="off" class="field" placeholder="Optional">
+                    </div>
+                    <div class="mt-6 flex justify-end">
+                        <button id="saveApiKeysBtn" onclick="saveApiKeys()" class="btn-primary btn-lg">Save</button>
+                    </div>
+                </section>
+
+                <!-- Bambu Cloud -->
+                <section id="cloudCard" data-settings-tab="cloud" class="hidden rounded-lg border border-border bg-panel p-6">
+                    <div class="flex items-start justify-between gap-3">
+                        <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">Bambu Cloud <span class="font-sans inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Experimental</span></h2>
+                        <span id="cloudMqtt" class="hidden text-xs text-text-2 flex items-center gap-1.5 mt-1 shrink-0"><span class="cloud-dot w-1.5 h-1.5 rounded-full bg-text-2"></span><span class="cloud-text">Off</span></span>
+                    </div>
+                    <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Add printers that are not in LAN Only Mode.
+                        <button type="button" class="info-tip" aria-label="What works over Bambu Cloud" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Account printers show their status and camera, and can switch the light and a smart plug. Pause, stop, speed and fan need LAN Only Mode. The Bridge keeps one connection for the whole account and backs off after errors, so it stays inside Bambu's limits.</span>
+                    </p>
+                    <div id="cloudUnlinked" class="mt-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_10rem] gap-3">
+                            <div>
+                                <label for="cloudEmail" class="field-label">Email</label>
+                                <input id="cloudEmail" type="email" class="field" autocomplete="off" placeholder="you@example.com">
+                            </div>
+                            <div>
+                                <label for="cloudRegion" class="field-label">Region</label>
+                                <div class="select-wrap">
+                                    <select id="cloudRegion" class="field">
+                                        <option value="global">Global</option>
+                                        <option value="cn">China</option>
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="cloudPasswordRow" class="mt-3">
+                            <div class="label-row">
+                                <label for="cloudPassword" class="field-label">Password</label>
+                                <button type="button" class="info-tip" aria-label="About the password" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Used once to sign in. It is never stored.</span>
+                            </div>
+                            <input id="cloudPassword" type="password" class="field" autocomplete="off" placeholder="Bambu account password" onkeydown="if(event.key==='Enter')cloudSignIn()">
+                        </div>
+                        <div id="cloudCodeRow" class="hidden mt-3">
+                            <label for="cloudCode" class="field-label">Code from Bambu's email</label>
+                            <input id="cloudCode" type="text" inputmode="numeric" class="field field-mono" autocomplete="off" placeholder="6-digit code" onkeydown="if(event.key==='Enter')cloudVerify()">
+                        </div>
+                        <p id="cloudError" class="hidden text-xs text-danger mt-3"></p>
+                        <div id="cloudTokenRow" class="hidden mt-3">
+                            <div class="label-row">
+                                <label for="cloudToken" class="field-label">Access token</label>
+                                <button type="button" class="info-tip" aria-label="About the access token" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">For when sign-in is blocked. Copy it from a signed-in Bambu session. It lasts about 90 days and cannot be renewed: sign in again when it runs out.</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <input id="cloudToken" type="password" class="field field-mono" autocomplete="off" placeholder="Access token">
+                                <button onclick="cloudUseToken()" class="btn-outline btn-lg shrink-0">Use token</button>
+                            </div>
+                        </div>
+                        <div class="mt-6 flex items-center justify-end gap-2 flex-wrap">
+                            <button onclick="toggleCloudToken()" class="btn-ghost btn-lg mr-auto">Use a token instead</button>
+                            <button id="cloudBackBtn" onclick="resetCloudForm()" class="btn-ghost btn-lg hidden">Start over</button>
+                            <button id="cloudSignInBtn" onclick="cloudSignIn()" class="btn-primary btn-lg">Sign in</button>
+                            <button id="cloudVerifyBtn" onclick="cloudVerify()" class="btn-primary btn-lg hidden">Link account</button>
+                        </div>
+                    </div>
+                    <div id="cloudLinked" class="hidden mt-5">
+                        <p class="text-sm"><span id="cloudLinkedEmail" class="font-medium"></span> <span id="cloudLinkedMeta" class="text-text-2"></span></p>
+                        <p id="cloudDetail" class="hidden text-xs leading-relaxed text-text-2 mt-2"></p>
+                        <div class="mt-6 flex items-center justify-end gap-2 flex-wrap">
+                            <button id="cloudRetryBtn" onclick="cloudRetry()" class="btn-outline btn-lg hidden">Retry now</button>
+                            <button onclick="cloudUnlink()" class="btn-danger btn-lg">Unlink</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Virtual printer -->
+                <section id="virtualPrinterCard" data-settings-tab="virtual" class="hidden rounded-lg border border-border bg-panel p-6">
+                    <div class="flex items-start justify-between gap-3">
+                        <h2 class="font-heading text-xl font-medium leading-tight">Virtual printer</h2>
+                        <button id="vpToggle" onclick="toggleVirtualPrinter()" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Turn on the virtual printer">
+                            <span class="switch-thumb"></span>
+                        </button>
+                    </div>
+                    <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Send files from OrcaSlicer or PrusaSlicer to FoxTrack.
+                        <button type="button" class="info-tip" aria-label="How to set up the slicer" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">In the slicer, add a printer host of type OctoPrint with the address and API key below. Files you send land in FoxTrack under Printers, From the slicer. Print them from there.</span>
+                    </p>
+                    <p id="vpStandalone" class="hidden mt-5 text-sm text-text-2">Connect FoxTrack first. <button type="button" onclick="showSettingsTab('foxtrack')" class="text-link hover:underline underline-offset-4">Open FoxTrack settings</button></p>
+                    <div id="vpDetails" class="hidden mt-5 space-y-4">
                         <div>
-                            <label for="cloudEmail" class="field-label">Email</label>
-                            <input id="cloudEmail" type="email" class="field" autocomplete="off" placeholder="you@example.com">
+                            <span class="field-label">Address for the slicer</span>
+                            <ul id="vpUrls" class="space-y-2"></ul>
+                            <p id="vpUrlsNone" class="hidden text-xs text-text-2">No address found yet. Use this computer's IP address with port <span id="vpPortText"></span>.</p>
                         </div>
                         <div>
-                            <label for="cloudRegion" class="field-label">Region</label>
+                            <span class="field-label">API key</span>
+                            <div class="flex items-center gap-2">
+                                <div class="min-w-0 flex-1 rounded-md border border-border px-3 py-1.5"><code id="vpKey" class="field-mono wrap-any"></code></div>
+                                <button type="button" onclick="copyVirtualPrinterKey()" class="btn-outline shrink-0">Copy</button>
+                            </div>
+                        </div>
+                        <p id="vpStatus" class="text-xs text-text-2"></p>
+                    </div>
+                </section>
+
+                <!-- Assistant -->
+                <section id="assistantCard" data-settings-tab="assistant" class="hidden rounded-lg border border-border bg-panel p-6">
+                    <div class="flex items-start justify-between gap-3">
+                        <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">Assistant <span class="font-sans inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Experimental</span></h2>
+                        <button id="aiEnabledToggle" onclick="toggleAIEnabled()" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Turn on the assistant">
+                            <span class="switch-thumb"></span>
+                        </button>
+                    </div>
+                    <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Ask about your printers, or why a print failed. It can only read.
+                        <button type="button" class="info-tip" aria-label="About the assistant" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only"><span class="block">You bring the AI provider and pay for it; the Bridge ships with none. Requests go from this machine straight to the provider, never through FoxTrack.</span><span class="block mt-1.5">It cannot change a setting or control a print.</span></span>
+                    </p>
+
+                    <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label for="aiPreset" class="field-label">Provider</label>
                             <div class="select-wrap">
-                                <select id="cloudRegion" class="field">
-                                    <option value="global">Global</option>
-                                    <option value="cn">China</option>
+                                <select id="aiPreset" class="field" onchange="onAIPresetChange()">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="gemini">Google Gemini</option>
+                                    <option value="anthropic">Anthropic</option>
+                                    <option value="custom">Custom (OpenAI-compatible)</option>
+                                    <option value="local">Local model on this machine</option>
                                 </select>
                                 <i class="fas fa-chevron-down"></i>
                             </div>
                         </div>
-                    </div>
-                    <div id="cloudPasswordRow" class="mt-3">
-                        <label for="cloudPassword" class="field-label">Password</label>
-                        <input id="cloudPassword" type="password" class="field" autocomplete="off" placeholder="Bambu account password" onkeydown="if(event.key==='Enter')cloudSignIn()">
-                        <p class="text-xs text-text-2 mt-1.5">The password is used once to sign in and is never stored.</p>
-                    </div>
-                    <div id="cloudCodeRow" class="hidden mt-3">
-                        <label for="cloudCode" class="field-label">Code from the email Bambu just sent</label>
-                        <input id="cloudCode" type="text" inputmode="numeric" class="field field-mono" autocomplete="off" placeholder="6-digit code" onkeydown="if(event.key==='Enter')cloudVerify()">
-                    </div>
-                    <p id="cloudError" class="hidden text-xs text-danger mt-3"></p>
-                    <div class="mt-4 flex items-center gap-2 flex-wrap">
-                        <button id="cloudSignInBtn" onclick="cloudSignIn()" class="btn-outline btn-lg">Sign in</button>
-                        <button id="cloudVerifyBtn" onclick="cloudVerify()" class="btn-outline btn-lg hidden">Link account</button>
-                        <button id="cloudBackBtn" onclick="resetCloudForm()" class="btn-ghost btn-lg hidden">Start over</button>
-                        <button onclick="toggleCloudToken()" class="btn-ghost btn-lg">Paste a token instead</button>
-                    </div>
-                    <div id="cloudTokenRow" class="hidden mt-3">
-                        <label for="cloudToken" class="field-label">Access token</label>
-                        <input id="cloudToken" type="password" class="field field-mono" autocomplete="off" placeholder="Paste the token from a signed-in Bambu session">
-                        <p class="text-xs text-text-2 mt-1.5 mb-3">Use this when sign-in is blocked. A token lasts about 90 days and cannot be renewed; sign in again when it expires.</p>
-                        <button onclick="cloudUseToken()" class="btn-outline btn-lg">Use token</button>
-                    </div>
-                </div>
-                <div id="cloudLinked" class="hidden">
-                    <p class="text-sm"><span id="cloudLinkedEmail" class="font-medium"></span> <span id="cloudLinkedMeta" class="text-text-2"></span></p>
-                    <p id="cloudDetail" class="hidden text-xs leading-relaxed text-text-2 mt-2"></p>
-                    <div class="mt-4 flex items-center gap-2 flex-wrap">
-                        <button id="cloudRetryBtn" onclick="cloudRetry()" class="btn-outline hidden">Retry now</button>
-                        <button onclick="cloudUnlink()" class="btn-danger">Unlink</button>
-                    </div>
-                </div>
-            </section>
-            <!-- Hidden until /api/network reports at least one address. -->
-            <section id="deviceCard" class="hidden rounded-lg border border-border bg-panel p-5">
-                <h2 class="font-heading text-xl font-medium leading-tight">Open on another device</h2>
-                <p class="mt-1 mb-4 text-sm leading-relaxed text-text-2">Type one of these addresses into a phone, tablet or another computer on the same network to open this dashboard there. Anyone on your network can open it, because it has no login.</p>
-                <ul id="deviceUrls" class="space-y-2"></ul>
-                <p id="deviceDocker" class="hidden mt-3 text-xs leading-relaxed text-text-2">Running in Docker. Use the host's address and the mapped port.</p>
-            </section>
-            <section id="virtualPrinterCard" class="rounded-lg border border-border bg-panel p-5">
-                <div class="flex items-start justify-between gap-3 mb-1">
-                    <h2 class="font-heading text-xl font-medium leading-tight">Virtual printer</h2>
-                    <button id="vpToggle" onclick="toggleVirtualPrinter()" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Enable the virtual printer">
-                        <span class="switch-thumb"></span>
-                    </button>
-                </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">The Bridge can look like an OctoPrint printer to OrcaSlicer and PrusaSlicer. Add a printer host of type OctoPrint in the slicer with the address and key below. Files you send go to FoxTrack, Printers page, From the slicer. Print them from FoxTrack.</p>
-                <p id="vpStandalone" class="hidden text-sm leading-relaxed text-text-2">Connect the Bridge to FoxTrack first (the FoxTrack card above). The virtual printer sends files to FoxTrack, so it has nowhere to send them until then.</p>
-                <div id="vpDetails" class="hidden space-y-3">
-                    <div>
-                        <span class="field-label">Address for the slicer</span>
-                        <ul id="vpUrls" class="space-y-2"></ul>
-                        <p id="vpUrlsNone" class="hidden text-xs text-text-2">No network address found yet. Use this computer's IP address with port <span id="vpPortText"></span>.</p>
-                    </div>
-                    <div>
-                        <span class="field-label">API key</span>
-                        <div class="flex items-center gap-2">
-                            <div class="min-w-0 flex-1 rounded-md border border-border bg-panel-2 px-3 py-1.5"><code id="vpKey" class="field-mono wrap-any"></code></div>
-                            <button type="button" onclick="copyVirtualPrinterKey()" class="btn-outline shrink-0">Copy</button>
-                        </div>
-                    </div>
-                    <p id="vpStatus" class="text-xs text-text-2"></p>
-                </div>
-            </section>
-            <section id="assistantCard" class="rounded-lg border border-border bg-panel p-5">
-                <div class="flex items-start justify-between gap-3 mb-1">
-                    <h2 class="font-heading text-xl font-medium leading-tight">Assistant <span class="font-sans align-middle inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Experimental</span></h2>
-                    <button id="aiEnabledToggle" onclick="toggleAIEnabled()" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Enable the assistant">
-                        <span class="switch-thumb"></span>
-                    </button>
-                </div>
-                <p class="text-sm leading-relaxed text-text-2 mb-4">Ask questions about your printers, get help connecting one, and work out why a print went wrong. You supply the AI provider and pay for it; the Bridge ships with none. Requests go from this machine straight to the provider and never through FoxTrack. The assistant can only read. It cannot change a setting or control a print.</p>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                        <label for="aiPreset" class="field-label">Provider</label>
-                        <div class="select-wrap">
-                            <select id="aiPreset" class="field" onchange="onAIPresetChange()">
-                                <option value="openai">OpenAI</option>
-                                <option value="gemini">Google Gemini</option>
-                                <option value="anthropic">Anthropic</option>
-                                <option value="custom">Custom (OpenAI-compatible)</option>
-                                <option value="local">Local model on this machine</option>
-                            </select>
-                            <i class="fas fa-chevron-down"></i>
-                        </div>
-                    </div>
-                    <div>
-                        <label for="aiModel" class="field-label">Model</label>
-                        <div class="flex gap-2">
-                            <input id="aiModel" type="text" class="field field-mono" autocomplete="off" placeholder="e.g. gpt-4o-mini" list="aiModelList">
-                            <datalist id="aiModelList"></datalist>
-                            <button type="button" onclick="loadAIModels()" class="btn-outline btn-lg shrink-0">Fetch</button>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="aiBaseUrlRow" class="hidden mt-3">
-                    <label for="aiBaseUrl" class="field-label">Base URL</label>
-                    <input id="aiBaseUrl" type="text" class="field field-mono" autocomplete="off" placeholder="http://localhost:11434/v1">
-                    <p class="text-xs text-text-2 mt-1.5">The OpenAI-compatible endpoint root, ending in <code class="code-inline">/v1</code>. For Ollama that is usually <code class="code-inline">http://localhost:11434/v1</code>.</p>
-                </div>
-
-                <div class="mt-3">
-                    <label for="aiApiKey" class="field-label">API key</label>
-                    <input id="aiApiKey" type="password" class="field" autocomplete="off" placeholder="Paste your provider API key">
-                    <p id="aiKeyHint" class="text-xs text-text-2 mt-1.5">Stored on this machine in <code class="code-inline">config.json</code>, which is readable only by your user. Leave blank to keep the saved key.</p>
-                </div>
-
-                <div class="mt-4 rounded-md border border-border bg-panel-2 p-3 flex items-start justify-between gap-3">
-                    <div>
-                        <p class="text-sm font-medium">Let the assistant look at printer cameras</p>
-                        <p id="aiCameraWarning" class="text-xs leading-relaxed text-text-2 mt-1">Needed to diagnose how a print actually looks. With a cloud provider this sends a photograph of your printer to that provider. With a local model it stays on this machine.</p>
-                    </div>
-                    <button id="aiCameraToggle" onclick="toggleAICamera()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Allow camera access">
-                        <span class="switch-thumb"></span>
-                    </button>
-                </div>
-
-                <p class="text-xs leading-relaxed text-text-2 mt-3">The dashboard has no login. Anyone who can reach it on your network can use the assistant and spend credit on this key.</p>
-
-                <p id="aiSettingsError" class="hidden text-xs text-danger mt-3"></p>
-                <div class="mt-4 flex items-center gap-2">
-                    <button onclick="saveAISettings()" class="btn-primary btn-lg">Save</button>
-                    <span id="aiSettingsStatus" class="text-xs text-text-2"></span>
-                </div>
-            </section>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <section class="rounded-lg border border-border bg-panel p-5">
-                    <div class="flex items-center justify-between gap-3">
                         <div>
-                            <h2 class="font-heading text-xl font-medium leading-tight">Advanced mode</h2>
-                            <p class="text-sm text-text-2 mt-1">Shows the GCode console button on printer cards.</p>
+                            <label for="aiModel" class="field-label">Model</label>
+                            <div class="flex gap-2">
+                                <input id="aiModel" type="text" class="field field-mono" autocomplete="off" placeholder="e.g. gpt-4o-mini" list="aiModelList">
+                                <datalist id="aiModelList"></datalist>
+                                <button type="button" onclick="loadAIModels()" class="btn-outline btn-lg shrink-0">Fetch</button>
+                            </div>
                         </div>
-                        <button id="advancedToggle" onclick="toggleAdvancedMode()" class="switch" role="switch" aria-checked="false" aria-label="Advanced mode">
-                            <span id="advancedThumb" class="switch-thumb"></span>
+                    </div>
+
+                    <div id="aiBaseUrlRow" class="hidden mt-3">
+                        <div class="label-row">
+                            <label for="aiBaseUrl" class="field-label">Base URL</label>
+                            <button type="button" class="info-tip" aria-label="About the base URL" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">The OpenAI-compatible endpoint, ending in /v1. For Ollama that is usually http://localhost:11434/v1.</span>
+                        </div>
+                        <input id="aiBaseUrl" type="text" class="field field-mono" autocomplete="off" placeholder="http://localhost:11434/v1">
+                    </div>
+
+                    <div class="mt-3">
+                        <div class="label-row">
+                            <label for="aiApiKey" class="field-label">API key</label>
+                            <button type="button" class="info-tip" aria-label="Where the key is kept" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Kept on this machine in config.json, readable only by your user. The dashboard has no login: anyone on your network who can open it can use the assistant and spend credit on this key.</span>
+                        </div>
+                        <input id="aiApiKey" type="password" class="field" autocomplete="off" placeholder="Paste your provider API key">
+                        <p id="aiKeyHint" class="text-xs text-text-2 mt-1.5">Kept only on this machine.</p>
+                    </div>
+
+                    <div class="mt-5 flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <p class="text-sm font-medium">Camera access</p>
+                            <p id="aiCameraWarning" class="text-xs text-text-2 mt-0.5">Sends camera photos to your AI provider.</p>
+                        </div>
+                        <button id="aiCameraToggle" onclick="toggleAICamera()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Let the assistant see printer cameras">
+                            <span class="switch-thumb"></span>
                         </button>
                     </div>
-                </section>
-                <section class="rounded-lg border border-border bg-panel p-5">
-                    <div class="flex items-center justify-between gap-3">
-                        <div>
-                            <h2 class="font-heading text-xl font-medium leading-tight">Auto-update</h2>
-                            <p id="autoUpdateDesc" class="text-sm text-text-2 mt-1">Automatically download and restart when a new version is available.</p>
-                        </div>
-                        <button id="autoUpdateToggle" onclick="toggleAutoUpdate()" class="switch" role="switch" aria-checked="false" aria-label="Auto-update">
-                            <span id="autoUpdateThumb" class="switch-thumb"></span>
-                        </button>
+
+                    <p id="aiSettingsError" class="hidden text-xs text-danger mt-4"></p>
+                    <div class="mt-6 flex items-center justify-end gap-3">
+                        <span id="aiSettingsStatus" class="text-xs text-text-2"></span>
+                        <button onclick="saveAISettings()" class="btn-primary btn-lg">Save</button>
                     </div>
                 </section>
+
+                <!-- General -->
+                <div data-settings-tab="general" class="hidden space-y-4">
+                    <section class="rounded-lg border border-border bg-panel p-6">
+                        <h2 class="font-heading text-xl font-medium leading-tight">General</h2>
+                        <div class="mt-5 space-y-5">
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <p class="text-sm font-medium">Auto-update</p>
+                                    <p id="autoUpdateDesc" class="text-xs text-text-2 mt-0.5">Installs new versions and restarts.</p>
+                                </div>
+                                <button id="autoUpdateToggle" onclick="toggleAutoUpdate()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Auto-update">
+                                    <span id="autoUpdateThumb" class="switch-thumb"></span>
+                                </button>
+                            </div>
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <p class="text-sm font-medium">Advanced mode</p>
+                                    <p class="text-xs text-text-2 mt-0.5">Adds a GCode console to Bambu printer cards.</p>
+                                </div>
+                                <button id="advancedToggle" onclick="toggleAdvancedMode()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Advanced mode">
+                                    <span id="advancedThumb" class="switch-thumb"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                    <!-- Hidden until /api/network reports at least one address. -->
+                    <section id="deviceCard" class="hidden rounded-lg border border-border bg-panel p-6">
+                        <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">Open on another device
+                            <button type="button" class="info-tip" aria-label="Who can open the dashboard" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only font-sans">The dashboard has no login, so anyone on your network can open it.</span>
+                        </h2>
+                        <p class="mt-1.5 text-sm text-text-2">Type an address into a phone or computer on the same network.</p>
+                        <ul id="deviceUrls" class="mt-5 space-y-2"></ul>
+                        <p id="deviceDocker" class="hidden mt-3 text-xs text-text-2">Running in Docker: use the host's address and the mapped port.</p>
+                    </section>
+                </div>
             </div>
         </div>
     </div>
@@ -846,39 +933,45 @@ function clearCameraTimer(enc) { clearTimeout(cameraTimers.get(enc)); cameraTime
 const printerCardEls = new Map(); // id -> { el, hooks }: keyed patch rendering state
 let forceFullCardRefresh = false; // set true to force a full content rebuild of every card on the next renderPrinters() pass
 
+// The line under the printer type: one short sentence, the how-to behind its (i).
+function brandNote(line, help, label) {
+    return '<p class="flex items-center gap-1 text-xs text-text-2">' + escHtml(line) + ' ' + tip(escHtml(help), label) + '</p>';
+}
+
 const brands = {
     bambu: {
-        instructions: '<div class="space-y-1.5 rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2"><p>On the printer, open Settings, then Network (WLAN on the P1 and A1) and turn on LAN Only mode. The access code is shown there. The serial number is on the printer\'s label and under Settings, Device.</p><p>Pause, stop and start also need Developer mode: next to LAN Only mode on 2025 and later firmware, under About on older firmware.</p></div>',
+        instructions: brandNote('Needs LAN Only Mode on the printer.', 'On the printer, open Settings, Network (WLAN on the P1 and A1) and turn on LAN Only Mode. The access code shows there. The serial number is on the printer\'s label and under Settings, Device. Pause, stop and start also need Developer mode: next to LAN Only Mode on 2025 firmware and later, under About on older firmware.', 'How to set up a Bambu Lab printer'),
         fields: { ip: true, serial: true, lanCode: true, moonrakerUrl: false, klipperKey: false, webcamUrl: false }
     },
     bambu_cloud: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Experimental. Uses the Bambu account linked in Settings. Cloud printers report status and can toggle the light; pause, stop, speed and fan need LAN mode. The camera works when the printer is on this network: its address is learned from the printer, or you can type it below.</div>',
+        instructions: brandNote('Uses the Bambu account linked in Settings.', 'Status, the camera, the light and a smart plug work over the cloud. Pause, stop, speed and fan need LAN Only Mode. The camera needs the printer on this network: its address is learned from the printer, or type it below.', 'What works over Bambu Cloud'),
         fields: { ip: true, serial: false, lanCode: false, moonrakerUrl: false, klipperKey: false, webcamUrl: false, cloudDevices: true }
     },
     klipper: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Use your Moonraker address, usually http://printer-ip:7125 (Moonraker listens on port 7125). Add an API key only if Moonraker authorization is on.</div>',
+        instructions: brandNote('Your Moonraker address, usually port 7125.', 'For example http://192.168.1.120:7125. Add an API key only if Moonraker authorization is on.', 'About the Moonraker address'),
         fields: { ip: false, serial: false, lanCode: false, moonrakerUrl: true, klipperKey: true, webcamUrl: true }
     },
     prusalink: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">For Prusa MK4, XL, MINI and Core One. Turn on PrusaLink in the printer\'s network settings, then enter its address and the API key shown on its PrusaLink screen.</div>',
+        instructions: brandNote('For the MK4, XL, MINI and Core One.', 'Turn on PrusaLink in the printer\'s network settings. Its address and API key show on the PrusaLink screen.', 'How to set up PrusaLink'),
         fields: { prusaLinkUrl: true, klipperKey: true, webcamUrl: true },
         keyLabel: 'PrusaLink API key', keyPlaceholder: 'PrusaLink API key'
     },
     octoprint: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Enter the OctoPrint address (for example http://octopi.local) and an API key. In OctoPrint, make one under Settings, Application Keys, or copy the global key under Settings, API. The webcam is found from OctoPrint\'s own settings; set a URL only if the camera button does not work.</div>',
+        instructions: brandNote('Your OctoPrint address and an API key.', 'Make a key in OctoPrint under Settings, Application Keys, or copy the global one under Settings, API. The webcam is found from OctoPrint\'s own settings.', 'How to set up OctoPrint'),
         fields: { octoPrintUrl: true, klipperKey: true, webcamUrl: true },
         keyLabel: 'OctoPrint API key', keyPlaceholder: 'OctoPrint API key'
     },
     home_assistant: {
-        instructions: '<div class="rounded-md border border-border bg-panel px-3 py-2.5 text-xs leading-relaxed text-text-2">Read-only: FoxTrack sees the status but cannot pause, stop or start a print. Create a long-lived access token on your Home Assistant profile page, then enter the entity IDs of your printer\'s sensors.</div>',
+        instructions: brandNote('Read-only: status, no print controls.', 'Make a long-lived access token on your Home Assistant profile page, then enter the entity IDs of your printer\'s sensors.', 'How to set up Home Assistant'),
         fields: { homeAssistant: true, webcamUrl: true }
     }
 };
 
 // Printer kinds the Bridge reaches over HTTP and FoxTrack knows by name.
 const NAME_KEYED_BRANDS = ['klipper', 'prusalink', 'octoprint', 'home_assistant'];
-// Printer types that can have a smart plug: every one the Bridge talks to itself.
-const PLUG_BRANDS = ['bambu', 'klipper', 'prusalink', 'octoprint'];
+// Printer types that can have a smart plug: every one the Bridge talks to itself
+// (a Bambu account printer too: the plug is on the LAN, only the printer is not).
+const PLUG_BRANDS = ['bambu', 'bambu_cloud', 'klipper', 'prusalink', 'octoprint'];
 
 function escHtml(str) {
     return (str == null ? '' : String(str)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -1045,7 +1138,9 @@ document.addEventListener('keydown', e => {
     }
 });
 
-function statusMeta(status) {
+function statusMeta(status, plug) {
+    // Offline with its plug off: the plug cut the power.
+    if (status === 'disconnected' && plug && plug.reachable && !plug.on) return { label:'Powered off', dot:'bg-text-2', badge:'badge-muted' };
     // Status colour is the one place a hue is allowed: accent for activity,
     // amber for paused, the link blue for done, danger for errors, muted for
     // everything quiet. Pills are border + text, never a fill.
@@ -1054,7 +1149,7 @@ function statusMeta(status) {
         paused:       { label:'Paused',     dot:'bg-warning pulse', badge:'badge-warning' },
         finished:     { label:'Finished',   dot:'bg-link',          badge:'badge-link' },
         error:        { label:'Error',      dot:'bg-danger pulse',  badge:'badge-danger' },
-        cancelled:    { label:'Cancelled',  dot:'bg-text-2',        badge:'badge-muted' },
+        cancelled:    { label:'Canceled',   dot:'bg-text-2',        badge:'badge-muted' },
         disconnected: { label:'Offline',    dot:'bg-text-2',        badge:'badge-muted' },
         connected:    { label:'Connected',  dot:'bg-text-2',        badge:'badge-muted' },
         idle:         { label:'Idle',       dot:'bg-brand',         badge:'badge-muted' },
@@ -1101,10 +1196,22 @@ function showView(view) {
     if (view === 'history') refreshGlobalHistory();
     if (view === 'printers') renderPrinters(); // the empty state depends on Settings
     if (view === 'settings') {
+        showSettingsTab(settingsTab);
         if (foxtrackTokenSet) checkFoxTrack(); else setFoxTrackStatus('', '', '');
         loadNetwork();
         loadVirtualPrinter();
     }
+}
+
+// Settings shows one section at a time, picked from its nav. In memory only:
+// a fresh load opens on FoxTrack, the first section.
+let settingsTab = 'foxtrack';
+function showSettingsTab(tab) {
+    settingsTab = tab;
+    document.querySelectorAll('[data-settings-tab]').forEach(el => el.classList.toggle('hidden', el.dataset.settingsTab !== tab));
+    document.querySelectorAll('[data-set-tab]').forEach(el => {
+        if (el.dataset.setTab === tab) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+    });
 }
 
 function toggleAdvancedMode() {
@@ -1128,8 +1235,8 @@ function applyDevBuildState(isDev) {
     const desc = document.getElementById('autoUpdateDesc');
     if (toggle) toggle.disabled = isDev;
     if (desc) desc.textContent = isDev
-        ? 'Disabled: this is a development build, so update checks are off.'
-        : 'Automatically download and restart when a new version is available.';
+        ? 'Off in development builds.'
+        : 'Installs new versions and restarts.';
 }
 
 async function toggleAutoUpdate() {
@@ -1175,7 +1282,7 @@ function updateStatCards() {
     const errEl = document.getElementById('statErrors');
     const errIco = document.getElementById('statErrorIcon');
     if (errEl) { errEl.textContent = errors; errEl.className = 'font-heading text-2xl leading-none mt-0.5 tabular-nums' + (errors > 0 ? ' text-danger' : ''); }
-    if (errIco) errIco.className = 'w-9 h-9 rounded-md border border-border flex items-center justify-center shrink-0 ' + (errors > 0 ? 'text-danger' : 'text-text-2');
+    if (errIco) errIco.className = 'stat-icon w-9 h-9 rounded-md border border-border flex items-center justify-center shrink-0 ' + (errors > 0 ? 'text-danger' : 'text-text-2');
 }
 
 function setBridgeStatus(online) {
@@ -1508,10 +1615,78 @@ async function copyText(text, fallbackEl) {
 function goToSettingsCard(cardId, focusId) {
     showView('settings');
     const card = document.getElementById(cardId);
-    if (card) card.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+    const tab = card && card.closest('[data-settings-tab]');
+    if (tab) showSettingsTab(tab.dataset.settingsTab);
     const field = focusId && document.getElementById(focusId);
     if (field) { try { field.focus({ preventScroll: true }); } catch (_) { field.focus(); } }
 }
+
+// ── (i) help tips ──
+// The help text sits in a .tip-text span (sr-only, so screen readers read it
+// in place) right after its .info-tip button; the one #tipPop shows a copy. A
+// mouse hover opens it; a click or tap pins it open until a second click,
+// Escape, a click elsewhere or a scroll. Focus never moves.
+
+function tip(html, label) {
+    return '<button type="button" class="info-tip" aria-label="' + escHtml(label || 'More info') + '" aria-expanded="false"><i class="fas fa-info"></i></button>'
+        + '<span class="tip-text sr-only">' + html + '</span>';
+}
+
+let tipBtn = null, tipPinned = false, tipCloseTimer = 0;
+function openTip(btn) {
+    const pop = document.getElementById('tipPop');
+    const text = btn.nextElementSibling;
+    if (!pop || !text || !text.classList.contains('tip-text')) return;
+    clearTimeout(tipCloseTimer);
+    if (tipBtn && tipBtn !== btn) tipBtn.setAttribute('aria-expanded', 'false');
+    tipBtn = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    pop.innerHTML = text.innerHTML;
+    pop.classList.remove('hidden');
+    const r = btn.getBoundingClientRect();
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    const left = Math.max(8, Math.min(r.left - 8, window.innerWidth - w - 8));
+    const top = r.top - h - 6 >= 8 ? r.top - h - 6 : r.bottom + 6;
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+}
+function closeTip() {
+    clearTimeout(tipCloseTimer);
+    if (tipBtn) tipBtn.setAttribute('aria-expanded', 'false');
+    tipBtn = null;
+    tipPinned = false;
+    const pop = document.getElementById('tipPop');
+    if (pop) pop.classList.add('hidden');
+}
+function tipZone(el) { return el && el.closest ? el.closest('.info-tip, #tipPop') : null; }
+document.addEventListener('pointerover', e => {
+    if (e.pointerType !== 'mouse') return;
+    const btn = e.target.closest && e.target.closest('.info-tip');
+    if (btn && btn !== tipBtn && !tipPinned) openTip(btn);
+    else if (tipZone(e.target)) clearTimeout(tipCloseTimer);
+});
+document.addEventListener('pointerout', e => {
+    // A short delay lets the pointer cross the gap from the button to the tip.
+    if (e.pointerType !== 'mouse' || tipPinned || !tipBtn || !tipZone(e.target) || tipZone(e.relatedTarget)) return;
+    tipCloseTimer = setTimeout(closeTip, 120);
+});
+document.addEventListener('click', e => {
+    const btn = e.target.closest && e.target.closest('.info-tip');
+    if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (tipPinned && tipBtn === btn) { closeTip(); return; }
+        openTip(btn);
+        tipPinned = true;
+        return;
+    }
+    if (tipBtn && !tipZone(e.target)) closeTip();
+}, true);
+// Capture phase, so Escape closes the tip before it closes the dialog under it.
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && tipBtn) { e.stopPropagation(); closeTip(); }
+}, true);
+window.addEventListener('scroll', e => { if (tipBtn && !tipZone(e.target)) closeTip(); }, true);
 
 // ── Network scan (GET /api/discover) ──
 
@@ -1669,7 +1844,7 @@ function addDiscovered(k) { const r = discovery.printers.find(x => discKey(x) ==
 const WELCOME_HTML =
     '<div class="col-span-full mx-auto w-full max-w-2xl py-2 sm:py-6">'
     + '<h2 class="font-heading text-2xl font-medium leading-tight sm:text-3xl">Welcome to FoxTrack Bridge</h2>'
-    + '<p class="mt-2 text-sm leading-relaxed text-text-2">Connect your printers in a couple of minutes. Everything runs on this computer; FoxTrack is optional.</p>'
+    + '<p class="mt-2 text-sm leading-relaxed text-text-2">Everything runs on this computer. FoxTrack is optional.</p>'
     + '<ol class="mt-6 space-y-3">'
     // Step 1: find printers
     + '<li class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
@@ -1685,7 +1860,7 @@ const WELCOME_HTML =
     + '<button type="button" id="wScanAgain" onclick="runDiscovery(true)" class="btn-outline"><i class="fas fa-refresh-cw"></i> Scan again</button>'
     + '<button type="button" onclick="openAddPrinterModal()" class="btn-outline">Add manually</button>'
     + '</div>'
-    + '<p class="mt-4 text-xs leading-relaxed text-text-2">Using Bambu Cloud? <button type="button" onclick="goToSettingsCard(\'cloudCard\',\'cloudEmail\')" class="text-link underline-offset-4 hover:underline">Sign in under Settings → Bambu Cloud</button></p>'
+    + '<p class="mt-4 text-xs leading-relaxed text-text-2">Using Bambu Cloud? <button type="button" onclick="goToSettingsCard(\'cloudCard\',\'cloudEmail\')" class="text-link underline-offset-4 hover:underline">Sign in to your Bambu account</button></p>'
     + '</div>'
     + '</li>'
     // Step 2: FoxTrack, optional
@@ -1696,9 +1871,9 @@ const WELCOME_HTML =
     + '<span class="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-2">Optional</span>'
     + '</div>'
     + '<div id="wFtOpen" class="mt-4">'
-    + '<p class="text-sm leading-relaxed text-text-2">FoxTrack adds your printer status from anywhere, a print history, and starting prints from FoxTrack. It needs a Pro or Farm plan, and the Bridge works fully without it.</p>'
+    + '<p class="text-sm leading-relaxed text-text-2">See your printers in FoxTrack from anywhere, with print history. Needs the Pro or Farm plan.</p>'
     + '<div class="mb-1.5 mt-4 flex items-center justify-between gap-3">'
-    + '<label for="wFtToken" class="field-label mb-0">Bridge token</label>'
+    + '<span class="flex items-center gap-1"><label for="wFtToken" class="field-label mb-0">Bridge token</label>' + tip('In FoxTrack, open Settings, Integrations, FoxTrack Bridge and click Generate token. Paste it here.', 'Where to get the token') + '</span>'
     + '<a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="flex shrink-0 items-center gap-1 text-xs text-link underline-offset-4 hover:underline">Get a token <i class="fas fa-arrow-up-right-from-square text-[10px]"></i></a>'
     + '</div>'
     + '<div class="flex gap-2">'
@@ -1713,7 +1888,7 @@ const WELCOME_HTML =
     + '<button type="button" onclick="goToSettingsCard(\'foxtrackCard\')" class="btn-ghost">Settings</button>'
     + '</div>'
     + '<div id="wFtSkipped" class="mt-4 hidden flex-wrap items-center justify-between gap-2">'
-    + '<p class="text-sm text-text-2">Using the Bridge on its own. You can connect FoxTrack later in Settings.</p>'
+    + '<p class="text-sm text-text-2">Using the Bridge on its own. Connect FoxTrack any time in Settings.</p>'
     + '<button type="button" onclick="unskipFoxTrack()" class="btn-ghost">Connect FoxTrack</button>'
     + '</div>'
     + '</li>'
@@ -1733,7 +1908,7 @@ function startWelcome() {
 
 function syncStatRow() {
     const row = document.getElementById('statCardsRow');
-    if (row) row.classList.toggle('hidden', currentView === 'settings' || (currentView === 'printers' && welcomeActive));
+    if (row) row.classList.toggle('hidden', currentView !== 'printers' || welcomeActive);
 }
 
 function skipFoxTrack() { flagSet(FLAG_FT_SKIPPED); renderWelcomeFt(); }
@@ -1867,7 +2042,7 @@ function renderFirstPrinterCard() {
         return;
     }
     const lines = [];
-    if (!foxtrackLinked()) lines.push('<p class="mt-1 text-xs leading-relaxed text-text-2">Want it in FoxTrack too? <button type="button" onclick="goToSettingsCard(\'foxtrackCard\',\'foxtrack2ApiKey\')" class="text-link underline-offset-4 hover:underline">Connect FoxTrack in Settings</button>. The Bridge works fully without it.</p>');
+    if (!foxtrackLinked()) lines.push('<p class="mt-1 text-xs leading-relaxed text-text-2">Want it in FoxTrack too? <button type="button" onclick="goToSettingsCard(\'foxtrackCard\',\'foxtrack2ApiKey\')" class="text-link underline-offset-4 hover:underline">Connect FoxTrack</button></p>');
     const url = networkUrls()[0];
     if (url && isLocalPage()) lines.push('<p class="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs leading-relaxed text-text-2"><i class="fas fa-smartphone"></i> Open on your phone: <code class="code-inline wrap-any">' + escHtml(url) + '</code></p>');
     const html = '<i class="fas fa-check-circle mt-0.5 shrink-0 text-brand"></i>'
@@ -1956,7 +2131,7 @@ function renderVirtualPrinterCard() {
     const urls = Array.isArray(vp.urls) ? vp.urls : [];
     document.getElementById('vpUrls').innerHTML = urls.map((u, i) =>
         '<li class="flex items-center gap-2">'
-        + '<div class="min-w-0 flex-1 rounded-md border border-border bg-panel-2 px-3 py-1.5"><code id="vpUrl' + i + '" class="field-mono wrap-any">' + escHtml(u) + '</code></div>'
+        + '<div class="min-w-0 flex-1 rounded-md border border-border px-3 py-1.5"><code id="vpUrl' + i + '" class="field-mono wrap-any">' + escHtml(u) + '</code></div>'
         + '<button type="button" onclick="copyVirtualPrinterUrl(' + i + ')" class="btn-outline shrink-0">Copy</button>'
         + '</li>').join('');
     document.getElementById('vpUrlsNone').classList.toggle('hidden', urls.length > 0);
@@ -2011,7 +2186,7 @@ function renderDeviceCard() {
     card.classList.toggle('hidden', urls.length === 0);
     document.getElementById('deviceUrls').innerHTML = urls.map((u, i) =>
         '<li class="flex items-center gap-2">'
-        + '<div class="min-w-0 flex-1 rounded-md border border-border bg-panel-2 px-3 py-1.5"><code id="devUrl' + i + '" class="field-mono wrap-any">' + escHtml(u) + '</code></div>'
+        + '<div class="min-w-0 flex-1 rounded-md border border-border px-3 py-1.5"><code id="devUrl' + i + '" class="field-mono wrap-any">' + escHtml(u) + '</code></div>'
         + '<button type="button" onclick="copyDeviceUrl(' + i + ', this)" class="btn-outline shrink-0"><i class="fas fa-copy"></i> Copy</button>'
         + '</li>').join('');
     document.getElementById('deviceDocker').classList.toggle('hidden', !(networkInfo && networkInfo.in_docker));
@@ -2060,7 +2235,7 @@ function openEditPrinterModal(id) {
     document.getElementById('modalDiscover').classList.add('hidden');   // finding printers is for adding
     const brand = printerBrand(printer);
     document.getElementById('printerModalTitle').textContent = 'Edit printer';
-    document.getElementById('printerModalSubtitle').textContent = 'Change the details of ' + printer.name + '. Saving reconnects the printer if its connection details changed.';
+    document.getElementById('printerModalSubtitle').textContent = printer.name;
     document.getElementById('fieldBrand').classList.add('hidden');
     document.getElementById('pBrand').value = brand;
     onBrandChange();
@@ -2089,7 +2264,7 @@ function closeAddPrinterModal() {
     hideModal('addPrinterModal');
     editingPrinterId = null;
     document.getElementById('printerModalTitle').textContent = 'Add printer';
-    document.getElementById('printerModalSubtitle').textContent = 'Connect a printer to FoxTrack Bridge.';
+    document.getElementById('printerModalSubtitle').textContent = 'Pick one found on your network, or fill in the details.';
     document.getElementById('fieldBrand').classList.remove('hidden');
     document.getElementById('pNameHint').classList.add('hidden');
     Object.entries(SECRET_PLACEHOLDERS).forEach(([id, text]) => { const el=document.getElementById(id); if(el) el.placeholder=text; });
@@ -2843,7 +3018,7 @@ function patchCard(entry, printer) {
     const hooks = entry.hooks;
     const live = liveStatus[printer.id] || null;
     const status = live && live.status ? live.status : 'connecting';
-    const meta = statusMeta(status);
+    const meta = statusMeta(status, live && live.plug);
     const isCloud = isCloudPrinter(printer);
     const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
     const dis = (status === 'disconnected' || status === 'connecting');
@@ -2916,20 +3091,24 @@ function patchCard(entry, printer) {
     }
 
     [hooks.stopBtn, hooks.startBtn].forEach(b => { if (b) b.disabled = dis; });
+    // Start print is for an idle printer only.
+    if (hooks.startBtn) hooks.startBtn.classList.toggle('hidden', status === 'printing' || status === 'paused');
     if (hooks.homeBtn) hooks.homeBtn.disabled = dis || status === 'printing' || status === 'paused';
     if (hooks.tempNozzle) hooks.tempNozzle.placeholder = nozzleTgt !== null ? Math.round(nozzleTgt) : '0';
     if (hooks.tempBed) hooks.tempBed.placeholder = bedTgt !== null ? Math.round(bedTgt) : '0';
-    if (hooks.pauseBtn) hooks.pauseBtn.disabled = status !== 'printing';
-    if (hooks.resumeBtn) hooks.resumeBtn.disabled = status !== 'paused';
+    // Print controls show only when they apply: Pause while printing, Resume
+    // while paused, Stop during either.
+    if (hooks.pauseBtn) hooks.pauseBtn.classList.toggle('hidden', status !== 'printing');
+    if (hooks.resumeBtn) hooks.resumeBtn.classList.toggle('hidden', status !== 'paused');
+    if (hooks.stopBtn) hooks.stopBtn.classList.toggle('hidden', status !== 'printing' && status !== 'paused');
 
     const lightOn = !!(live && live.light_on);
     const lightPending = printer.id in pendingLightTarget;
     if (hooks.lightBtn) {
         hooks.lightBtn.disabled = dis || lightPending;
         hooks.lightBtn.className = 'light-btn btn-outline' + (lightOn ? ' is-on' : '');
-        hooks.lightBtn.innerHTML = lightPending
-            ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>Light'
-            : '<i class="fas fa-lightbulb mr-1"></i>' + (lightOn ? 'On' : 'Off');
+        hooks.lightBtn.setAttribute('aria-pressed', lightOn ? 'true' : 'false');
+        hooks.lightBtn.innerHTML = (lightPending ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '<i class="fas fa-lightbulb mr-1"></i>') + 'Light';
     }
 
     const coolingFanPct = live && live.cooling_fan_pct > 0 ? live.cooling_fan_pct : null;
@@ -2993,8 +3172,8 @@ function alarmsInnerHTML(alarms) {
 }
 
 function plugLineText(plug) {
-    if (!plug) return 'Plug: waiting for the first reading';
-    if (!plug.reachable) return 'Plug not answering (last seen ' + (plug.on ? 'on' : 'off') + ')';
+    if (!plug) return 'Plug: checking…';
+    if (!plug.reachable) return 'Plug not answering';
     let s = 'Plug ' + (plug.on ? 'on' : 'off');
     if (plug.on && typeof plug.watts === 'number') s += ' · ' + (plug.watts >= 100 ? Math.round(plug.watts) : plug.watts.toFixed(1)) + ' W';
     if (plug.auto_off) s += ' · off after the print';
@@ -3075,7 +3254,7 @@ function amsSlotsInnerHTML(amsSlots, ext, canEdit, enc, printerName) {
 // called from patchCard.
 function cardInnerHTML(printer, live) {
     const status = live && live.status ? live.status : 'connecting';
-    const meta = statusMeta(status);
+    const meta = statusMeta(status, live && live.plug);
     const file = live && live.file_name ? live.file_name : '';
     const progress = live && typeof live.progress === 'number' ? live.progress : 0;
     const error = live && live.error ? live.error : '';
@@ -3107,9 +3286,8 @@ function cardInnerHTML(printer, live) {
     const dis = (status==='disconnected'||status==='connecting') ? 'disabled ' : '';
     const lightPending = printer.id in pendingLightTarget;
     const lightCls = 'light-btn btn-outline' + (lightOn ? ' is-on' : '');
-    const lightHtml = lightPending
-        ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>Light'
-        : '<i class="fas fa-lightbulb mr-1"></i>' + (lightOn ? 'On' : 'Off');
+    // The button always says Light; on is shown by its colour and aria-pressed.
+    const lightHtml = (lightPending ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '<i class="fas fa-lightbulb mr-1"></i>') + 'Light';
     const speedLevel = live && live.speed_level ? live.speed_level : 0;
     const amsSlots = live && live.ams ? live.ams : [];
     const extSpool = live && live.external_spool ? live.external_spool : null;
@@ -3195,8 +3373,8 @@ function cardInnerHTML(printer, live) {
         + '<span class="text-[11px] text-text-2">Nozzle</span>' + tempInput('temp-nozzle', 350, nozzleTgt, 'set_nozzle_temp')
         + '<span class="text-[11px] text-text-2 ml-2">Bed</span>' + tempInput('temp-bed', 120, bedTgt, 'set_bed_temp')
         + '<button ' + homeDis + 'onclick="sendControlEncoded(\'' + enc + '\',\'home\')" class="home-btn btn-outline ml-2" title="Home X, Y and Z">Home</button>'
+        + tip('0 turns a heater off. Home is off while a print runs.', 'About temperatures and Home')
         + '</div>'
-        + '<p class="text-[11px] text-text-2 mt-2">0 turns a heater off. Home is off while a print runs.</p>'
         + '</div>'
         : '';
 
@@ -3206,10 +3384,10 @@ function cardInnerHTML(printer, live) {
         // Cloud printers: current Bambu firmware only honours the light over the
         // cloud, so pause/stop/fan/speed/GCode are LAN-only buttons.
         + ((isCloud || readOnly) ? '' :
-            '<button ' + (status === 'printing' ? '' : 'disabled ') + 'onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline">Pause</button>'
-            + '<button ' + (status === 'paused' ? '' : 'disabled ') + 'onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline">Resume</button>'
-            + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger">Stop</button>')
-        + (noExtras ? '' : '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '">' + lightHtml + '</button>')
+            '<button onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline' + (status === 'printing' ? '' : ' hidden') + '">Pause</button>'
+            + '<button onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline' + (status === 'paused' ? '' : ' hidden') + '">Resume</button>'
+            + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger' + ((status === 'printing' || status === 'paused') ? '' : ' hidden') + '">Stop</button>')
+        + (noExtras ? '' : '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '" aria-pressed="' + lightOn + '">' + lightHtml + '</button>')
         + (printer.plug ? plugButtonHTML(enc, plug, status) : '')
         + (hasConsole ? '<button onclick="toggleTemps(\'' + enc + '\')" class="btn-outline"><i class="fas fa-thermometer mr-1"></i>Temps</button>' : '')
         + camControls
@@ -3218,7 +3396,7 @@ function cardInnerHTML(printer, live) {
             + (isBambu
                 ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'
                   + (advancedMode ? '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>GCode</button>' : '')
-                : '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline">Start print</button>'))
+                : '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline' + ((status === 'printing' || status === 'paused') ? ' hidden' : '') + '">Start print</button>'))
         + '</div>'
         + amsPanel
         + '</div>';
@@ -3228,8 +3406,8 @@ function cardInnerHTML(printer, live) {
         + '<img class="cam-img" src="" alt="Camera" style="display:block;width:100%;max-height:300px;object-fit:contain;">'
         + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>'
         + (isBambu
-            ? 'Camera unavailable. The Bridge camera works with A1 and P1 series printers. Check the IP address and LAN access code.'
-            : (brand === 'octoprint' ? 'Camera unavailable. Check the webcam settings in OctoPrint, or enter the webcam URL on this printer.' : 'Camera unavailable. Check the webcam service or URL.'))
+            ? 'No camera. Works on A1 and P1 printers: check the IP address and access code.'
+            : (brand === 'octoprint' ? 'No camera. Check OctoPrint\'s webcam settings, or set a webcam URL on this printer.' : 'No camera. Check the webcam service or URL.'))
         + '</div>'
         + '</div>';
 
@@ -3533,7 +3711,7 @@ let _historyRecords = [];
 
 // statusMeta() would label an unknown result "Connecting", so map the known ones.
 function resultLabel(result) {
-    const known = { finished:'Finished', cancelled:'Cancelled', error:'Failed', failed:'Failed' };
+    const known = { finished:'Finished', cancelled:'Canceled', error:'Failed', failed:'Failed' };
     return known[result] || (result ? result.charAt(0).toUpperCase() + result.slice(1) : '-');
 }
 
@@ -3936,7 +4114,7 @@ async function loadAISettings() {
     setSwitch('aiEnabledToggle', !!aiSettings.enabled);
     setSwitch('aiCameraToggle', !!aiSettings.allow_camera);
     if (keyHint && aiSettings.api_key_set) {
-        keyHint.textContent = 'A key is saved. Leave this blank to keep it, or paste a new one to replace it.';
+        keyHint.textContent = 'A key is saved. Leave blank to keep it.';
     }
     onAIPresetChange();
     updateAssistantAvailability();
@@ -3966,12 +4144,12 @@ function onAIPresetChange() {
     const warn = document.getElementById('aiCameraWarning');
     if (warn) {
         warn.textContent = preset === 'local'
-            ? 'Needed to diagnose how a print actually looks. Your provider is a local model, so the picture stays on this machine. The model has to support image input.'
-            : 'Needed to diagnose how a print actually looks. This sends a photograph of your printer to your AI provider, over the internet. The model has to support image input.';
+            ? 'Pictures stay on this machine. The model must read images.'
+            : 'Sends camera photos to your AI provider. The model must read images.';
     }
     const keyHint = document.getElementById('aiKeyHint');
     if (keyHint && preset === 'local' && !(aiSettings && aiSettings.api_key_set)) {
-        keyHint.textContent = 'Most local model servers need no key. Leave this blank unless yours asks for one.';
+        keyHint.textContent = 'Most local servers need no key.';
     }
 }
 
@@ -4028,8 +4206,8 @@ async function saveAISettings() {
         // The server drops a saved key when the provider or base URL changes
         // without a new one, so the hint has to follow what it sends back.
         if (keyHint) keyHint.textContent = aiSettings.api_key_set
-            ? 'A key is saved. Leave this blank to keep it, or paste a new one to replace it.'
-            : 'No key is saved for this provider. Paste one if it needs one.';
+            ? 'A key is saved. Leave blank to keep it.'
+            : 'No key saved for this provider.';
         if (status) status.textContent = aiSettings.configured ? 'Saved. The assistant is ready.' : 'Saved. Fill in a provider and a model to switch it on.';
         updateAssistantAvailability();
     } catch (e) {
