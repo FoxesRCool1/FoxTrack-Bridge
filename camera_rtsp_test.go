@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -92,8 +93,8 @@ func TestRTSPURLNeverShowsTheCode(t *testing.T) {
 }
 
 func TestRTSPArgs(t *testing.T) {
-	stream := strings.Join(rtspArgs("rtsps://x", false), " ")
-	for _, want := range []string{"-rtsp_transport tcp", "-i rtsps://x", "-an", "-f image2pipe", "-vcodec mjpeg", "-q:v 5", "-r 10"} {
+	stream := strings.Join(rtspArgs("/x/in.ffconcat", false), " ")
+	for _, want := range []string{"-f concat -safe 0", "-protocol_whitelist file,crypto,data,rtsp,rtsps,tcp,tls,udp,rtp,srtp", "-i /x/in.ffconcat", "-an", "-f image2pipe", "-vcodec mjpeg", "-q:v 5", "-r 10"} {
 		if !strings.Contains(stream, want) {
 			t.Errorf("stream args %q lack %q", stream, want)
 		}
@@ -101,8 +102,54 @@ func TestRTSPArgs(t *testing.T) {
 	if strings.Contains(stream, "-frames:v") {
 		t.Error("a stream must not stop after one frame")
 	}
-	if one := strings.Join(rtspArgs("rtsps://x", true), " "); !strings.Contains(one, "-frames:v 1") || strings.Contains(one, "-r 10") {
+	if one := strings.Join(rtspArgs("/x/in.ffconcat", true), " "); !strings.Contains(one, "-frames:v 1") || strings.Contains(one, "-r 10") {
 		t.Errorf("snapshot args = %q", one)
+	}
+}
+
+// The access code goes into a private script, never onto the command line.
+func TestRTSPInputKeepsTheCodeOffTheCommandLine(t *testing.T) {
+	const code = "it's-s3cret"
+	args, remove, err := rtspInput(rtspURL("192.168.1.50", code).String(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(args, " "), "s3cret") || strings.Contains(strings.Join(args, " "), "bblp") {
+		t.Fatalf("the command line holds the address: %q", args)
+	}
+	script := args[slices.Index(args, "-i")+1]
+	data, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "ffconcat version 1.0\nfile 'rtsps://bblp:it%27s-s3cret@192.168.1.50:322/streaming/live/1'\noption rtsp_transport tcp\n"
+	if string(data) != want {
+		t.Errorf("script = %q, want %q", data, want)
+	}
+	if runtime.GOOS != "windows" {
+		fi, _ := os.Stat(script)
+		di, _ := os.Stat(filepath.Dir(script))
+		if fi.Mode().Perm() != 0o600 || di.Mode().Perm() != 0o700 {
+			t.Errorf("modes: file %v, folder %v; want 0600 and 0700", fi.Mode().Perm(), di.Mode().Perm())
+		}
+	}
+	remove()
+	if _, err := os.Stat(filepath.Dir(script)); err == nil {
+		t.Error("the folder was not removed")
+	}
+
+	// A quote in the address is escaped the ffconcat way; a line break is refused.
+	args, remove, err = rtspInput("rtsp://h/it's", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remove()
+	data, _ = os.ReadFile(args[slices.Index(args, "-i")+1])
+	if !strings.Contains(string(data), `file 'rtsp://h/it'\''s'`) {
+		t.Errorf("quote not escaped: %q", data)
+	}
+	if _, _, err := rtspInput("rtsp://h/a\nfile '/etc/passwd'", true); err == nil {
+		t.Error("a line break in the address was accepted")
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,10 +19,10 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !checkPassword("correct horse", h) {
+	if !passwordMatches("correct horse", h) {
 		t.Fatal("the right password was refused")
 	}
-	if checkPassword("correct hors", h) || checkPassword("", h) || checkPassword("correct horse", "plain") {
+	if passwordMatches("correct hors", h) || passwordMatches("", h) || passwordMatches("correct horse", "plain") {
 		t.Fatal("a wrong password or a bad hash was accepted")
 	}
 }
@@ -252,4 +253,15 @@ func currentSecurityViewJSON(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestCheckPasswordBusy(t *testing.T) {
+	old := hashWait
+	hashWait = 20 * time.Millisecond
+	hashSlots <- struct{}{}
+	hashSlots <- struct{}{}
+	t.Cleanup(func() { <-hashSlots; <-hashSlots; hashWait = old })
+	if ok, err := checkPassword("x", "pbkdf2-sha256$1$00$00"); ok || !errors.Is(err, errSignInBusy) {
+		t.Fatalf("ok=%v err=%v, want errSignInBusy", ok, err)
+	}
 }

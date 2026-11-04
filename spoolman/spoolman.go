@@ -308,8 +308,8 @@ func (s *Syncer) update(id int, fn func(*Entry)) {
 	}
 }
 
-// Sync sends every use and returns when each has succeeded or given up. A
-// failure that retrying cannot fix (a 4xx answer) is not retried.
+// Sync sends every use and returns when each has succeeded or given up. Only
+// a failed connection or a 5xx answer is retried.
 func (s *Syncer) Sync(ctx context.Context, c *Client, printer string, uses []Use) {
 	if c == nil {
 		return
@@ -343,11 +343,13 @@ func (s *Syncer) syncOne(ctx context.Context, c *Client, printer string, u Use) 
 			return
 		}
 		var he *HTTPError
-		var ne net.Error
-		// A use is not idempotent: after a timeout Spoolman may have booked
-		// it already, and a retry would take the filament off twice.
-		timedOut := errors.As(err, &ne) && ne.Timeout()
-		giveUp := (errors.As(err, &he) && he.Status >= 400 && he.Status < 500) || timedOut || try >= len(s.Delays)
+		var oe *net.OpError
+		// A use is not idempotent: once the request was sent (a timeout, a
+		// reset) Spoolman may have booked it, and a retry would take the
+		// filament off twice. Retry only when it certainly never arrived (the
+		// connection could not be made) or the server answered 5xx.
+		retry := (errors.As(err, &oe) && oe.Op == "dial") || (errors.As(err, &he) && he.Status >= 500)
+		giveUp := !retry || try >= len(s.Delays)
 		status := "retrying"
 		if giveUp {
 			status = "error"

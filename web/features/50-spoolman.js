@@ -30,6 +30,11 @@ const spSpoolText = s => '#' + s.id + ' ' + [s.vendor, s.name].filter(Boolean).j
     + (s.material ? ' · ' + s.material : '') + ' · ' + Math.round(s.remaining_g || 0) + ' g left';
 const spColor = hex => (/^[0-9a-fA-F]{6}$/.test(hex || '') ? '#' + hex : '');
 
+// friendlyError would call these "Can't reach the printer", but the address
+// here is the Spoolman server's, not the printer's.
+const spNetError = m => /dial tcp|connection refused|Get "http/i.test(String(m || ''));
+const spErr = m => spNetError(m) ? "Can't reach Spoolman. Check the address and that Spoolman is running." : String(m || '');
+
 // The slots to show for a printer: what the printer reports now, plus any
 // slot that is mapped already so a saved choice never disappears.
 function spSlots(p) {
@@ -49,7 +54,7 @@ function spSelectHtml(key, current, label) {
     const spools = sp.spools || [];
     const known = spools.some(s => s.id === current);
     let opts = '<option value="0">Not tracked</option>';
-    if (current && !known) opts += '<option value="' + current + '" selected>Spool #' + current + '</option>';
+    if (current && !known) opts += '<option value="' + current + '" selected>' + escHtml(fill('Spool #{0}', current)) + '</option>';
     opts += spools.map(s => '<option data-no-i18n value="' + s.id + '"' + (s.id === current ? ' selected' : '') + '>' + escHtml(spSpoolText(s)) + '</option>').join('');
     return '<div class="select-wrap"><select class="field" data-sp-slot="' + escHtml(key) + '" aria-label="Spool for ' + escHtml(label) + '">' + opts + '</select><i class="fas fa-chevron-down"></i></div>';
 }
@@ -66,7 +71,7 @@ function spMappingHtml() {
             const swatch = spColor(chosen ? chosen.color : s.color);
             let hint = '';
             if (!current && s.tag && (sp.spools || []).some(x => x.tag && x.tag.toLowerCase() === String(s.tag).toLowerCase())) hint = 'Matched by the spool’s tag when a print ends.';
-            else if (!current && s.material) hint = 'The printer reports ' + escHtml(s.material) + ' here.';
+            else if (!current && s.material) hint = fill('The printer reports {0} here.', escHtml(s.material));
             return '<div class="sp-row"><div class="sp-slot"><span class="sp-dot"' + (swatch ? ' style="background:' + swatch + '"' : '') + '></span><span class="truncate">' + escHtml(s.label) + '</span></div>'
                 + '<div>' + spSelectHtml(key, current, p.name + ', ' + s.label) + (hint ? '<p class="sp-hint">' + hint + '</p>' : '') + '</div></div>';
         }).join('');
@@ -106,7 +111,7 @@ async function spLoadSpools() {
     sp.spoolsError = '';
     if (!sp.cfg.url) { spRenderMapping(); return; }
     try { sp.spools = await apiFetch('/api/spoolman/spools'); }
-    catch (e) { sp.spoolsError = friendlyError(e.message); }
+    catch (e) { sp.spoolsError = spErr(e.message); }
     spRenderMapping();
 }
 
@@ -162,7 +167,7 @@ async function spSave() {
         toast('Spoolman saved');
         if (cfg.url !== was || !sp.spools) await spLoadSpools();
     } catch (e) {
-        err.textContent = friendlyError(e.message);
+        err.textContent = spErr(e.message);
         err.classList.remove('hidden');
     }
     btn.disabled = false;
@@ -190,7 +195,7 @@ function spMount(section) {
   <button id="spEnabled" type="button" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Report filament to Spoolman" data-sp-act="toggle"><span class="switch-thumb"></span></button>
 </div>
 <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">After each print, the filament it used is subtracted from your spools in Spoolman.
-  ${tip('Your Spoolman server is on your own network. The Bridge sends it the grams (or the length) used, per spool, and nothing else. It never goes to FoxTrack.', 'What is sent')}
+  ${tip('Your Spoolman server is on your own network. The Bridge sends it the grams (or the length) used per spool, and nothing else.', 'What is sent')}
 </p>
 
 <div id="spLoadError" class="hidden mt-4 text-sm text-danger flex items-center gap-3 flex-wrap">

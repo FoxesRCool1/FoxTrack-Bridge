@@ -17,11 +17,11 @@ function mxScrapeConfig() {
         + '    #   credentials: YOUR_API_TOKEN\n';
 }
 
-async function mxCopy(text, source, what) {
+async function mxCopy(text, source, done) {
     const ok = typeof copyText === 'function'
         ? await copyText(text, source)
         : !!(navigator.clipboard && await navigator.clipboard.writeText(text).then(() => true, () => false));
-    if (ok) toast('Copied the ' + what + '.', 'success');
+    if (ok) toast(done, 'success');
     else toast("Couldn't copy. Select the text and copy it by hand.", 'error');
 }
 
@@ -38,8 +38,7 @@ function mxMount(sec) {
     <h2 class="font-heading text-xl font-medium leading-tight">Prometheus</h2>
     <button id="mxEnabled" type="button" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Serve Prometheus metrics"><span class="switch-thumb"></span></button>
 </div>
-<p class="mt-1.5 text-sm text-text-2">Let Prometheus, Grafana or any scraper read your printers' temperatures, progress and print totals.</p>
-<p class="mt-1.5 text-xs text-text-2">Your scraper asks this Bridge for the numbers. The Bridge sends nothing out.</p>
+<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Let Prometheus, Grafana or any scraper read your printers' temperatures, progress and print totals. ${tip('Your scraper asks this Bridge for the numbers. The Bridge sends nothing out.', 'About the metrics')}</p>
 <p id="mxState" class="mt-4 text-sm" role="status" aria-live="polite"></p>
 
 <div class="mt-5">
@@ -51,11 +50,9 @@ function mxMount(sec) {
     ${local ? '<p class="text-xs text-text-2 mt-1.5">You are on localhost. From another machine, use this machine\'s network address instead.</p>' : ''}
 </div>
 
-<p class="mt-4 text-xs text-text-2">If you set a dashboard password, create an API token in Security and add it as a bearer token in your scrape config.</p>
-
 <div class="mt-5">
     <div class="flex items-center justify-between gap-3 mb-2">
-        <span class="field-label" style="margin:0" id="mxSnipLabel">Sample prometheus.yml</span>
+        <span class="field-label flex items-center gap-1" style="margin:0" id="mxSnipLabel">Sample prometheus.yml ${tip('If you set a dashboard password, create an API token in Security and add it as a bearer token in your scrape config.', 'About the sample prometheus.yml')}</span>
         <button id="mxCopySnip" type="button" class="btn-outline btn-lg" aria-label="Copy the sample prometheus.yml"><i class="fas fa-copy mr-1"></i>Copy</button>
     </div>
     <div class="rounded-md bg-panel-2 p-3 overflow-x-auto"><pre id="mxSnip" class="font-mono" tabindex="0" aria-labelledby="mxSnipLabel">${escHtml(mxScrapeConfig())}</pre></div>
@@ -66,10 +63,13 @@ function mxMount(sec) {
             ? 'On. The address above answers with metrics.'
             : 'Off. The address above answers 404 until you turn this on.';
     };
-    document.getElementById('mxCopyUrl').addEventListener('click', () => mxCopy(url, document.getElementById('mxUrl'), 'address'));
-    document.getElementById('mxCopySnip').addEventListener('click', () => mxCopy(mxScrapeConfig(), document.getElementById('mxSnip'), 'sample'));
+    document.getElementById('mxCopyUrl').addEventListener('click', () => mxCopy(url, document.getElementById('mxUrl'), 'Copied the address.'));
+    document.getElementById('mxCopySnip').addEventListener('click', () => mxCopy(mxScrapeConfig(), document.getElementById('mxSnip'), 'Copied the sample.'));
     // The switch saves at once: there is nothing else to fill in.
     const sw = document.getElementById('mxEnabled');
+    // Disabled while the current state loads, so a click cannot post the
+    // inverse of the default.
+    sw.disabled = true;
     sw.addEventListener('click', async () => {
         const on = !getSwitch('mxEnabled');
         sw.disabled = true;
@@ -86,5 +86,6 @@ function mxMount(sec) {
     });
     document.getElementById('mxState').textContent = 'Checking…';
     apiFetch('/api/metrics').then(r => { setSwitch('mxEnabled', !!r.enabled); state(!!r.enabled); })
-        .catch(e => { document.getElementById('mxState').textContent = "Couldn't load this setting. " + friendlyError(e.message); });
+        .catch(e => { document.getElementById('mxState').textContent = "Couldn't load this setting. " + friendlyError(e.message); })
+        .finally(() => { sw.disabled = false; });
 }

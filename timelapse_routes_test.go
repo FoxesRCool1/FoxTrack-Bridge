@@ -3,16 +3,22 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"foxtrack-bridge/config"
 	"foxtrack-bridge/events"
+	mqttpkg "foxtrack-bridge/mqtt"
+	"foxtrack-bridge/timelapse"
 )
 
 func timelapseTestConfig(t *testing.T) {
@@ -75,6 +81,13 @@ func TestTimelapseSettings(t *testing.T) {
 	v = timelapseGet(t)
 	if v.Enabled || v.IntervalSec != 45 || v.KeepDays != 0 || len(v.Printers) != 1 {
 		t.Errorf("a partial save changed other settings: %+v", v)
+	}
+	// A list of printers that are all gone is refused: stored empty it would mean every printer.
+	if rec := timelapsePost(`{"printers":["nope","gone"]}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "None of those printers exist") {
+		t.Errorf("only unknown printers = %d %q, want 400 with a plain message", rec.Code, rec.Body)
+	}
+	if v = timelapseGet(t); strings.Join(v.Printers, ",") != "p2" {
+		t.Errorf("a refused save changed the filter to %v", v.Printers)
 	}
 	// An empty list means every printer.
 	timelapsePost(`{"printers":[]}`)
@@ -140,6 +153,11 @@ func TestTimelapseFileEndpoints(t *testing.T) {
 	if rec = do("GET", "/api/timelapse/file/"+id+"?poster=1"); rec.Code != 200 || rec.Header().Get("Content-Type") != "image/jpeg" {
 		t.Errorf("poster = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
+	for _, q := range []string{"?poster=0", "?poster=", "?poster=no"} {
+		if rec = do("GET", "/api/timelapse/file/"+id+q); rec.Code != 200 || rec.Header().Get("Content-Type") != "video/mp4" {
+			t.Errorf("%s = %d %q, want the video", q, rec.Code, rec.Header().Get("Content-Type"))
+		}
+	}
 
 	for _, target := range []string{
 		"/api/timelapse/file/", "/api/timelapse/file/..", "/api/timelapse/file/../config.json.bak",
@@ -180,6 +198,40 @@ func TestTimelapseFileEndpoints(t *testing.T) {
 
 // A print starting begins a recording only when the feature is on and the
 // printer is wanted; its end stops it even if the feature was switched off.
+// A recording closed because its printer sat idle takes its result from the
+// status the printer is in: an error is a failed print, not a cancelled one.
+func TestTimelapseIdleEndResult(t *testing.T) {
+	var pic bytes.Buffer
+	jpeg.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil)
+	for status, want := range map[string]string{"error": "failed", "finished": "finished", "idle": "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			timelapseTestConfig(t)
+			t.Setenv("FOXTRACK_BRIDGE_FFMPEG", "")
+			t.Setenv("PATH", t.TempDir()) // no ffmpeg: the video is a GIF
+			rec := timelapseRecorder()
+			rec.Start(timelapse.Printer{ID: "p1", Name: "Monsieur"}, "a.gcode", false)
+			for i := 0; i < timelapse.MinFrames; i++ {
+				if err := rec.Capture("p1", 0, func() ([]byte, error) { return pic.Bytes(), nil }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mqttpkg.UpdatePrinterState("Monsieur", mqttpkg.TelemetryData{Status: status})
+			t.Cleanup(func() { mqttpkg.RemovePrinterState("Monsieur"); delete(tlIdle, "p1") })
+
+			now := time.Now()
+			timelapseTick(now)
+			if !rec.Active("p1") {
+				t.Fatal("the recording ended before the printer had been idle long enough")
+			}
+			timelapseTick(now.Add(timelapseIdleEnd))
+			waitFor(t, "the video", func() bool { return !rec.Active("p1") && rec.Building() == 0 && len(rec.List()) == 1 })
+			if got := rec.List()[0].Result; got != want {
+				t.Errorf("printer %s: result %q, want %q", status, got, want)
+			}
+		})
+	}
+}
+
 func TestTimelapseEvents(t *testing.T) {
 	timelapseTestConfig(t)
 	rec := timelapseRecorder()

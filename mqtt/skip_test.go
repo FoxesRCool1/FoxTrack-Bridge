@@ -42,7 +42,7 @@ func skip3MF(t *testing.T) string {
 func TestRead3MFObjects(t *testing.T) {
 	p := skip3MF(t)
 
-	objs, err := read3MFObjects(p, 0)
+	objs, err := read3MFObjects(p, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,35 @@ func TestRead3MFObjects(t *testing.T) {
 		objs[1].ID != "1066" || objs[1].Name != "Ball" || !objs[1].Skipped ||
 		!reflect.DeepEqual(objs[0].BBox, []float64{10, 20, 60, 70}) ||
 		!reflect.DeepEqual(objs[1].BBox, []float64{100, 20, 150, 70}) {
-		t.Fatalf("plate 0: %+v", objs)
+		t.Fatalf("plate 1: %+v", objs)
+	}
+
+	// Plate unknown and the project has two sliced plates: refuse, do not guess.
+	var unsup *SkipUnsupported
+	if _, err = read3MFObjects(p, 0); !errors.As(err, &unsup) {
+		t.Fatalf("plate 0 on two plates: err = %v, want *SkipUnsupported", err)
+	}
+
+	// Plate unknown and only one plate sliced: that plate is used.
+	one := make3MF(t, map[string]string{
+		"Metadata/slice_info.config": skipSliceInfo,
+		"Metadata/plate_2.json":      skipPlate2JSON,
+		"Metadata/plate_2.gcode":     "G1",
+	})
+	objs, err = read3MFObjects(one, 0)
+	if err != nil || len(objs) != 1 || objs[0].ID != "2000" {
+		t.Fatalf("one plate: %+v err=%v", objs, err)
+	}
+
+	// Non-numeric identify_id values are dropped.
+	bad := make3MF(t, map[string]string{
+		"Metadata/slice_info.config": `<config><plate><metadata key="index" value="1"/>` +
+			`<object identify_id="abc" name="Bad"/><object identify_id="12" name="Good"/></plate></config>`,
+		"Metadata/plate_1.gcode": "G1",
+	})
+	objs, err = read3MFObjects(bad, 0)
+	if err != nil || len(objs) != 1 || objs[0].ID != "12" {
+		t.Fatalf("non-numeric id: %+v err=%v", objs, err)
 	}
 
 	objs, err = read3MFObjects(p, 2)
@@ -78,7 +106,6 @@ func TestRead3MFObjects(t *testing.T) {
 	// Neither: unsupported.
 	empty := make3MF(t, map[string]string{"Metadata/plate_1.gcode": "G1"})
 	_, err = read3MFObjects(empty, 0)
-	var unsup *SkipUnsupported
 	if !errors.As(err, &unsup) {
 		t.Fatalf("err = %v, want *SkipUnsupported", err)
 	}
@@ -128,6 +155,15 @@ func TestPickSkipFile(t *testing.T) {
 			t.Errorf("%s: got %q ok=%v, want %q ok=%v", c.name, got, ok, c.want, c.ok)
 		}
 	}
+	// Same name in two folders: the newest wins.
+	dup := []PrinterFile{
+		{Name: "old/Cube.gcode.3mf", ModifiedAt: "2026-01-01T00:00:00Z"},
+		{Name: "cache/Cube.gcode.3mf", ModifiedAt: "2026-03-01T00:00:00Z"},
+		{Name: "sdcard/Cube.gcode.3mf", ModifiedAt: "2026-02-01T00:00:00Z"},
+	}
+	if got, ok := pickSkipFile(dup, "Metadata/plate_1.gcode", "Cube", false); !ok || got != "cache/Cube.gcode.3mf" {
+		t.Errorf("newest: got %q ok=%v", got, ok)
+	}
 	// Without Cube.gcode.3mf the plain .3mf is used.
 	if got, ok := pickSkipFile(files[1:], "Metadata/plate_1.gcode", "Cube", false); !ok || got != "Cube.3mf" {
 		t.Errorf("subtask .3mf: got %q ok=%v", got, ok)
@@ -164,13 +200,14 @@ func TestNoteSkipFields(t *testing.T) {
 		t.Fatalf("numeric string: %+v", rep)
 	}
 
-	// FINISH resets; a following s_obj is ignored until RUNNING arrives.
+	// FINISH resets; a following s_obj is ignored until RUNNING arrives, but
+	// a gcode_file seen meanwhile is kept (reports are partial).
 	noteSkipFields(name, []byte(`{"print":{"gcode_state":"FINISH"}}`))
 	if gf, rep, _, _, idle := st(); !idle || gf != "" || len(rep) != 0 {
 		t.Fatalf("after FINISH: idle=%v gf=%q rep=%+v", idle, gf, rep)
 	}
 	noteSkipFields(name, []byte(`{"print":{"gcode_file":"Metadata/plate_2.gcode","s_obj":[9]}}`))
-	if gf, rep, _, _, idle := st(); !idle || gf != "" || len(rep) != 0 {
+	if gf, rep, _, _, idle := st(); !idle || gf != "Metadata/plate_2.gcode" || len(rep) != 0 {
 		t.Fatalf("idle leftovers: idle=%v gf=%q rep=%+v", idle, gf, rep)
 	}
 	noteSkipFields(name, []byte(`{"print":{"gcode_state":"RUNNING","gcode_file":"Metadata/plate_2.gcode","s_obj":[9]}}`))
@@ -327,6 +364,12 @@ func TestSkipFlow(t *testing.T) {
 		t.Fatalf("downloads = %d, want 1", h.downloads)
 	}
 
+	// The printer confirms by reporting the object in s_obj.
+	confirm := publishRequestFn
+	publishRequestFn = func(n, s string, payload []byte) error {
+		noteSkipFields(name, []byte(`{"print":{"s_obj":[1065]}}`))
+		return confirm(n, s, payload)
+	}
 	res, err := SkipObjects(context.Background(), p, []string{"1065"})
 	if err != nil {
 		t.Fatal(err)
@@ -360,7 +403,7 @@ func TestSkipFlow(t *testing.T) {
 		commandFail[name+"/skip_objects"] = "busy"
 		printErrMu.Unlock()
 	}
-	pub := publishRequestFn
+	pub := confirm
 	publishRequestFn = func(n, s string, payload []byte) error {
 		setRefusal()
 		return pub(n, s, payload)
@@ -379,5 +422,94 @@ func TestSkipFlow(t *testing.T) {
 	}
 	if byID["1066"].Skipped {
 		t.Fatal("1066 must stay not skipped after the refusal")
+	}
+}
+
+func TestSkipObjects_NoConfirm(t *testing.T) {
+	const name = "skip-noconfirm"
+	prevWait := skipConfirmWait
+	skipConfirmWait = 50 * time.Millisecond
+	t.Cleanup(func() { skipConfirmWait = prevWait })
+
+	h, p := setupSkip(t, name, "printing")
+	h.src = make3MF(t, map[string]string{
+		"Metadata/slice_info.config": strings.Replace(skipSliceInfo, `skipped="true"`, `skipped="false"`, 1),
+		"Metadata/plate_1.json":      skipPlate1JSON,
+		"Metadata/plate_1.gcode":     "G1",
+	})
+	noteSkipFields(name, []byte(`{"print":{"gcode_file":"Metadata/plate_1.gcode","gcode_state":"RUNNING"}}`))
+
+	// The printer never reports the object: an error, and the object is not shown as skipped.
+	_, err := SkipObjects(context.Background(), p, []string{"1065"})
+	if err == nil || !strings.Contains(err.Error(), "did not confirm") {
+		t.Fatalf("err = %v, want did not confirm", err)
+	}
+	list, err := ListSkipObjects(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range list.Objects {
+		if o.Skipped {
+			t.Fatalf("%s must stay not skipped: %+v", o.ID, list.Objects)
+		}
+	}
+}
+
+// A multi-plate project whose gcode_file arrived while the printer still said
+// FINISH must still use that plate, not the lowest one.
+func TestSkipObjects_GcodeFileBeforeState(t *testing.T) {
+	const name = "skip-early-gcode"
+	h, p := setupSkip(t, name, "printing")
+	h.src = skip3MF(t)
+	noteSkipFields(name, []byte(`{"print":{"gcode_state":"FINISH"}}`))
+	noteSkipFields(name, []byte(`{"print":{"gcode_file":"Metadata/plate_2.gcode"}}`))
+	noteSkipFields(name, []byte(`{"print":{"gcode_state":"RUNNING"}}`))
+
+	list, err := ListSkipObjects(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Objects) != 1 || list.Objects[0].ID != "2000" {
+		t.Fatalf("list = %+v, want plate 2", list.Objects)
+	}
+
+	// Without any gcode_file the plate is unknown: refuse on a multi-plate file.
+	const name2 = "skip-no-gcode"
+	h2, p2 := setupSkip(t, name2, "printing")
+	h2.src = skip3MF(t)
+	noteSkipFields(name2, []byte(`{"print":{"gcode_state":"RUNNING"}}`))
+	_, err = ListSkipObjects(context.Background(), p2)
+	var unsup *SkipUnsupported
+	if !errors.As(err, &unsup) {
+		t.Fatalf("err = %v, want *SkipUnsupported", err)
+	}
+}
+
+func TestNoteSkipFields_IdleKeepsOnlyANewFile(t *testing.T) {
+	const name = "skip-fields-done"
+	t.Cleanup(func() {
+		skipJobsMu.Lock()
+		delete(skipJobs, name)
+		skipJobsMu.Unlock()
+	})
+	job := jobFor(name)
+	file := func() string {
+		job.mu.Lock()
+		defer job.mu.Unlock()
+		return job.gcodeFile
+	}
+	noteSkipFields(name, []byte(`{"print":{"gcode_state":"RUNNING","gcode_file":"a/plate_1.gcode"}}`))
+	noteSkipFields(name, []byte(`{"print":{"gcode_state":"FINISH","gcode_file":"a/plate_1.gcode"}}`))
+	noteSkipFields(name, []byte(`{"print":{"gcode_state":"FINISH","gcode_file":"a/plate_1.gcode"}}`))
+	if f := file(); f != "" {
+		t.Fatalf("the ended print's file was kept: %q", f)
+	}
+	noteSkipFields(name, []byte(`{"print":{"gcode_file":"b/plate_2.gcode"}}`))
+	if f := file(); f != "b/plate_2.gcode" {
+		t.Fatalf("next print's file = %q", f)
+	}
+	noteSkipFields(name, []byte(`{"print":{"gcode_state":"RUNNING"}}`))
+	if f := file(); f != "b/plate_2.gcode" {
+		t.Fatalf("after RUNNING = %q", f)
 	}
 }

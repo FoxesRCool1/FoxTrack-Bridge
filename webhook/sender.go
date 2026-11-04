@@ -568,7 +568,7 @@ func historyDelay(attempts int) time.Duration {
 
 // scheduleHistoryRetry runs item after its backoff on its own timer. Items
 // older than historyMaxAge are discarded.
-// ponytail: retries live in memory only and do not survive a restart; persist
+// Retries live in memory only and do not survive a restart; persist
 // them to disk if losing a history post across a restart ever matters.
 func scheduleHistoryRetry(item historyRetryItem) {
 	if pendingHistoryRetries.Add(1) > maxPendingRetries {

@@ -495,3 +495,127 @@ func TestRecover(t *testing.T) {
 		t.Error("a recent open print was closed; it may still be printing")
 	}
 }
+
+// Details and posters whose video is gone are removed once they are old, like
+// half-written files; anything with a video, or fresh, stays.
+func TestCleanupRemovesDetailsAndPostersWithoutAVideo(t *testing.T) {
+	r, clock := newTestRecorder(t, nil)
+	day := 24 * time.Hour
+	fakeVideo(t, r, "100-orphan", clock.Add(-40*day))
+	fakeVideo(t, r, "150-gif", clock.Add(-2*time.Hour))
+	fakeVideo(t, r, "200-fresh", clock.Add(-2*time.Hour))
+	fakeVideo(t, r, "300-kept", clock.Add(-2*time.Hour))
+	os.Remove(filepath.Join(r.dir, "100-orphan.mp4"))
+	os.Remove(filepath.Join(r.dir, "200-fresh.mp4"))
+	os.Rename(filepath.Join(r.dir, "150-gif.mp4"), filepath.Join(r.dir, "150-gif.gif"))
+	notes := filepath.Join(r.dir, "notes.json") // not a video's file
+	os.WriteFile(notes, []byte("{}"), 0o644)
+	old := clock.Add(-3 * day)
+	for _, id := range []string{"100-orphan", "150-gif", "300-kept", "notes"} {
+		for _, ext := range []string{".json", ".jpg", ".mp4", ".gif"} {
+			os.Chtimes(filepath.Join(r.dir, id+ext), old, old) // the ones that do not exist are skipped
+		}
+	}
+
+	r.Cleanup(0)
+	exists := func(name string) bool { _, err := os.Stat(filepath.Join(r.dir, name)); return err == nil }
+	for name, want := range map[string]bool{
+		"100-orphan.json": false, "100-orphan.jpg": false, // old, no video
+		"200-fresh.json": true, "200-fresh.jpg": true, // no video, but fresh: a build may be writing it
+		"150-gif.json": true, "150-gif.jpg": true, "150-gif.gif": true, // a GIF is a video
+		"300-kept.json": true, "300-kept.jpg": true, "300-kept.mp4": true,
+		"notes.json": true,
+	} {
+		if exists(name) != want {
+			t.Errorf("%s: exists = %v, want %v", name, !want, want)
+		}
+	}
+}
+
+// retryState is what is kept about a failed folder.
+func retryState(dir string) (tries int, waiting bool) {
+	retries.Lock()
+	defer retries.Unlock()
+	if t := retries.m[dir]; t != nil {
+		return t.tries, t.timer != nil
+	}
+	return 0, false
+}
+
+func waitUntil(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if ok() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// failingPrint records a print and puts a folder where its GIF goes, so the
+// build fails until the returned path is removed.
+func failingPrint(t *testing.T, r *Recorder, clock *time.Time, delays ...time.Duration) (dir, block string) {
+	t.Helper()
+	retries.Lock()
+	old := retryDelays
+	retryDelays = delays
+	retries.Unlock()
+	t.Cleanup(func() { retries.Lock(); retryDelays = old; retries.Unlock() })
+
+	r.Start(testPrinter, "benchy.gcode", false)
+	capture(t, r, clock, MinFrames+2, 5*time.Second, func(i int) []byte { return testJPEG(t, 64, 48, i) })
+	s := r.sessions[testPrinter.ID]
+	block = filepath.Join(r.dir, videoID(s.st)+".gif")
+	if err := os.MkdirAll(filepath.Join(block, "keep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return s.dir, block
+}
+
+// A build that failed is tried again after a wait, and the pictures stay until
+// it works.
+func TestFailedBuildIsRetried(t *testing.T) {
+	r, clock := newTestRecorder(t, func() string { return "" })
+	dir, block := failingPrint(t, r, clock, 300*time.Millisecond, 300*time.Millisecond)
+	r.End(testPrinter.ID, "finished")
+
+	waitUntil(t, "the first build to fail", func() bool { n, waiting := retryState(dir); return n == 1 && waiting })
+	if len(r.List()) != 0 {
+		t.Fatal("a video was listed for a failed build")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal("the pictures were deleted after a failed build")
+	}
+	os.RemoveAll(block) // what broke it is gone
+	waitUntil(t, "the retry to make the video", func() bool { return len(r.List()) == 1 })
+	waitBuilt(t, r)
+	if n, waiting := retryState(dir); n != 0 || waiting {
+		t.Errorf("a built folder is still counted: %d tries, waiting %v", n, waiting)
+	}
+}
+
+// After the last wait the folder is left to the daily Recover, which builds it.
+func TestRetriesStopAndRecoverTriesAgain(t *testing.T) {
+	r, clock := newTestRecorder(t, func() string { return "" })
+	dir, block := failingPrint(t, r, clock, 10*time.Millisecond, 10*time.Millisecond)
+	r.End(testPrinter.ID, "finished")
+
+	waitUntil(t, "the retries to run out", func() bool {
+		n, waiting := retryState(dir)
+		return n == 2 && !waiting && r.Building() == 0
+	})
+	time.Sleep(100 * time.Millisecond)
+	if n, waiting := retryState(dir); n != 2 || waiting || r.Building() != 0 {
+		t.Fatalf("after the last retry: %d tries, waiting %v, %d building; want it to stop", n, waiting, r.Building())
+	}
+
+	os.RemoveAll(block)
+	r.Recover()
+	waitBuilt(t, r)
+	if len(r.List()) != 1 {
+		t.Fatalf("Recover did not build the folder: %d videos", len(r.List()))
+	}
+	if n, _ := retryState(dir); n != 0 {
+		t.Errorf("a built folder is still counted: %d", n)
+	}
+}

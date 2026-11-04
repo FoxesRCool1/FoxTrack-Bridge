@@ -66,6 +66,9 @@ func sendEmail(ctx context.Context, ch config.NotifyChannel, m Message) error {
 	if err != nil {
 		return err
 	}
+	if err := checkSignIn(s); err != nil {
+		return err
+	}
 	msg := buildMail(from, to, m, time.Now())
 
 	host := strings.TrimSpace(s.Host)
@@ -110,7 +113,15 @@ func sendEmail(ctx context.Context, ch config.NotifyChannel, m Message) error {
 		}
 	}
 	if s.Username != "" {
-		if err := c.Auth(smtp.PlainAuth("", s.Username, s.Password, host)); err != nil {
+		offered, mechs := c.Extension("AUTH")
+		if !offered {
+			return errors.New("The mail server does not offer sign-in. Leave the username blank")
+		}
+		auth, err := pickAuth(mechs, s.Username, s.Password, host)
+		if err != nil {
+			return err
+		}
+		if err := c.Auth(auth); err != nil {
 			return smtpErr("signing in", err)
 		}
 	}
@@ -136,11 +147,67 @@ func sendEmail(ctx context.Context, ch config.NotifyChannel, m Message) error {
 	return nil
 }
 
+func isLocal(host string) bool {
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
+}
+
+// checkSignIn refuses to send a password in the clear: signing in needs TLS or
+// STARTTLS, unless the server is on this machine.
+func checkSignIn(s *config.SMTP) error {
+	if s.Username == "" || s.Security != "none" || isLocal(strings.TrimSpace(s.Host)) {
+		return nil
+	}
+	return errors.New("Sign-in needs TLS or STARTTLS. Pick one under Security, or leave the username blank.")
+}
+
+// pickAuth chooses how to sign in from the server's AUTH line: PLAIN if it is
+// offered, else LOGIN, else CRAM-MD5.
+func pickAuth(offered, user, pass, host string) (smtp.Auth, error) {
+	has := map[string]bool{}
+	for _, m := range strings.Fields(strings.ToUpper(offered)) {
+		has[m] = true
+	}
+	switch {
+	case has["PLAIN"]:
+		return smtp.PlainAuth("", user, pass, host), nil
+	case has["LOGIN"]:
+		return loginAuth{user, pass}, nil
+	case has["CRAM-MD5"]:
+		return smtp.CRAMMD5Auth(user, pass), nil
+	}
+	return nil, fmt.Errorf("The mail server offers no sign-in the Bridge can use (it offers: %s)", clip(offered))
+}
+
+// loginAuth is the LOGIN mechanism: the server asks for the username and then
+// the password, one challenge each. net/smtp does the base64.
+type loginAuth struct{ user, pass string }
+
+func (a loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !server.TLS && !isLocal(server.Name) {
+		return "", nil, errors.New("unencrypted connection")
+	}
+	return "LOGIN", nil, nil
+}
+
+func (a loginAuth) Next(from []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(string(from))) {
+	case "username:":
+		return []byte(a.user), nil
+	case "password:":
+		return []byte(a.pass), nil
+	}
+	return nil, errors.New("The mail server sent a sign-in question the Bridge does not know")
+}
+
 // smtpErr words a mail server failure.
 func smtpErr(doing string, err error) error {
 	var te *textproto.Error
 	if errors.As(err, &te) {
-		if te.Code == 535 || te.Code == 534 || te.Code == 530 {
+		if te.Code == 535 {
 			return errors.New("The mail server refused the username or password")
 		}
 		return fmt.Errorf("The mail server said no while %s: %d %s", doing, te.Code, clip(te.Msg))

@@ -44,28 +44,27 @@
                     <input id="secCurrent" type="password" class="field" autocomplete="current-password">
                 </div>` : ''}
                 <div>
-                    <label for="secNew" class="field-label">${on ? 'New password' : 'Password'}</label>
+                    <label for="secNew" class="field-label flex items-center gap-1">${on ? 'New password' : 'Password'} ${tip('<span id="secNewHelp">At least 8 characters. Everyone else is signed out when it changes.</span>', 'About the new password')}</label>
                     <input id="secNew" type="password" class="field" autocomplete="new-password" minlength="8" aria-describedby="secNewHelp">
-                    <p id="secNewHelp" class="mt-1.5 text-xs text-text-2">At least 8 characters. Everyone else is signed out when it changes.</p>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2">
                     ${on ? '<button type="button" id="secRemove" class="btn-danger btn-lg">Remove password</button>' : ''}
                     <button type="submit" id="secSave" class="btn-primary btn-lg">${on ? 'Change password' : 'Set password'}</button>
                 </div>
             </form>
-            ${on ? `<p class="mt-3 text-xs text-text-2">Forgot it? Stop the Bridge, run it once with <code>--reset-password</code>, then start it again.</p>
+            ${on ? `<div class="mt-3 text-xs text-text-2 flex items-center gap-1">Forgot the password? ${tip('<span data-i18n-html>Stop the Bridge, run it once with <code>--reset-password</code>, then start it again.</span>', 'About a forgotten password')}</div>
                 <div class="mt-4 flex justify-end"><button type="button" id="secSignOut" class="btn-ghost">Sign out of this browser</button></div>` : ''}
 
             <div class="mt-8 pt-6 border-t border-border">
                 <div class="flex items-center gap-2">
                     <h3 class="text-sm font-medium">API tokens</h3>
-                    ${tip('For Home Assistant, Prometheus or your own scripts. Send it as <code>Authorization: Bearer &lt;token&gt;</code>. A token only matters once a password is set.', 'About API tokens')}
+                    ${tip('<span data-i18n-html>For Home Assistant, Prometheus or your own scripts. Send it as <code>Authorization: Bearer &lt;token&gt;</code>. A token only matters once a password is set.</span>', 'About API tokens')}
                 </div>
                 <div id="secTokenList" class="mt-3">
                     ${tokens.length ? tokens.map(t => `
                         <div class="sec-row">
                             <div class="min-w-0">
-                                <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
+                                <p class="text-sm font-medium truncate" data-no-i18n>${escHtml(t.name)}</p>
                                 <p class="text-xs text-text-2 sec-num">…${escHtml(t.hint)} · created ${escHtml(fmtDate(t.created_at))}</p>
                             </div>
                             <button type="button" class="btn-danger btn-xs" data-revoke="${escHtml(t.id)}" aria-label="Revoke ${escHtml(t.name)}">Revoke</button>
@@ -137,7 +136,7 @@
         });
         el.querySelectorAll('[data-revoke]').forEach(b => b.addEventListener('click', async () => {
             const name = b.closest('.sec-row').querySelector('p').textContent;
-            const ok = await confirmDialog({ title: 'Revoke this token?', body: 'Anything using "' + name + '" stops working at once. This cannot be undone.', confirmLabel: 'Revoke' });
+            const ok = await confirmDialog({ title: 'Revoke this token?', body: fill('Anything using "{0}" stops working at once. This cannot be undone.', name), confirmLabel: 'Revoke' });
             if (!ok) return;
             try {
                 view = await apiFetch('/api/security/tokens/' + encodeURIComponent(b.dataset.revoke), { method: 'DELETE' });

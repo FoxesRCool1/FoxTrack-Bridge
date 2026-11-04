@@ -37,12 +37,12 @@
             const s = (liveStatus || {})[p.id] || {};
             const st = s.status || '';
             const enc = encodeURIComponent(p.id);
-            out.push({ group: 'Printers', label: p.name, sub: st ? statusWord(st) : '', run: () => { showView('printers'); scrollToPrinter(p.id); } });
-            if (st === 'printing') out.push({ group: 'Printers', label: 'Pause ' + p.name, run: () => sendControl(p.id, 'pause') });
-            if (st === 'paused') out.push({ group: 'Printers', label: 'Resume ' + p.name, run: () => sendControl(p.id, 'resume') });
-            if (st === 'printing' || st === 'paused') out.push({ group: 'Printers', label: 'Stop ' + p.name + '…', run: () => confirmStop(p.id) });
-            if (typeof s.light_on === 'boolean' && st && st !== 'disconnected') out.push({ group: 'Printers', label: (s.light_on ? 'Light off: ' : 'Light on: ') + p.name, run: () => toggleLightEncoded(enc) });
-            out.push({ group: 'Printers', label: 'Edit ' + p.name, run: () => openEditPrinterModal(p.id) });
+            out.push({ group: 'Printers', label: p.name, raw: true, sub: st ? statusWord(st) : '', run: () => showView('printers').then(() => scrollToPrinter(p.id)) });
+            if (st === 'printing') out.push({ group: 'Printers', label: fill('Pause {0}', p.name), run: () => sendControl(p.id, 'pause') });
+            if (st === 'paused') out.push({ group: 'Printers', label: fill('Resume {0}', p.name), run: () => sendControl(p.id, 'resume') });
+            if (st === 'printing' || st === 'paused') out.push({ group: 'Printers', label: fill('Stop {0}…', p.name), run: () => confirmStop(p.id) });
+            if (typeof s.light_on === 'boolean' && st && st !== 'disconnected') out.push({ group: 'Printers', label: fill(s.light_on ? 'Light off: {0}' : 'Light on: {0}', p.name), run: () => toggleLightEncoded(enc) });
+            out.push({ group: 'Printers', label: fill('Edit {0}', p.name), run: () => openEditPrinterModal(p.id) });
         }
         return out;
     }
@@ -60,7 +60,7 @@
             { group: 'Go to', label: 'History', keys: ['G', 'H'], run: () => showView('history') },
             { group: 'Go to', label: 'Settings', keys: ['G', 'S'], run: () => showView('settings') },
         ];
-        for (const t of SETTINGS_TABS) cmds.push({ group: 'Settings', label: t.label, sub: t.group, run: () => { showView('settings'); showSettingsTab(t.id); } });
+        for (const t of SETTINGS_TABS) cmds.push({ group: 'Settings', label: t.label, sub: t.group, run: () => showView('settings').then(() => showSettingsTab(t.id)) });
         cmds.push(...printerCommands());
         cmds.push(
             { group: 'Actions', label: 'Add a printer', keys: ['N'], run: () => openAddPrinterModal() },
@@ -142,7 +142,7 @@
             const g = q && q !== '?' ? 'Results' : c.group;
             if (g !== group) { group = g; html += '<li class="cmdk-group" role="presentation">' + escHtml(g) + '</li>'; }
             html += '<li role="option" id="cmdk-o' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '">'
-                + '<span class="min-w-0 truncate">' + escHtml(c.label) + (c.sub ? '<span class="cmdk-sub">' + escHtml(c.sub) + '</span>' : '') + '</span>'
+                + '<span class="min-w-0 truncate">' + (c.raw ? '<span data-no-i18n>' + escHtml(c.label) + '</span>' : escHtml(c.label)) + (c.sub ? '<span class="cmdk-sub">' + escHtml(c.sub) + '</span>' : '') + '</span>'
                 + kbd(c.keys) + '</li>';
         });
         list.innerHTML = html || '<li class="cmdk-empty" role="presentation">Nothing matches.</li>';
@@ -201,9 +201,9 @@
         if (pendingG && Date.now() - pendingG < 1200) {
             pendingG = 0;
             const v = { p: 'printers', h: 'history', s: 'settings' }[k.toLowerCase()];
-            if (v) { e.preventDefault(); showView(v); }
-            return;
+            if (v) { e.preventDefault(); showView(v); return; }
         }
+        if (e.repeat) return;
         if (k === 'g' || k === 'G') { pendingG = Date.now(); return; }
         if (k === '/') { e.preventDefault(); open(); }
         else if (k === '?') { e.preventDefault(); open('?'); }

@@ -22,15 +22,19 @@ type Breakdown struct {
 	Total         float64 `json:"total"`        // FilamentCost + EnergyCost (an unknown part contributes 0)
 }
 
-// PricePerKg looks up the price of material in c. A per-material price wins
-// over the FilamentPerKg fallback; (0, false) means the price is unknown.
+// PricePerKg looks up the price of material in c: by its name, then by its
+// leading letters ("PLA-CF" -> PLA). A per-material price wins over the
+// FilamentPerKg fallback; (0, false) means the price is unknown.
 func PricePerKg(c *config.Costs, material string) (float64, bool) {
 	if c == nil {
 		return 0, false
 	}
 	if material != "" {
-		for name, price := range c.MaterialPerKg {
-			if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(material)) && price > 0 {
+		if price, ok := materialPrice(c.MaterialPerKg, material); ok {
+			return price, true
+		}
+		if family := leadingLetters(material); family != "" {
+			if price, ok := materialPrice(c.MaterialPerKg, family); ok {
 				return price, true
 			}
 		}
@@ -41,17 +45,31 @@ func PricePerKg(c *config.Costs, material string) (float64, bool) {
 	return 0, false
 }
 
-// Density returns the grams-per-cm^3 density of material, by its leading
-// letters ("PLA-CF" -> PLA). Unknown materials fall back to PLA's density.
-func Density(material string) float64 {
+// materialPrice finds material in prices, ignoring case and outer spaces.
+func materialPrice(prices map[string]float64, material string) (float64, bool) {
+	for name, price := range prices {
+		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(material)) && price > 0 {
+			return price, true
+		}
+	}
+	return 0, false
+}
+
+// leadingLetters is the upper-case run of letters that starts material.
+func leadingLetters(material string) string {
 	upper := strings.ToUpper(strings.TrimSpace(material))
 	for i := 0; i < len(upper); i++ {
 		if upper[i] < 'A' || upper[i] > 'Z' {
-			upper = upper[:i]
-			break
+			return upper[:i]
 		}
 	}
-	switch upper {
+	return upper
+}
+
+// Density returns the grams-per-cm^3 density of material, by its leading
+// letters ("PLA-CF" -> PLA). Unknown materials fall back to PLA's density.
+func Density(material string) float64 {
+	switch leadingLetters(material) {
 	case "PLA":
 		return 1.24
 	case "PETG":

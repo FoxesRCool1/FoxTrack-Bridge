@@ -109,12 +109,14 @@ func Evaluate(tasks []config.MaintenanceTask, printers []config.Printer, recs []
 			continue
 		}
 		names := append([]string{printer.Name}, printer.PreviousNames...)
-		hours := Hours(recs, names, task.LastDoneAt)
+		// Status and percent come from the rounded hours, so they agree with
+		// the number shown.
+		hours := math.Round(Hours(recs, names, task.LastDoneAt)*10) / 10
 		status, percent := StatusFor(hours, task.IntervalHours)
 		views = append(views, View{
 			MaintenanceTask: task,
 			PrinterName:     printer.Name,
-			Hours:           math.Round(hours*10) / 10,
+			Hours:           hours,
 			Percent:         percent,
 			Status:          status,
 		})
@@ -161,12 +163,23 @@ func NewAnnouncer(path string) *Announcer {
 }
 
 // NewlyDue returns the views that are due and not yet announced, recording
-// them. Tasks that are no longer due are forgotten.
-func (a *Announcer) NewlyDue(views []View) []View {
+// them. Tasks that are no longer due are forgotten, and so are those missing
+// from tasks, the full task list (a view exists only while its printer does).
+func (a *Announcer) NewlyDue(views []View, tasks []config.MaintenanceTask) []View {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := []View{}
 	changed := false
+	live := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		live[t.ID] = true
+	}
+	for id := range a.announced {
+		if !live[id] {
+			delete(a.announced, id)
+			changed = true
+		}
+	}
 	for _, v := range views {
 		if v.Status != StatusDue {
 			if _, ok := a.announced[v.ID]; ok {

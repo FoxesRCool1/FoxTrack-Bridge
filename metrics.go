@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -112,8 +113,14 @@ func printStatsByPrinter(printers []config.Printer, now time.Time) map[string]pr
 			}
 		}
 	}
+	records, err := loadHistory()
+	if err != nil {
+		// Zeros would look like a counter reset to Prometheus: keep the last
+		// totals and try again on the next scrape.
+		log.Printf("[metrics] print history not readable: %v", err)
+		return metricsHistory.stats
+	}
 	stats := map[string]printStats{}
-	records, _ := loadHistory()
 	for _, rec := range records {
 		name, ok := current[rec.PrinterName]
 		if !ok {

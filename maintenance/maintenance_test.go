@@ -99,6 +99,17 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
+func TestEvaluateUsesTheShownHours(t *testing.T) {
+	printers := []config.Printer{{ID: "p1", Name: "Fox"}}
+	tasks := []config.MaintenanceTask{{ID: "t1", PrinterID: "p1", IntervalHours: 100}}
+	// 99.96 h shows as 100 h, so it must read as due and 100%.
+	recs := []history.Record{{PrinterName: "Fox", EndTime: 2000, Duration: 359856}}
+	v := Evaluate(tasks, printers, recs)[0]
+	if v.Hours != 100 || v.Percent != 100 || v.Status != StatusDue {
+		t.Errorf("view: got %+v, want 100 h, 100%%, due", v)
+	}
+}
+
 func TestMessage(t *testing.T) {
 	v := View{
 		MaintenanceTask: config.MaintenanceTask{Name: "Lubricate the rods", IntervalHours: 100},
@@ -113,40 +124,41 @@ func TestMessage(t *testing.T) {
 func TestAnnouncer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	a := NewAnnouncer(path)
+	tasks := []config.MaintenanceTask{{ID: "t1"}, {ID: "t2"}, {ID: "t3"}}
 
 	due := View{MaintenanceTask: config.MaintenanceTask{ID: "t1", LastDoneAt: 1000}, Status: StatusDue}
 	soon := View{MaintenanceTask: config.MaintenanceTask{ID: "t2", LastDoneAt: 1000}, Status: StatusSoon}
 
-	got := a.NewlyDue([]View{due, soon})
+	got := a.NewlyDue([]View{due, soon}, tasks)
 	if len(got) != 1 || got[0].ID != "t1" {
 		t.Fatalf("first call: got %+v, want only t1", got)
 	}
-	if got := a.NewlyDue([]View{due, soon}); len(got) != 0 {
+	if got := a.NewlyDue([]View{due, soon}, tasks); len(got) != 0 {
 		t.Fatalf("second call: got %+v, want none", got)
 	}
 
 	// Marked done and due again: a different LastDoneAt is announced again.
 	due2 := View{MaintenanceTask: config.MaintenanceTask{ID: "t1", LastDoneAt: 2000}, Status: StatusDue}
-	if got := a.NewlyDue([]View{due2}); len(got) != 1 || got[0].ID != "t1" {
+	if got := a.NewlyDue([]View{due2}, tasks); len(got) != 1 || got[0].ID != "t1" {
 		t.Fatalf("redone task: got %+v, want t1", got)
 	}
 
 	// A task that is due, then ok (forgotten), then due again is announced again.
 	due3 := View{MaintenanceTask: config.MaintenanceTask{ID: "t3", LastDoneAt: 1000}, Status: StatusDue}
-	if got := a.NewlyDue([]View{due3}); len(got) != 1 || got[0].ID != "t3" {
+	if got := a.NewlyDue([]View{due3}, tasks); len(got) != 1 || got[0].ID != "t3" {
 		t.Fatalf("t3 first due: got %+v, want t3", got)
 	}
 	ok := View{MaintenanceTask: config.MaintenanceTask{ID: "t3", LastDoneAt: 1000}, Status: StatusOK}
-	if got := a.NewlyDue([]View{ok}); len(got) != 0 {
+	if got := a.NewlyDue([]View{ok}, tasks); len(got) != 0 {
 		t.Fatalf("t3 ok: got %+v, want none", got)
 	}
-	if got := a.NewlyDue([]View{due3}); len(got) != 1 || got[0].ID != "t3" {
+	if got := a.NewlyDue([]View{due3}, tasks); len(got) != 1 || got[0].ID != "t3" {
 		t.Fatalf("t3 due again: got %+v, want t3", got)
 	}
 
 	// A new announcer on the same file does not re-announce.
 	b := NewAnnouncer(path)
-	if got := b.NewlyDue([]View{due2}); len(got) != 0 {
+	if got := b.NewlyDue([]View{due2}, tasks); len(got) != 0 {
 		t.Fatalf("fresh announcer: got %+v, want none", got)
 	}
 }
@@ -157,8 +169,27 @@ func TestAnnouncerCorruptFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewAnnouncer(path)
+	tasks := []config.MaintenanceTask{{ID: "t1"}}
 	due := View{MaintenanceTask: config.MaintenanceTask{ID: "t1", LastDoneAt: 1000}, Status: StatusDue}
-	if got := a.NewlyDue([]View{due}); len(got) != 1 {
+	if got := a.NewlyDue([]View{due}, tasks); len(got) != 1 {
 		t.Fatalf("corrupt file: got %+v, want t1", got)
+	}
+}
+
+func TestAnnouncerForgetsDeletedTasks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	a := NewAnnouncer(path)
+	tasks := []config.MaintenanceTask{{ID: "t1"}}
+	due := View{MaintenanceTask: config.MaintenanceTask{ID: "t1", LastDoneAt: 1000}, Status: StatusDue}
+	if got := a.NewlyDue([]View{due}, tasks); len(got) != 1 {
+		t.Fatalf("first call: got %+v, want t1", got)
+	}
+	// The task is deleted, then comes back with the same ID and is due again.
+	a.NewlyDue(nil, nil)
+	if got := a.NewlyDue([]View{due}, tasks); len(got) != 1 {
+		t.Fatalf("after delete: got %+v, want t1 announced again", got)
+	}
+	if got := NewAnnouncer(path).announced; len(got) != 1 {
+		t.Errorf("saved state = %v, want t1", got)
 	}
 }

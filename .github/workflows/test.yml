@@ -30,3 +30,6 @@ jobs:
 
       - name: Test
         run: go test -tags headless -race ./...
+
+      - name: Check dashboard scripts
+        run: for f in web/features/*.js; do node --check "$f"; done

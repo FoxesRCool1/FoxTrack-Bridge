@@ -246,7 +246,7 @@ type printSession struct {
 
 // sessionResumeGrace is how long a print may go unseen (a dropped MQTT
 // connection) and still carry on in its session when it is seen again.
-// ponytail: the file name is the only check, so a reprint of the same file
+// The file name is the only check, so a reprint of the same file
 // within this window joins the old session.
 const sessionResumeGrace = 10 * 60
 

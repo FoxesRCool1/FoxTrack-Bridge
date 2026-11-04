@@ -104,6 +104,9 @@ func handleSpoolman(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if req.URL != nil {
+				if url != next.URL {
+					next.Slots = map[string]int{} // spool IDs belong to the old server
+				}
 				next.URL = url
 			}
 			if req.Enabled != nil {

@@ -167,7 +167,7 @@ func TestTestReportsPlainErrors(t *testing.T) {
 	b.mu.Lock()
 	ids := append([]string(nil), b.clientIDs...)
 	b.mu.Unlock()
-	if len(ids) != 1 || ids[0] == ClientID() || !strings.HasPrefix(ids[0], ClientID()) {
+	if len(ids) != 1 || ids[0] == ClientID(c.BridgeID) || !strings.HasPrefix(ids[0], ClientID(c.BridgeID)) {
 		t.Errorf("the test must use its own client ID so it cannot knock off the live one: %v", ids)
 	}
 
@@ -256,4 +256,24 @@ func TestExporterReportsAnUnreachableBroker(t *testing.T) {
 	ex.Apply(c)
 	defer ex.Apply(config.MQTTExport{})
 	waitFor(t, "the error", func() bool { _, e := ex.Status(); return strings.Contains(e, "Nothing is listening") })
+}
+
+func TestExporterClearsOldStatesOnNewPrefix(t *testing.T) {
+	tickEvery, settleAfter = 20*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { tickEvery, settleAfter = 3*time.Second, 2*time.Second })
+
+	b := newBroker(t, "", "")
+	ex := New(Host{
+		Printers: func() []config.Printer { return []config.Printer{bambu} },
+		States:   func() map[string]*mqttpkg.TelemetryData { return nil },
+	})
+	c, _ := Resolve(config.MQTTExport{Enabled: true, Broker: b.addr(), BridgeID: "abcd1234"})
+	ex.Apply(c)
+	defer ex.Apply(config.MQTTExport{})
+	waitFor(t, "the first state", func() bool { return b.hasTopic("foxtrack_bridge/p1/state") })
+
+	c.TopicPrefix = "other"
+	ex.Apply(c)
+	waitFor(t, "the old state to be cleared", func() bool { return b.has("foxtrack_bridge/p1/state", "", true) })
+	waitFor(t, "the new state", func() bool { return b.hasTopic("other/p1/state") })
 }

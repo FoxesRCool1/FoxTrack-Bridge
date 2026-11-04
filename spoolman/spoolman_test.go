@@ -232,6 +232,31 @@ func TestSyncRetries(t *testing.T) {
 	}
 }
 
+func TestSyncRetryOnlyWhenTheUseNeverArrived(t *testing.T) {
+	// The connection is dropped after the request arrived: Spoolman may have
+	// booked the use, so it must not be sent again.
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		conn.Close()
+	}))
+	c, _ := NewClient(srv.URL)
+	s := fastSyncer(2)
+	s.Sync(context.Background(), c, "Fox", []Use{{Spool: 7, Grams: 1}})
+	if e := s.Log()[0]; e.Status != "error" || e.Attempts != 1 || hits.Load() != 1 {
+		t.Errorf("dropped after sending: %+v, %d hits, want one try", e, hits.Load())
+	}
+
+	// Nothing is listening: the use never left, so retrying is safe.
+	srv.Close()
+	s = fastSyncer(2)
+	s.Sync(context.Background(), c, "Fox", []Use{{Spool: 7, Grams: 1}})
+	if e := s.Log()[0]; e.Status != "error" || e.Attempts != 3 {
+		t.Errorf("connection refused: %+v, want 3 tries", e)
+	}
+}
+
 func TestSyncStopsWhenCancelled(t *testing.T) {
 	f := newFake(t)
 	f.failures = 100

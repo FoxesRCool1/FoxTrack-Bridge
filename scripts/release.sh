@@ -7,7 +7,7 @@
 # Run it from the main checkout (not a worktree) with dev checked out and clean.
 # GitHub Actions (.github/workflows/release.yml) builds every platform when the
 # tag lands; this script only builds the Linux headless binary for the local
-# release checklist in CLAUDE.md.
+# release checklist.
 set -euo pipefail
 
 tag="${1:-}"
@@ -50,7 +50,7 @@ fi
 
 cat <<MSG
 
-Before you continue, run the release checklist in CLAUDE.md against
+Before you continue, run the release checklist against
 dist/FoxTrack-Bridge-Linux-${version} with your real config:
   - every printer shows on the dashboard on first load
   - a settings save keeps the printer list

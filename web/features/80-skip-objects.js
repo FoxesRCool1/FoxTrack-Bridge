@@ -216,7 +216,7 @@ function skRowHTML(o, i) {
     return '<li><label class="sk-row' + (o.skipped ? ' is-skip' : picked ? ' is-sel' : '') + '">'
         + '<input type="checkbox" data-i="' + i + '"' + (o.skipped ? ' disabled' : '') + (picked ? ' checked' : '') + '>'
         + '<span class="sk-n" aria-hidden="true">' + (i + 1) + '</span>'
-        + '<span class="sk-name" title="' + escHtml(o.name) + '">' + escHtml(o.name || ('Object ' + o.id)) + '</span>'
+        + '<span class="sk-name" data-no-i18n title="' + escHtml(o.name) + '">' + escHtml(o.name || i18n(fill('Object {0}', o.id))) + '</span>'
         + (o.skipped ? '<span class="sk-tag">Skipped</span>' : o.current ? '<span class="sk-tag is-now">Printing now</span>' : '')
         + '</label></li>';
 }
@@ -237,8 +237,10 @@ function skRender() {
         html = '<p class="sk-note">' + escHtml(d.reason || 'This printer cannot skip objects right now.') + '</p>';
     } else {
         const left = d.objects.filter(o => !o.skipped).length;
-        html = '<p class="sk-note">' + d.objects.length + (d.objects.length === 1 ? ' object' : ' objects') + ' on the plate, ' + left + ' still to print. '
-            + 'Tick the ones to cancel. The rest of the print carries on, and a skipped object cannot be brought back.</p>'
+        html = '<p class="sk-note">' + fill(d.objects.length === 1
+                ? '{0} object on the plate, {1} still to print. Tick the ones to cancel. The rest of the print carries on, and a skipped object cannot be brought back.'
+                : '{0} objects on the plate, {1} still to print. Tick the ones to cancel. The rest of the print carries on, and a skipped object cannot be brought back.',
+            d.objects.length, left) + '</p>'
             + skPlateSVG(d)
             + '<ul class="sk-list" aria-label="Objects on the plate">' + d.objects.map(skRowHTML).join('') + '</ul>';
     }
@@ -280,10 +282,10 @@ function skToggle(i, want) {
 }
 
 function skNames(list) {
-    const n = list.map(o => o.name || ('Object ' + o.id));
+    const n = list.map(o => o.name || i18n(fill('Object {0}', o.id)));
     if (n.length === 1) return n[0];
-    if (n.length <= 4) return n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1];
-    return n.slice(0, 3).join(', ') + ' and ' + (n.length - 3) + ' more';
+    if (n.length <= 4) return n.slice(0, -1).join(', ') + ' ' + i18n(fill('and {0}', n[n.length - 1]));
+    return n.slice(0, 3).join(', ') + ' ' + i18n(fill('and {0} more', n.length - 3));
 }
 
 async function skSubmit() {
@@ -292,24 +294,27 @@ async function skSubmit() {
     const picked = objects.filter(o => SK.picked.has(o.id));
     const n = picked.length;
     const everyOne = n === objects.filter(o => !o.skipped).length;
+    // Capture before the dialog: the sheet can be closed and reopened for
+    // another printer while it is up, and the old choice must not go to it.
+    const seq = SK.seq, url = skUrl(), ids = picked.map(o => o.id);
     const ok = await confirmDialog({
         title: n === 1 ? 'Skip this object?' : 'Skip ' + n + ' objects?',
-        body: skNames(picked) + ' will not be printed. The rest of the plate carries on. This cannot be undone.'
-            + (everyOne ? ' That is every object left, so nothing more will print. Use Stop if you want to end the print.' : ''),
+        body: fill(everyOne
+            ? '{0} will not be printed. The rest of the plate carries on. This cannot be undone. That is every object left, so nothing more will print. Use Stop if you want to end the print.'
+            : '{0} will not be printed. The rest of the plate carries on. This cannot be undone.', skNames(picked)),
         confirmLabel: n === 1 ? 'Skip object' : 'Skip ' + n + ' objects',
     });
-    if (!ok || skEl('skipObjectsModal').classList.contains('hidden')) return;
-    const seq = SK.seq;
+    if (!ok || seq !== SK.seq || skEl('skipObjectsModal').classList.contains('hidden')) return;
     SK.busy = true;
     SK.error = '';
     skSync();
     try {
-        const d = await apiFetch(skUrl() + '/skip', { method: 'POST', body: JSON.stringify({ ids: picked.map(o => o.id) }) });
+        const d = await apiFetch(url + '/skip', { method: 'POST', body: JSON.stringify({ ids }) });
         if (seq !== SK.seq) return;
         SK.picked = new Set();
         skApply(d);
         skRender();
-        toast(n === 1 ? 'Object skipped' : n + ' objects skipped');
+        toast(n === 1 ? 'Object skipped' : fill('{0} objects skipped', n));
     } catch (e) {
         if (seq !== SK.seq) return;
         SK.error = friendlyError(e.message);

@@ -26,10 +26,3 @@ foxtrack-bridge-linux
 build.log
 *.prev
 
-# Local development tool files (kept on disk, not published)
-CLAUDE.md
-AGENTS.md
-.claude/
-.llm/
-.roo/
-.rooignore

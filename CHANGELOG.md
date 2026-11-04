@@ -64,6 +64,33 @@ off until you turn it on. Existing configs load unchanged.
 - Control commands carry an idempotency key, so a retried click runs once.
 - Removed unused code (the old v1 status webhook, an unused MQTT helper).
 
+**Fixes and polish before release**
+- Help text in Settings sits behind the (i) next to each setting, the same
+  way everywhere. Sentences that join text with names now translate as whole
+  sentences, and monospace fields translate their placeholders.
+- One undo bar for deleted channels, timelapses and maintenance tasks;
+  several deletes can be undone at once.
+- The dashboard stops polling the printers while its tab is hidden and
+  refreshes the moment it is shown. A poll that hangs times out after 10 s.
+- Skip objects refuses rather than guesses when it cannot tell which plate is
+  printing, picks the newest copy of the print file, and no longer reports an
+  object as skipped that the printer never confirmed.
+- ffmpeg no longer gets the printer's access code on its command line.
+- Email signs in with PLAIN, LOGIN or CRAM-MD5, whichever the server offers,
+  and refuses to send a password without TLS.
+- A failed timelapse build is retried after 10 minutes, 1 hour and 6 hours.
+- Prometheus totals no longer drop to zero after a failed history read.
+- Two Bridges on hosts with the same name no longer knock each other off the
+  MQTT broker; a new topic prefix clears the old retained states.
+- Spoolman: a new server address forgets the old spool mapping, and a use is
+  never sent twice. Spoolman errors no longer say the printer is unreachable.
+- Costs: "PLA-CF" and similar use the "PLA" price when they have none.
+- Many smaller fixes: maintenance hours and status agree, the elapsed time is
+  only shown when it is known, history columns fit on narrow cards and phones,
+  and a broken feature script can no longer stop the others.
+- For contributors: running the tests no longer writes to your own Bridge's
+  config and print history (it added "relay-order-test" prints).
+
 ## v2.5.3
 
 **Smart plugs**

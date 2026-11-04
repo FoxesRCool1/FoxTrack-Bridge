@@ -163,7 +163,7 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 		SeqID: nextSequenceID(), ID: newJobID(),
 		Plate: info.Plate, RemoteName: remote,
 		TaskName: firstNonEmpty(opts.TaskName, "FoxTrack print"),
-		// ponytail: md5 "" works on P1S/X1C/A1 in three references; send
+		// md5 "" works on P1S/X1C/A1 in three references; send
 		// info.MD5 only if a Bambu Studio capture shows the firmware wants it.
 		MD5: "", Timelapse: opts.Timelapse, BedLeveling: opts.BedLeveling,
 		UseAMS: useAMS, DualNozzle: dualNozzle(prefix), P2S: prefix == "22E",

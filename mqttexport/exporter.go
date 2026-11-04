@@ -31,28 +31,39 @@ type Host struct {
 
 // Exporter runs one broker connection for the current settings.
 type Exporter struct {
-	host Host
-	mu   sync.Mutex
-	cur  *session
+	host    Host
+	applyMu sync.Mutex // one Apply at a time; only Apply changes cur
+	mu      sync.Mutex // guards cur for Status and OnEvent
+	cur     *session
 }
 
 func New(h Host) *Exporter { return &Exporter{host: h} }
 
 // Apply starts, restarts or stops the export for c (already Resolved).
 func (e *Exporter) Apply(c config.MQTTExport) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
 	if old := e.cur; old != nil {
 		if old.cfg == c {
 			return
 		}
+		e.mu.Lock()
+		e.cur = nil
+		e.mu.Unlock()
 		// Take the printers out of Home Assistant only when they would be
 		// left behind: discovery turned off, or a different broker or prefix.
-		old.close(old.cfg.Discovery && (!c.Enabled || !c.Discovery || c.Broker != old.cfg.Broker || c.DiscoveryPrefix != old.cfg.DiscoveryPrefix))
-		e.cur = nil
+		// A new topic prefix also leaves the old one's retained states behind.
+		// This runs outside e.mu: closing can take seconds.
+		old.close(
+			old.cfg.Discovery && (!c.Enabled || !c.Discovery || c.Broker != old.cfg.Broker || c.DiscoveryPrefix != old.cfg.DiscoveryPrefix),
+			c.Enabled && c.TopicPrefix != old.cfg.TopicPrefix,
+		)
 	}
 	if c.Enabled {
-		e.cur = e.start(c)
+		s := e.start(c)
+		e.mu.Lock()
+		e.cur = s
+		e.mu.Unlock()
 	}
 }
 
@@ -97,7 +108,7 @@ type session struct {
 
 func (e *Exporter) start(c config.MQTTExport) *session {
 	s := &session{host: e.host, cfg: c, stop: make(chan struct{}), done: make(chan struct{}), syn: newSyncer(c, e.host.Version)}
-	o := options(c, ClientID()).
+	o := options(c, ClientID(c.BridgeID)).
 		SetAutoReconnect(true).SetMaxReconnectInterval(time.Minute).
 		SetWill(availabilityTopic(c), "offline", 1, true).
 		SetOnConnectHandler(s.onConnect).
@@ -211,19 +222,25 @@ func (s *session) tick(now time.Time) {
 	})
 }
 
-// close hangs up. With clear it first removes this Bridge's discovery configs.
+// close hangs up. With clear it first removes this Bridge's discovery configs,
+// with clearStates each printer's retained state.
 // A clean hang-up does not fire the last will, so "offline" is sent here.
-func (s *session) close(clear bool) {
+func (s *session) close(clear, clearStates bool) {
 	close(s.stop)
 	<-s.done
 	if s.client.IsConnectionOpen() {
+		s.mu.Lock()
 		if clear {
-			s.mu.Lock()
 			for t := range s.syn.known {
 				s.client.Publish(t, 1, true, "")
 			}
-			s.mu.Unlock()
 		}
+		if clearStates {
+			for id := range s.syn.last {
+				s.client.Publish(stateTopic(s.cfg, id), 1, true, "")
+			}
+		}
+		s.mu.Unlock()
 		s.client.Publish(availabilityTopic(s.cfg), 1, true, "offline").WaitTimeout(2 * time.Second)
 	}
 	s.client.Disconnect(500)

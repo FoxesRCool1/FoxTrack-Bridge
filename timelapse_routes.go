@@ -147,8 +147,11 @@ func timelapseTick(now time.Time) {
 				} else if now.Sub(since) >= timelapseIdleEnd {
 					delete(tlIdle, p.ID)
 					result := "cancelled"
-					if s.Status == "finished" {
+					switch s.Status {
+					case "finished":
 						result = "finished"
+					case "error":
+						result = "failed"
 					}
 					rec.End(p.ID, result)
 				}
@@ -189,6 +192,8 @@ func timelapseCapture(rec *timelapse.Recorder, p config.Printer, interval time.D
 		log.Printf("[timelapse] %s: no picture: %v", p.Name, err)
 	}
 }
+
+var errNoSuchPrinters = errors.New("None of those printers exist. Reload the page and try again.")
 
 // timelapseView is what GET and POST /api/timelapse answer with.
 type timelapseView struct {
@@ -275,10 +280,17 @@ func handleTimelapse(w http.ResponseWriter, r *http.Request) {
 						t.Printers = append(t.Printers, p.ID)
 					}
 				}
+				if len(*req.Printers) > 0 && t.Printers == nil { // an empty list would mean all printers
+					return errNoSuchPrinters
+				}
 			}
 			c.Timelapse = &t
 			return nil
 		})
+		if errors.Is(err, errNoSuchPrinters) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			writeSaveFailed(w, err)
 			return
@@ -300,7 +312,7 @@ func handleTimelapseFile(w http.ResponseWriter, r *http.Request) {
 	rec := timelapseRecorder()
 	switch r.Method {
 	case "GET", "HEAD":
-		path, m, err := rec.Open(id, r.URL.Query().Get("poster") != "")
+		path, m, err := rec.Open(id, r.URL.Query().Get("poster") == "1")
 		if err != nil {
 			timelapseError(w, err)
 			return

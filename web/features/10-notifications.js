@@ -62,11 +62,11 @@ const NF_FIELDS = {
     ],
     webhook: [
         { k: 'url', label: 'URL', ph: 'https://example.com/hook',
-          tip: 'Receives a JSON POST for every event: event, printer, file, progress, message, code, severity, time and, for finished prints, the record. Handy for Home Assistant, n8n or Node-RED.' },
+          tip: 'Receives a JSON POST for every event: event, printer, file, progress, message, code, severity, time and, for prints that ended, the record. Handy for Home Assistant, n8n or Node-RED.' },
     ],
 };
 
-const NF_PRIVACY = 'Each message goes from this machine straight to the service you pick, never through FoxTrack. With Picture on, a camera photo goes along with it.';
+const NF_PRIVACY = 'Messages go from this machine straight to the service you pick. With Picture on, a camera photo is attached.';
 
 function nfGet(o, k) { return k.split('.').reduce((a, p) => (a == null ? a : a[p]), o); }
 function nfSet(o, k, v) {
@@ -77,12 +77,13 @@ function nfSet(o, k, v) {
 function nfService(kind) { return ((NF.data && NF.data.services) || []).find(s => s.kind === kind) || { kind, name: kind, picture: false }; }
 function nfTitle(ch) { return ch.name || nfService(ch.kind).name; }
 
-function nfAgo(sec) {
+// Whole sentences, so each language can put the time where it belongs.
+function nfAgo(ok, sec, error) {
     const d = Math.max(0, Math.round(Date.now() / 1000 - sec));
-    if (d < 60) return 'just now';
-    if (d < 3600) return Math.floor(d / 60) + ' min ago';
-    if (d < 86400) return Math.floor(d / 3600) + ' h ago';
-    return Math.floor(d / 86400) + ' d ago';
+    const [n, unit] = d < 60 ? [0, ''] : d < 3600 ? [Math.floor(d / 60), 'min'] : d < 86400 ? [Math.floor(d / 3600), 'h'] : [Math.floor(d / 86400), 'd'];
+    if (ok) return unit === '' ? 'Sent just now' : fill(unit === 'min' ? 'Sent {0} min ago' : unit === 'h' ? 'Sent {0} h ago' : 'Sent {0} d ago', n);
+    if (unit === '') return fill('Failed just now: {0}', error);
+    return fill(unit === 'min' ? 'Failed {0} min ago: {1}' : unit === 'h' ? 'Failed {0} h ago: {1}' : 'Failed {0} d ago: {1}', n, error);
 }
 
 function nfStyle() {
@@ -121,10 +122,6 @@ function nfStyle() {
 #settings-notifications .nf-result { min-height: 1.25rem; font-size: .8125rem; }
 #settings-notifications .nf-quiet { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }
 #settings-notifications .nf-quiet input[type=time] { width: 8.5rem; min-height: 44px; font-variant-numeric: tabular-nums; }
-#nfUndoWrap { position: fixed; left: 0; right: 0; bottom: 4.5rem; display: flex; flex-direction: column; align-items: center; gap: .5rem; z-index: 60; pointer-events: none; padding: 0 1rem; }
-#nfUndoWrap .nf-undo { pointer-events: auto; display: flex; align-items: center; gap: .75rem; max-width: 100%; padding: .375rem .375rem .375rem 1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-size: .875rem; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
-#nfUndoWrap .nf-undo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#nfUndoWrap .nf-undo button { min-height: 44px; padding: 0 1rem; border: 0; border-radius: 8px; background: transparent; color: var(--accent); font-weight: 500; cursor: pointer; }
 `;
     document.head.appendChild(st);
 }
@@ -177,7 +174,6 @@ function nfMount(sec) {
     sec.innerHTML = nfSkeleton();
     sec.addEventListener('click', nfClick);
     sec.addEventListener('change', nfChange);
-    window.addEventListener('pagehide', nfFlushDelete);
     nfLoad();
 }
 
@@ -194,8 +190,8 @@ function nfLastHtml(ch) {
     const l = ch.last;
     if (!l) return '<span class="nf-dot"></span><span>Nothing sent yet</span>';
     const when = new Date(l.time * 1000).toLocaleString();
-    if (l.ok) return '<span class="nf-dot ok"></span><span title="' + escHtml(when) + '">Sent ' + escHtml(nfAgo(l.time)) + '</span>';
-    return '<span class="nf-dot bad"></span><span title="' + escHtml(l.error || '') + '">Failed ' + escHtml(nfAgo(l.time)) + ': ' + escHtml(l.error || 'unknown error') + '</span>';
+    if (l.ok) return '<span class="nf-dot ok"></span><span title="' + escHtml(when) + '">' + escHtml(nfAgo(true, l.time)) + '</span>';
+    return '<span class="nf-dot bad"></span><span title="' + escHtml(l.error || '') + '">' + escHtml(nfAgo(false, l.time, l.error || 'unknown error')) + '</span>';
 }
 
 function nfRowHtml(ch) {
@@ -215,7 +211,7 @@ function nfRender() {
         + '<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Get a message when a print finishes or goes wrong, without any app. ' + tip(escHtml(NF_PRIVACY), 'About privacy') + '</p>';
     h += '<div class="mt-5" id="nfList">';
     if (!shown.length) {
-        h += '<div class="nf-empty">Pick a service below and the Bridge will message you there when a print finishes, fails or needs you.</div>';
+        h += '<div class="nf-empty">No channels yet. Add one below.</div>';
     }
     for (const ch of shown) {
         h += '<div class="nf-card' + (NF.open === ch._k ? ' is-open' : '') + '" data-k="' + ch._k + '"><div class="nf-row">' + nfRowHtml(ch) + '</div>'
@@ -226,7 +222,7 @@ function nfRender() {
         + d.services.map(s => '<button type="button" class="btn-outline btn-lg" data-act="add" data-kind="' + escHtml(s.kind) + '"><i class="fas fa-plus" aria-hidden="true"></i> ' + escHtml(s.name) + '</button>').join('')
         + '</div></div>';
     h += '<div class="mt-8 border-t border-border pt-5"><div class="label-row"><span class="field-label" id="nfQuietLabel">Quiet hours</span>'
-        + tip('Between these times only failed prints and printer alarms are sent. Everything else is held back, not delayed. Uses this machine\'s clock.', 'About quiet hours') + '</div>'
+        + tip('Between these times only failed prints and printer alarms are sent. Other messages are dropped. Uses this machine\'s clock.', 'About quiet hours') + '</div>'
         + '<div class="nf-quiet" role="group" aria-labelledby="nfQuietLabel">'
         + '<input id="nfQs" type="time" class="field" aria-label="Quiet hours start" value="' + escHtml(d.quiet_start || '') + '">'
         + '<span class="text-sm text-text-2">to</span>'
@@ -246,7 +242,7 @@ function nfFieldHtml(ch, f, key) {
     const v = nfGet(ch, f.k);
     const isSet = f.secret ? !!nfGet(ch, f.secret) : false;
     let h = '<div' + (f.half ? '' : ' class="nf-full"') + '><div class="label-row"><label for="' + id + '" class="field-label">' + escHtml(f.label) + '</label>'
-        + (f.tip ? tip(escHtml(f.tip), 'Where to find: ' + f.label) : '') + '</div>';
+        + (f.tip ? tip(escHtml(f.tip), fill('Where to find: {0}', i18n(f.label))) : '') + '</div>';
     if (f.select) {
         h += '<div class="select-wrap"><select id="' + id + '" class="field" data-f="' + f.k + '">'
             + f.select.map(o => '<option value="' + o[0] + '"' + ((v || 'starttls') === o[0] ? ' selected' : '') + '>' + escHtml(o[1]) + '</option>').join('')
@@ -283,8 +279,7 @@ function nfEditorHtml(ch) {
     const ps = (typeof configuredPrinters !== 'undefined' && configuredPrinters) || [];
     const all = !(ch.printers && ch.printers.length);
     if (ps.length > 1 || !all) {
-        h += '<div class="mt-4"><div class="flex items-center justify-between gap-4"><div class="min-w-0"><p class="text-sm font-medium" id="nf-' + key + '-allL">All printers</p>'
-            + '<p class="text-xs text-text-2 mt-0.5">Turn off to pick which printers this channel hears about.</p></div>'
+        h += '<div class="mt-4"><div class="flex items-center justify-between gap-4"><div class="min-w-0"><p class="text-sm font-medium flex items-center gap-1" id="nf-' + key + '-allL">All printers' + tip('Turn off to pick which printers this channel hears about.', 'About all printers') + '</p></div>'
             + '<button type="button" id="nf-' + key + '-all" class="switch shrink-0" role="switch" data-act="all-printers" aria-checked="' + (all ? 'true' : 'false') + '" aria-labelledby="nf-' + key + '-allL"><span class="switch-thumb"></span></button></div>'
             + '<div id="nf-' + key + '-plist" class="nf-checks mt-1' + (all ? ' hidden' : '') + '">'
             + ps.map(p => '<label class="nf-check"><input type="checkbox" data-pr="' + escHtml(p.id) + '"' + ((ch.printers || []).includes(p.id) ? ' checked' : '') + '> ' + escHtml(p.name) + '</label>').join('')
@@ -293,7 +288,7 @@ function nfEditorHtml(ch) {
 
     if (svc.picture) {
         h += '<div class="mt-4 flex items-center justify-between gap-4"><div class="min-w-0"><p class="text-sm font-medium" id="nf-' + key + '-picL">Picture</p>'
-            + '<p class="text-xs text-text-2 mt-0.5 flex items-center gap-1">Attach a camera photo to each message. ' + tip('The photo is sent to ' + escHtml(svc.name) + ' along with the message. Printers without a camera send text only.', 'About the picture') + '</p></div>'
+            + tip('<span class="block">Attach a camera photo to each message.</span><span class="block mt-1.5">' + fill('The photo is sent to {0} along with the message. Printers without a camera send text only.', escHtml(svc.name)) + '</span>', 'About the picture') + '</div>'
             + '<button type="button" id="nf-' + key + '-pic" class="switch shrink-0" role="switch" data-act="picture" aria-checked="' + (ch.snapshot ? 'true' : 'false') + '" aria-labelledby="nf-' + key + '-picL"><span class="switch-thumb"></span></button></div>';
     }
 
@@ -400,13 +395,21 @@ function nfClick(ev) {
 
 function nfChange(ev) {
     if (ev.target.id === 'nfQs' || ev.target.id === 'nfQe') nfSaveQuiet();
+    if (ev.target.dataset && ev.target.dataset.f === 'smtp.security') {
+        // The server picks 465 for TLS and 25 for None only when the port is 0,
+        // so a port left at the previous security's default would be ignored.
+        const card = ev.target.closest('.nf-card');
+        const port = card && card.querySelector('[data-f="smtp.port"]');
+        if (port && (port.value === '' || port.value === '587' || port.value === '465' || port.value === '25'))
+            port.value = { starttls: '587', tls: '465', none: '25' }[ev.target.value] || '';
+    }
 }
 
 function nfAdd(kind) {
     // One editor at a time: an unsaved draft is dropped when another is started.
     NF.chs = NF.chs.filter(c => !c._draft);
     const svc = nfService(kind);
-    const ch = { _k: 'k' + (++NF.n), _draft: true, kind, enabled: true, events: NF.data.events.filter(e => e.default).map(e => e.kind), printers: [], snapshot: !!svc.picture, smtp: kind === 'email' ? { security: 'starttls', port: 587 } : undefined };
+    const ch = { _k: 'k' + (++NF.n), _draft: true, kind, enabled: true, events: NF.data.events.filter(e => e.default).map(e => e.kind), printers: [], snapshot: !!svc.picture, smtp: kind === 'email' ? { security: 'starttls' } : undefined };
     NF.chs.push(ch);
     NF.open = ch._k;
     NF.focusOnRender = true;
@@ -457,6 +460,12 @@ async function nfSave(card, ch, btn) {
     if (!ch || NF.busy) return;
     const req = nfRead(card, ch);
     const out = card.querySelector('[data-result]');
+    const all = card.querySelector('[data-act="all-printers"]');
+    if (all && all.getAttribute('aria-checked') !== 'true' && !req.printers.length) {
+        out.className = 'nf-result mt-4 text-danger';
+        out.textContent = 'Pick at least one printer, or choose all printers.';
+        return;
+    }
     NF.busy = true;
     btn.disabled = true;
     out.className = 'nf-result mt-4 text-text-2';
@@ -487,7 +496,7 @@ async function nfTest(card, ch, btn) {
         const r = await apiFetch('/api/notifications/test', { method: 'POST', body: JSON.stringify({ channel: req }) });
         if (r.ok) {
             out.className = 'nf-result mt-4 text-text';
-            out.textContent = 'Test sent. Check ' + nfService(ch.kind).name + '.';
+            out.textContent = fill('Test sent. Check {0}.', nfService(ch.kind).name);
         } else {
             out.className = 'nf-result mt-4 text-danger';
             out.textContent = r.error || 'The test failed.';
@@ -501,18 +510,6 @@ async function nfTest(card, ch, btn) {
 
 // ---- delete with undo ----
 
-function nfUndoBar(text, onUndo) {
-    let wrap = document.getElementById('nfUndoWrap');
-    if (!wrap) { wrap = document.createElement('div'); wrap.id = 'nfUndoWrap'; document.body.appendChild(wrap); }
-    const bar = document.createElement('div');
-    bar.className = 'nf-undo';
-    bar.setAttribute('role', 'status');
-    bar.innerHTML = '<span data-no-i18n>' + escHtml(text) + '</span><button type="button">Undo</button>';
-    bar.querySelector('button').addEventListener('click', onUndo);
-    wrap.appendChild(bar);
-    return bar;
-}
-
 function nfDelete(ch) {
     if (!ch) return;
     if (ch._draft) return nfClose(ch);
@@ -520,43 +517,34 @@ function nfDelete(ch) {
     NF.open = null;
     nfRender();
     const id = ch.id;
-    const bar = nfUndoBar('Deleted ' + nfTitle(ch) + '.', () => {
-        const p = NF.pending.get(id);
-        if (!p) return;
-        clearTimeout(p.timer);
-        p.bar.remove();
-        NF.pending.delete(id);
-        NF.chs.forEach(c => { if (c.id === id) c._deleted = false; });
-        nfRender();
-    });
-    const timer = setTimeout(async () => {
-        bar.remove();
-        // Waits its turn behind a save in progress.
-        while (NF.busy) await new Promise(r => setTimeout(r, 100));
-        NF.busy = true;
-        try {
-            const keep = NF.chs.filter(c => c.id !== id && !c._draft).map(nfReq);
-            await nfPost(keep, keep.length ? {} : { confirm_clear_channels: true });
-            NF.pending.delete(id);
-            NF.chs = NF.chs.filter(c => c.id !== id); // the card is already hidden
-        } catch (e) {
+    const bar = undoBar('Deleted', nfTitle(ch), {
+        ms: 6000,
+        onUndo() {
+            if (!NF.pending.has(id)) return;
             NF.pending.delete(id);
             NF.chs.forEach(c => { if (c.id === id) c._deleted = false; });
             nfRender();
-            toast('Could not delete ' + nfTitle(ch) + ': ' + e.message, 'error');
-        } finally { NF.busy = false; }
-    }, 6000);
-    NF.pending.set(id, { timer, bar });
-}
-
-// Leaving the page inside the undo window: the delete still happens.
-function nfFlushDelete() {
-    if (!NF.pending.size) return;
-    const keep = NF.chs.filter(c => !c._draft && !NF.pending.has(c.id)).map(nfReq);
-    const body = { channels: keep };
-    if (!keep.length) body.confirm_clear_channels = true;
-    fetch('/api/notifications', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    NF.pending.clear();
+        },
+        onCommit() {
+            // Waits its turn behind a save in progress.
+            (async () => {
+                while (NF.busy) await new Promise(r => setTimeout(r, 100));
+                NF.busy = true;
+                try {
+                    const keep = NF.chs.filter(c => c.id !== id && !c._draft).map(nfReq);
+                    await nfPost(keep, keep.length ? {} : { confirm_clear_channels: true });
+                    NF.pending.delete(id);
+                    NF.chs = NF.chs.filter(c => c.id !== id); // the card is already hidden
+                } catch (e) {
+                    NF.pending.delete(id);
+                    NF.chs.forEach(c => { if (c.id === id) c._deleted = false; });
+                    nfRender();
+                    toast('Could not delete ' + nfTitle(ch) + ': ' + e.message, 'error');
+                } finally { NF.busy = false; }
+            })();
+        },
+    });
+    NF.pending.set(id, { bar });
 }
 
 // ---- quiet hours ----
@@ -569,7 +557,7 @@ async function nfSaveQuiet() {
         const v = await apiFetch('/api/notifications', { method: 'POST', body: JSON.stringify({ quiet_start: s, quiet_end: e }) });
         NF.data.quiet_start = v.quiet_start; NF.data.quiet_end = v.quiet_end;
         msg.className = 'text-xs text-text-2';
-        msg.textContent = s ? 'Saved. Only failures and alarms get through from ' + s + ' to ' + e + '.' : 'Saved. No quiet hours.';
+        msg.textContent = s ? fill('Saved. Only failures and alarms get through from {0} to {1}.', s, e) : 'Saved. No quiet hours.';
     } catch (err) {
         msg.className = 'text-xs text-danger';
         msg.textContent = friendlyError(err.message);

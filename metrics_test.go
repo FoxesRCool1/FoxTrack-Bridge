@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -195,6 +196,21 @@ func TestPrintStatsByPrinter(t *testing.T) {
 	printStatsByPrinter(printers, now.Add(31*time.Second))
 	if calls != 2 {
 		t.Errorf("history read %d times after 30 s, want 2", calls)
+	}
+}
+
+func TestPrintStatsByPrinter_KeepsTotalsWhenHistoryFails(t *testing.T) {
+	printers := []config.Printer{{ID: "a1", Name: "Fox"}}
+	setMetricsConfig(t, true, printers)
+	loadHistory = func() ([]history.Record, error) {
+		return []history.Record{{PrinterName: "Fox", Result: "finished", Duration: 50}}, nil
+	}
+	now := time.Now()
+	printStatsByPrinter(printers, now)
+	loadHistory = func() ([]history.Record, error) { return nil, errors.New("unreadable") }
+	got := printStatsByPrinter(printers, now.Add(31*time.Second))
+	if got["Fox"].Seconds != 50 {
+		t.Errorf("stats after a failed read = %+v, want the earlier totals", got)
 	}
 }
 

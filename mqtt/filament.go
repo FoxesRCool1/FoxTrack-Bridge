@@ -209,7 +209,7 @@ type filamentPreset struct {
 
 // filamentPresets: the materials set_filament takes. Ids from ha-bambulab
 // pybambu/filaments.json, ranges from Bambu Studio's generic profiles
-// (fdm_filament_*.json), both read 2026-10-07. ponytail: the PLA-CF, PETG-CF
+// (fdm_filament_*.json), both read 2026-10-07. The PLA-CF, PETG-CF
 // and PVA ranges are estimates; the printer only uses them as a hint.
 var filamentPresets = map[string]filamentPreset{
 	"PLA":     {"GFL99", 190, 240},

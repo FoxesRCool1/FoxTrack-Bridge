@@ -60,6 +60,14 @@ func TestPricePerKg(t *testing.T) {
 	if got, ok := PricePerKg(c, "ABS"); !ok || got != 18 {
 		t.Errorf("PricePerKg(c, \"ABS\") = %v, %v; want 18, true", got, ok)
 	}
+	if got, ok := PricePerKg(c, "PLA-CF"); !ok || got != 20 {
+		t.Errorf("PricePerKg(c, \"PLA-CF\") = %v, %v; want 20, true (the PLA price)", got, ok)
+	}
+	c.MaterialPerKg["PLA-CF"] = 40
+	if got, ok := PricePerKg(c, "pla-cf"); !ok || got != 40 {
+		t.Errorf("PricePerKg(c, \"pla-cf\") = %v, %v; want 40, true (an exact name wins)", got, ok)
+	}
+	delete(c.MaterialPerKg, "PLA-CF")
 	if got, ok := PricePerKg(c, ""); !ok || got != 18 {
 		t.Errorf("PricePerKg(c, \"\") = %v, %v; want 18, true", got, ok)
 	}

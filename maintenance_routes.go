@@ -44,6 +44,7 @@ func dueMaintenance() []events.Event {
 	}
 	printers, tasks := maintenanceSnapshot()
 	if len(tasks) == 0 {
+		maintAnnouncer.NewlyDue(nil, nil) // forgets what was announced for deleted tasks
 		return nil
 	}
 	recs, err := history.Load()
@@ -52,7 +53,7 @@ func dueMaintenance() []events.Event {
 		return nil
 	}
 	var out []events.Event
-	for _, v := range maintAnnouncer.NewlyDue(maintenance.Evaluate(tasks, printers, recs)) {
+	for _, v := range maintAnnouncer.NewlyDue(maintenance.Evaluate(tasks, printers, recs), tasks) {
 		out = append(out, events.Event{Kind: events.MaintenanceDue, PrinterID: v.PrinterID, Printer: v.PrinterName, Message: v.Message(), Progress: -1})
 	}
 	return out

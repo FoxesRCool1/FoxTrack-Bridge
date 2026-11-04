@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -122,11 +123,13 @@ func maskCode(s, code string) string {
 	return s
 }
 
-// rtspArgs is ffmpeg's command line: RTSP over TCP in, JPEG frames out on
-// stdout. A snapshot stops after one frame; a stream is limited to 10 per
-// second.
-func rtspArgs(streamURL string, oneShot bool) []string {
-	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-rtsp_transport", "tcp", "-i", streamURL, "-an"}
+// rtspArgs is ffmpeg's command line: the stream read through an ffconcat
+// script (see rtspInput), JPEG frames out on stdout. A snapshot stops after
+// one frame; a stream is limited to 10 per second.
+func rtspArgs(script string, oneShot bool) []string {
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-f", "concat", "-safe", "0", "-protocol_whitelist", "file,crypto,data,rtsp,rtsps,tcp,tls,udp,rtp,srtp",
+		"-i", script, "-an"}
 	if oneShot {
 		args = append(args, "-frames:v", "1")
 	}
@@ -135,6 +138,42 @@ func rtspArgs(streamURL string, oneShot bool) []string {
 		args = append(args, "-r", "10")
 	}
 	return append(args, "-")
+}
+
+// rtspInput keeps the stream address, which holds the access code, off
+// ffmpeg's command line, where other users could read it in ps. It writes an
+// ffconcat script (the address, RTSP over TCP) to a private folder and returns
+// ffmpeg's arguments for it. The caller runs ffmpeg and then calls remove.
+// removeStaleRTSPDirs deletes input folders left by a Bridge that was killed
+// while ffmpeg ran. They hold the access code, so they must not pile up.
+func removeStaleRTSPDirs() {
+	dirs, _ := filepath.Glob(filepath.Join(os.TempDir(), "foxtrack-rtsp-*"))
+	for _, d := range dirs {
+		if fi, err := os.Stat(d); err == nil && fi.IsDir() && time.Since(fi.ModTime()) > 24*time.Hour {
+			os.RemoveAll(d)
+		}
+	}
+}
+
+func rtspInput(streamURL string, oneShot bool) (args []string, remove func(), err error) {
+	if strings.ContainsAny(streamURL, "\r\n") {
+		return nil, nil, errors.New("the stream address has a line break")
+	}
+	removeStaleRTSPDirs()
+	dir, err := os.MkdirTemp("", "foxtrack-rtsp-") // mode 0700
+	if err != nil {
+		return nil, nil, fmt.Errorf("making a folder for ffmpeg's input: %w", err)
+	}
+	remove = func() { os.RemoveAll(dir) }
+	// Inside single quotes everything is literal: close the quote, escape one, reopen.
+	quoted := strings.ReplaceAll(streamURL, "'", `'\''`)
+	script := "ffconcat version 1.0\nfile '" + quoted + "'\noption rtsp_transport tcp\n"
+	path := filepath.Join(dir, "input.ffconcat")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		remove()
+		return nil, nil, fmt.Errorf("writing ffmpeg's input: %w", err)
+	}
+	return rtspArgs(path, oneShot), remove, nil
 }
 
 // splitJPEG reads concatenated JPEGs from r and calls emit with each one,
@@ -386,7 +425,12 @@ func (h *rtspHub) run(ctx context.Context) {
 func (h *rtspHub) runOnce(ctx context.Context) (got bool, why string) {
 	pctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(pctx, h.bin, rtspArgs(h.url, false)...)
+	args, remove, err := rtspInput(h.url, false)
+	if err != nil {
+		return false, err.Error()
+	}
+	defer remove()
+	cmd := exec.CommandContext(pctx, h.bin, args...)
 	var stderr tailBuffer
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = 2 * time.Second
@@ -530,7 +574,12 @@ func rtspSnapshot(ctx context.Context, p config.Printer, ip string) ([]byte, err
 
 	ctx, cancel := context.WithTimeout(ctx, rtspSnapshotTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, rtspArgs(rtspURL(ip, p.LANCode).String(), true)...)
+	args, remove, err := rtspInput(rtspURL(ip, p.LANCode).String(), true)
+	if err != nil {
+		return nil, fmt.Errorf("camera snapshot failed: %w", err)
+	}
+	defer remove()
+	cmd := exec.CommandContext(ctx, bin, args...)
 	var out bytes.Buffer
 	var stderr tailBuffer
 	cmd.Stdout, cmd.Stderr = &out, &stderr

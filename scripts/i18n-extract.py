@@ -28,13 +28,16 @@ class P(html.parser.HTMLParser):
             add(d)
 
 
+PH = re.compile(r'\{\d\}')  # "{0}": where a name or number goes in a pattern key
+
+
 def add(s):
     s = re.sub(r'\s+', ' ', html.unescape(s)).strip()
     if len(s) < 2 or len(s) > 400 or not re.search(r'[A-Za-z]{2}', s):
         return
     if re.fullmatch(r'[\w.\-/:#?=&%{}$]+', s) and ' ' not in s and not re.fullmatch(r'[A-Z][a-z]+', s):
         return  # identifiers, URLs, class names
-    if re.search(r'[{};]|=>|\bfunction\b|\(\)|\.\w+\(', s):
+    if re.search(r'[{}]|=>|\bfunction\b|\(\)|\.\w+\(', PH.sub('', s)):
         return  # code
     found.add(s)
 
@@ -50,11 +53,29 @@ def html_text(s):
 
 CLASSY = re.compile(r'^[a-z0-9:\[\]./%#\s-]+$')  # tailwind class lists, ids
 
+HTML_SENTENCE = re.compile(r'<span data-i18n-html>(.*?)</span>', re.S)
+
+
+def html_sentences(src):
+    """Pull data-i18n-html sentences out as one key each, and drop them from src."""
+    def one(m):
+        n = [0]
+        def slot(_):
+            n[0] += 1
+            return '{%d}' % (n[0] - 1)
+        found.add(re.sub(r'\s+', ' ', html.unescape(re.sub(r'<(\w+)[^>]*>.*?</\1>', slot, m.group(1), flags=re.S))).strip())
+        return ' '
+    return HTML_SENTENCE.sub(one, src)
+
+
 def js_strings(src):
+    src = re.sub(r'(?m)^\s*//.*$', '', src)  # whole-line comments
     for m in re.finditer(r"'((?:\\.|[^'\\\n])*)'|\"((?:\\.|[^\"\\\n])*)\"|`((?:\\.|[^`\\])*)`", src):
         s = m.group(1) if m.group(1) is not None else m.group(2) if m.group(2) is not None else m.group(3)
         if s is None:
             continue
+        for inner in re.findall(r'\$\{([^}]*)\}', s):
+            js_strings(inner)  # a tip('...') call inside a template literal
         s = s.replace("\\'", "'").replace('\\"', '"').replace('\\n', ' ')
         if '<' in s and '>' in s:
             # Template pieces like '<p class="x">Text</p>'.
@@ -86,10 +107,17 @@ for s in scripts:
     js_strings(s)
 js_strings(open(os.path.join(ROOT, 'web/login.html')).read().split('<script>')[-1])
 for f in sorted(glob.glob(os.path.join(ROOT, 'web/features/*.js'))):
-    js_strings(open(f).read())
+    src = html_sentences(open(f).read())
+    js_strings(src)
+    # Template literals nested inside ${...} defeat the string regex above, so
+    # also read the markup text between tags straight from the source.
+    for m in re.finditer(r'>([^<>`${}\n]*[A-Za-z][^<>`${}\n]*)(?=<|\$\{)', src):
+        t = m.group(1).replace("\\'", "'")
+        if not re.search(r"' \+|\+ '|\? '", t):
+            add(t)
 
 # Drop markup and code fragments that slipped through.
 JUNK = re.compile(r'^#|:not\(|[<>=\[\]{}]|^["\'.,:;)\-]|^\w+_\w+$|@example|ftb_|ftk_|https?:')
-out = sorted(x for x in found if not JUNK.search(x))
+out = sorted(x for x in found if not JUNK.search(PH.sub('X', x)))
 json.dump(out, open(OUT, 'w'), indent=0, ensure_ascii=False)
 print(len(out), 'strings')

@@ -483,7 +483,7 @@ func handleNotificationTest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	err := notifySend(ctx, ch, msg)
-	if stored != nil {
+	if req.Channel == nil && stored != nil { // an edited, unsaved form says nothing about the saved channel
 		recordNotify(stored.ID, err)
 	}
 	if err != nil {

@@ -167,7 +167,7 @@ func (t *printJobTracker) useFile(path string, delta int) {
 // fileLock returns the mutex for one cache path. Two jobs for the same file
 // take turns: the second finds the first one's verified copy instead of
 // downloading and renaming over it. The map holds one small mutex per distinct
-// file seen since start-up (ponytail: never pruned, a few bytes each).
+// file seen since start-up (never pruned, a few bytes each).
 func (t *printJobTracker) fileLock(path string) *sync.Mutex {
 	t.locksMu.Lock()
 	defer t.locksMu.Unlock()

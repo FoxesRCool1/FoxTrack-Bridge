@@ -25,15 +25,13 @@ function haMount(sec) {
     <button id="haEnabled" type="button" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Send printer state to an MQTT broker"><span class="switch-thumb"></span></button>
 </div>
 <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Show your printers in Home Assistant, or react to them from any MQTT client.
-    ${tip('<span class="block">In Home Assistant, open Settings, then Devices and services, then MQTT. Each printer is a device there, with sensors, pause, resume and stop buttons, and a light.</span><span class="block mt-1.5">Home Assistant has to use the same broker. Automations can also listen on the printer\'s event topic for prints that start, finish or fail.</span>', 'How to find the printers in Home Assistant')}
+    ${tip('<span class="block">In Home Assistant, open Settings, then Devices and services, then MQTT. Each printer is a device there, with sensors, pause, resume and stop buttons, and a light.</span><span class="block mt-1.5">Home Assistant has to use the same broker. Automations can also listen on the printer\'s event topic for prints that start, finish or fail.</span><span class="block mt-1.5">Printer state goes to the broker you name here and nowhere else.</span>', 'How to find the printers in Home Assistant')}
 </p>
-<p class="mt-1.5 text-xs text-text-2">Printer state goes to the broker you name here and nowhere else.</p>
 <p id="haConn" class="mt-4 text-sm" role="status" aria-live="polite"></p>
 
 <div class="mt-5">
-    <label for="haBroker" class="field-label">Broker address</label>
+    <label for="haBroker" class="field-label flex items-center gap-1">Broker address ${tip('Use tcp:// for a plain connection or ssl:// for an encrypted one.', 'About the broker address')}</label>
     <input id="haBroker" type="text" class="field field-mono" autocomplete="off" spellcheck="false" placeholder="tcp://192.168.1.10:1883">
-    <p class="text-xs text-text-2 mt-1.5">Use tcp:// for a plain connection or ssl:// for an encrypted one.</p>
 </div>
 <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
     <div>
@@ -41,34 +39,29 @@ function haMount(sec) {
         <input id="haUser" type="text" class="field" autocomplete="off" placeholder="Optional">
     </div>
     <div>
-        <label for="haPass" class="field-label">Password</label>
+        <label for="haPass" class="field-label flex items-center gap-1">Password ${tip('<span id="haPassHint">Kept only on this machine.</span>', 'About the password')}</label>
         <input id="haPass" type="password" class="field" autocomplete="new-password" placeholder="Optional">
-        <p id="haPassHint" class="text-xs text-text-2 mt-1.5">Kept only on this machine.</p>
     </div>
 </div>
 <div id="haSkipRow" class="hidden mt-4 flex items-start justify-between gap-4">
     <div class="min-w-0">
-        <p class="text-sm font-medium">Skip certificate check</p>
-        <p class="text-xs text-text-2 mt-0.5">For a broker with a self-signed certificate. Anyone on your network could then pose as the broker.</p>
+        <p class="text-sm font-medium flex items-center gap-1">Skip certificate check ${tip('For a broker with a self-signed certificate. Anyone on your network could then pose as the broker.', 'About skipping the certificate check')}</p>
     </div>
     <button id="haSkip" type="button" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Skip the broker certificate check"><span class="switch-thumb"></span></button>
 </div>
 <div class="mt-3">
-    <label for="haPrefix" class="field-label">Topic prefix</label>
+    <label for="haPrefix" class="field-label flex items-center gap-1">Topic prefix ${tip('State goes to prefix/printer id/state, events to prefix/printer id/event.', 'About the topic prefix')}</label>
     <input id="haPrefix" type="text" class="field field-mono" autocomplete="off" spellcheck="false" placeholder="foxtrack_bridge">
-    <p class="text-xs text-text-2 mt-1.5">State goes to prefix/printer id/state, events to prefix/printer id/event.</p>
 </div>
 <div class="mt-5 flex items-start justify-between gap-4">
     <div class="min-w-0">
-        <p class="text-sm font-medium">Home Assistant discovery</p>
-        <p class="text-xs text-text-2 mt-0.5">Adds each printer to Home Assistant by itself, and removes it when you delete the printer.</p>
+        <p class="text-sm font-medium flex items-center gap-1">Home Assistant discovery ${tip('Adds each printer to Home Assistant by itself, and removes it when you delete the printer.', 'About Home Assistant discovery')}</p>
     </div>
     <button id="haDiscovery" type="button" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Home Assistant discovery"><span class="switch-thumb"></span></button>
 </div>
 <div id="haDiscRow" class="mt-3">
-    <label for="haDiscPrefix" class="field-label">Discovery prefix</label>
+    <label for="haDiscPrefix" class="field-label flex items-center gap-1">Discovery prefix ${tip('Leave this as it is unless you changed it in Home Assistant.', 'About the discovery prefix')}</label>
     <input id="haDiscPrefix" type="text" class="field field-mono" autocomplete="off" spellcheck="false" placeholder="homeassistant">
-    <p class="text-xs text-text-2 mt-1.5">Leave this as it is unless you changed it in Home Assistant.</p>
 </div>
 
 <p id="haError" class="hidden text-xs text-danger mt-4"></p>

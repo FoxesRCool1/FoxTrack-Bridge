@@ -212,9 +212,24 @@ func hashPassword(pw string) (string, error) {
 // slow, and a flood of sign-ins must not take every CPU from the printers.
 var hashSlots = make(chan struct{}, 2)
 
-func checkPassword(pw, stored string) bool {
-	hashSlots <- struct{}{}
+// hashWait is how long a sign-in waits for a slot.
+var hashWait = 5 * time.Second
+
+// errSignInBusy: every slot stayed taken, so the check never ran. It is not a
+// wrong password and must not count as one.
+var errSignInBusy = errors.New("The Bridge is busy checking other sign-ins. Try again in a few seconds.")
+
+func checkPassword(pw, stored string) (bool, error) {
+	select {
+	case hashSlots <- struct{}{}:
+	case <-time.After(hashWait):
+		return false, errSignInBusy
+	}
 	defer func() { <-hashSlots }()
+	return passwordMatches(pw, stored), nil
+}
+
+func passwordMatches(pw, stored string) bool {
 	parts := strings.Split(stored, "$")
 	if len(parts) != 4 || parts[0] != "pbkdf2-sha256" {
 		return false
@@ -362,7 +377,12 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)), http.StatusTooManyRequests)
 		return
 	}
-	ok := checkPassword(req.Password, sec.PasswordHash)
+	ok, err := checkPassword(req.Password, sec.PasswordHash)
+	if err != nil {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if ok {
 		noteLogin(ip, true, now)
 	}
@@ -476,7 +496,12 @@ func handleSecurity(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)), http.StatusTooManyRequests)
 				return
 			}
-			if !checkPassword(req.Current, prevHash) {
+			ok, err := checkPassword(req.Current, prevHash)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			if !ok {
 				http.Error(w, errWrongCurrent.Error(), http.StatusForbidden)
 				return
 			}

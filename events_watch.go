@@ -59,6 +59,11 @@ func watchOnce(now time.Time) {
 
 	watchMu.Lock()
 	defer watchMu.Unlock()
+	for k, t := range alarmSentAt {
+		if now.Sub(t) >= alarmQuietAgain {
+			delete(alarmSentAt, k)
+		}
+	}
 	seen := map[string]bool{}
 	for _, p := range printers {
 		seen[p.Name] = true

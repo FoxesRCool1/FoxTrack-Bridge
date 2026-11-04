@@ -87,10 +87,12 @@ func cleanPrefix(s, def, what string) (string, error) {
 	return s, nil
 }
 
-// ClientID is "foxtrack-bridge-" and a short hash of this machine's host name.
-func ClientID() string {
+// ClientID is "foxtrack-bridge-" and a short hash of this machine's host name
+// and the Bridge ID, so two Bridges on same-named hosts do not share one ID
+// (the broker would keep disconnecting the older of them).
+func ClientID(bridgeID string) string {
 	h, _ := os.Hostname()
-	sum := sha256.Sum256([]byte(h))
+	sum := sha256.Sum256([]byte(h + "/" + bridgeID))
 	return "foxtrack-bridge-" + hex.EncodeToString(sum[:3])
 }
 
@@ -110,7 +112,7 @@ func options(c config.MQTTExport, clientID string) *paho.ClientOptions {
 // plain sentence.
 func Test(c config.MQTTExport) error {
 	// A different client ID: the same one would knock the live connection off.
-	cl := paho.NewClient(options(c, ClientID()+"-test").SetAutoReconnect(false).SetConnectRetry(false))
+	cl := paho.NewClient(options(c, ClientID(c.BridgeID)+"-test").SetAutoReconnect(false).SetConnectRetry(false))
 	tok := cl.Connect()
 	if !tok.WaitTimeout(12 * time.Second) {
 		return errors.New("The broker did not answer in time. Check the address and the port.")

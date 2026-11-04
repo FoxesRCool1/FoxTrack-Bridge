@@ -144,6 +144,9 @@ func Validate(ch config.NotifyChannel) error {
 		if sm.Security != "" && sm.Security != "starttls" && sm.Security != "tls" && sm.Security != "none" {
 			return errors.New("Email security must be starttls, tls or none")
 		}
+		if err := checkSignIn(sm); err != nil {
+			return err
+		}
 		if _, err := parseFrom(sm); err != nil {
 			return err
 		}

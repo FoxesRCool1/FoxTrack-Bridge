@@ -90,17 +90,34 @@ func (r *Recorder) Delete(id string) error {
 	return os.Remove(base + ".json")
 }
 
+// hasVideo reports whether the video file of id is there.
+func (r *Recorder) hasVideo(id string) bool {
+	for _, ext := range []string{".mp4", ".gif"} {
+		if _, err := os.Stat(filepath.Join(r.dir, id+ext)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // Cleanup deletes the videos that ended more than keepDays ago (0 keeps them
-// all) and half-written files left by a crash. It returns how many videos it
-// deleted.
+// all), half-written files left by a crash, and details or posters whose video
+// is gone. It returns how many videos it deleted.
 func (r *Recorder) Cleanup(keepDays int) int {
 	now := r.now()
 	entries, _ := os.ReadDir(r.dir)
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".part") {
-			if fi, err := e.Info(); err == nil && now.Sub(fi.ModTime()) > partTTL {
-				os.Remove(filepath.Join(r.dir, e.Name()))
-			}
+		if e.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(e.Name())
+		stem := strings.TrimSuffix(e.Name(), ext)
+		leftover := ext == ".part" || ((ext == ".json" || ext == ".jpg") && ValidID(stem) && !r.hasVideo(stem))
+		if !leftover {
+			continue
+		}
+		if fi, err := e.Info(); err == nil && now.Sub(fi.ModTime()) > partTTL {
+			os.Remove(filepath.Join(r.dir, e.Name()))
 		}
 	}
 	if keepDays <= 0 {

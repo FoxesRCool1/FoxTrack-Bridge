@@ -1,7 +1,7 @@
 // Costs: what filament and electricity cost, and what the last days of
 // printing came to. Prices live on this machine (config.json); nothing is sent.
 const csDefaultMaterials = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU'];
-const cs = { root: null, loaded: false, currency: '', days: 30 };
+const cs = { root: null, loaded: false, currency: '', days: 30, summarySeq: 0 };
 
 const csStyle = document.createElement('style');
 csStyle.textContent = `
@@ -92,7 +92,7 @@ function csMount(section) {
 
 <div class="cs-spend">
   <div class="flex items-center justify-between gap-3">
-    <h3 class="font-heading text-lg font-medium leading-tight">Spending</h3>
+    <h3 class="font-heading text-lg font-medium leading-tight flex items-center gap-1">Spending ${tip('A print adds to the filament figure when the printer reports its weight or length, and to the energy figure when it has a smart plug with a meter. Anything else counts as 0.', 'About spending')}</h3>
     <div class="select-wrap cs-days">
       <label for="csDays" class="sr-only">Period</label>
       <select id="csDays" class="field">
@@ -105,7 +105,6 @@ function csMount(section) {
     </div>
   </div>
   <div id="csSummary" class="mt-2" aria-live="polite"></div>
-  <p class="mt-3 text-xs text-text-2">A print adds to the filament figure when the printer reports its weight or length, and to the energy figure when it has a smart plug with a meter. Anything else counts as 0.</p>
 </div>`;
 
     section.addEventListener('click', e => {
@@ -182,9 +181,12 @@ async function csSave() {
 
 async function csSummary() {
     const box = cs.root.querySelector('#csSummary');
+    // A stale answer from an older period must not paint over the newer one.
+    const seq = ++cs.summarySeq, days = cs.days;
     if (!box.children.length) box.innerHTML = '<div class="cs-skel"></div><div class="cs-skel"></div>';
     try {
-        const d = await apiFetch('/api/costs/summary?days=' + cs.days);
+        const d = await apiFetch('/api/costs/summary?days=' + days);
+        if (seq !== cs.summarySeq) return;
         cs.currency = d.currency || cs.currency;
         const stat = (v, l) => '<div><span class="cs-v">' + escHtml(v) + '</span><span class="cs-l">' + l + '</span></div>';
         const row = (name, t, first) => '<div class="cs-row"' + (first ? ' style="border-top:0"' : '') + '>'
@@ -198,6 +200,7 @@ async function csSummary() {
         box.innerHTML = d.printers.map((p, i) => row(p.printer, p, i === 0)).join('')
             + (d.printers.length > 1 ? row('All printers', d.overall, false) : '');
     } catch (e) {
+        if (seq !== cs.summarySeq) return;
         box.innerHTML = '<p class="text-sm text-danger">The spending could not be loaded: ' + escHtml(friendlyError(e.message)) + '</p>';
     }
 }

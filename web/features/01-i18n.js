@@ -1,5 +1,5 @@
 // Translations. The dashboard is written in English; this swaps visible text
-// (and placeholder, title and aria-label) for the chosen language as it is
+// (and placeholder, title, aria-label and alt) for the chosen language as it is
 // drawn, so no screen code has to know about languages. Dictionaries are
 // web/i18n/<lang>.json: { "English text": "translation" }, where "{0}",
 // "{1}"... in a key stand for any text (numbers, names) and are put back in
@@ -7,10 +7,10 @@
 (function () {
     const LANGS = { en: 'English', de: 'Deutsch', es: 'Español', fr: 'Français', it: 'Italiano', nl: 'Nederlands', pt: 'Português' };
     const KEY = 'foxtrack.bridge.lang';
-    const ATTRS = ['placeholder', 'title', 'aria-label'];
+    const ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
     // Nothing in these is translated, text or attributes. Input and textarea
     // values are never touched, but their placeholder, title and aria-label are.
-    const SKIP_ALL = 'script, style, code, pre, kbd, select option[value=""] ~ option, .field-mono, [data-no-i18n], #logOutput, #assistantMessages';
+    const SKIP_ALL = 'script, style, code, pre, kbd, select option[value=""] ~ option, [data-no-i18n], [data-i18n-html], #logOutput, #assistantMessages';
     const SKIP = SKIP_ALL + ', textarea, input';
 
     function stored() { try { return localStorage.getItem(KEY); } catch (_) { return null; } }
@@ -23,6 +23,7 @@
 
     let lang = pick();
     let exact = new Map();   // English -> translation
+    let all = new Map();     // every key, {n} ones too, for swapHtml
     let patterns = [];       // [RegExp, translation template]
     const done = new WeakMap(); // node -> the text we last wrote, so our own writes are not re-translated
 
@@ -31,16 +32,20 @@
 
     function load(dict) {
         exact = new Map();
+        all = new Map();
         patterns = [];
         for (const [en, tr] of Object.entries(dict || {})) {
             if (!tr) continue;
+            all.set(norm(en), tr);
             if (/\{\d\}/.test(en)) {
                 const re = new RegExp('^' + reEsc(en).replace(/\\\{(\d)\\\}/g, '(?<p$1>.+?)') + '$');
-                patterns.push([re, tr]);
+                patterns.push([re, tr, en.replace(/\{\d\}/g, '').length]);
             } else {
                 exact.set(norm(en), tr);
             }
         }
+        // The key with the most fixed text is the most specific, so it is tried first.
+        patterns.sort((a, b) => b[2] - a[2]);
     }
 
     function translate(text) {
@@ -80,8 +85,28 @@
         }
     }
 
+    // A sentence with an element inside (a <code> snippet): the element is
+    // {0} in the key and goes back in place, untranslated.
+    function swapHtml(el) {
+        if (done.get(el) === el.innerHTML) return;
+        const parts = [];
+        let key = '';
+        el.childNodes.forEach(n => {
+            if (n.nodeType === 3) key += n.nodeValue;
+            else if (n.nodeType === 1) { key += '{' + parts.length + '}'; parts.push(n.outerHTML); }
+        });
+        const tr = all.get(norm(key));
+        if (!tr) return;
+        el.innerHTML = tr.replace(/\{(\d)\}/g, (_, i) => parts[i] || '');
+        done.set(el, el.innerHTML);
+    }
+
     function walk(root) {
         if (lang === 'en' || !exact.size) return;
+        if (root.nodeType === 1) {
+            if (root.matches('[data-i18n-html]')) swapHtml(root);
+            root.querySelectorAll('[data-i18n-html]').forEach(swapHtml);
+        }
         if (root.nodeType === 3) { if (!root.parentElement || !root.parentElement.closest(SKIP)) swapText(root); return; }
         if (root.nodeType !== 1 || root.closest(SKIP_ALL)) return;
         swapAttrs(root);
@@ -127,6 +152,9 @@
     // The toast and dialog helpers write with textContent, which the observer
     // sees; nothing else to hook.
     window.bridgeLanguage = () => lang;
+    // For text that never reaches the page (notifications) or is joined from
+    // pieces. Before the dictionary has loaded nothing matches, so it returns s.
+    window.bridgeT = s => (lang === 'en' ? s : (translate(s) ?? s));
 
     // Language picker at the top of Settings, General.
     function addPicker() {
@@ -134,8 +162,7 @@
         if (!general || document.getElementById('langSelect')) return;
         const row = document.createElement('div');
         row.className = 'flex items-start justify-between gap-4';
-        row.innerHTML = '<div class="min-w-0"><p class="text-sm font-medium"><label for="langSelect">Language</label></p>'
-            + '<p class="text-xs text-text-2 mt-0.5">For this browser. Printer and file names stay as they are.</p></div>'
+        row.innerHTML = '<div class="min-w-0"><p class="text-sm font-medium flex items-center gap-1"><label for="langSelect">Language</label>' + tip('For this browser. Printer and file names stay as they are.', 'About the language') + '</p></div>'
             + '<div class="select-wrap shrink-0"><select id="langSelect" class="field" style="width:auto;min-width:9rem" data-no-i18n>'
             + Object.entries(LANGS).map(([k, v]) => '<option value="' + k + '">' + v + '</option>').join('')
             + '</select><i class="fas fa-chevron-down"></i></div>';

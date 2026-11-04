@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,13 +51,69 @@ func (r *Recorder) enqueue(dir string) {
 
 func (r *Recorder) worker() {
 	for dir := range r.queue {
-		if err := r.Build(dir); err != nil {
+		err := r.Build(dir)
+		if err != nil {
 			log.Printf("[timelapse] building a video from %s failed: %v", dir, err)
 		}
+		r.built(dir, err)
 		r.qmu.Lock()
 		delete(r.queued, dir)
 		r.qmu.Unlock()
 	}
+}
+
+// retryDelays is how long a failed build waits before each retry. After the
+// last one the folder is left to the daily Recover. A variable for the tests.
+var retryDelays = []time.Duration{10 * time.Minute, time.Hour, 6 * time.Hour}
+
+type retry struct {
+	tries int
+	timer *time.Timer
+}
+
+// retries holds the failed folders by path, in memory only: after a restart
+// Recover starts them again from the first retry. The Recorder struct has no
+// room for it, and a folder path belongs to one recorder.
+var retries = struct {
+	sync.Mutex
+	m map[string]*retry
+}{m: map[string]*retry{}}
+
+// built records how a build of dir ended. A failure is tried again after a
+// growing wait. enqueue skips a folder that is queued or being built, so a
+// retry never runs beside the build of the same folder.
+func (r *Recorder) built(dir string, err error) {
+	retries.Lock()
+	defer retries.Unlock()
+	t := retries.m[dir]
+	if err == nil || errors.Is(err, errNoFrames) { // made, or the folder is gone
+		if t != nil && t.timer != nil {
+			t.timer.Stop()
+		}
+		delete(retries.m, dir)
+		return
+	}
+	if t == nil {
+		t = &retry{}
+		retries.m[dir] = t
+	}
+	if t.timer != nil {
+		t.timer.Stop()
+		t.timer = nil
+	}
+	if t.tries >= len(retryDelays) {
+		return // the daily Recover will try
+	}
+	t.timer = time.AfterFunc(retryDelays[t.tries], func() {
+		if _, err := os.Stat(dir); err != nil { // removed meanwhile
+			retries.Lock()
+			delete(retries.m, dir)
+			retries.Unlock()
+			return
+		}
+		r.enqueue(dir)
+	})
+	t.tries++
 }
 
 // Build turns an ended print's pictures into a video, writes its details and

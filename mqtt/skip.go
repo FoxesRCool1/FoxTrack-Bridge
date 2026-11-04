@@ -56,6 +56,7 @@ type skipJob struct {
 	mu         sync.Mutex // guards the fields below
 	fetch      sync.Mutex // held while a file is downloaded
 	gcodeFile  string
+	doneFile   string // gcode_file of the print that last ended
 	idle       bool
 	reported   map[string]bool // ids the printer says are skipped
 	sent       map[string]bool // ids Bridge sent
@@ -112,6 +113,12 @@ func noteSkipFields(name string, payload []byte) {
 	defer j.mu.Unlock()
 	switch pr.GcodeState {
 	case "IDLE", "FINISH", "FAILED":
+		if !j.idle {
+			j.doneFile = j.gcodeFile
+			if j.doneFile == "" {
+				j.doneFile = pr.GcodeFile
+			}
+		}
 		j.idle = true
 		j.gcodeFile = ""
 		j.reported = map[string]bool{}
@@ -124,11 +131,14 @@ func noteSkipFields(name string, payload []byte) {
 			j.idle = false
 		}
 	}
-	if j.idle {
-		return // a finished print's leftovers must not reach the next print
-	}
-	if pr.GcodeFile != "" {
+	// Reports are partial: the next print's gcode_file can arrive before
+	// gcode_state leaves FINISH, so keep it even while idle, unless it is
+	// still the file of the print that just ended.
+	if pr.GcodeFile != "" && (!j.idle || pr.GcodeFile != j.doneFile) {
 		j.gcodeFile = pr.GcodeFile
+	}
+	if j.idle {
+		return // a finished print's s_obj must not reach the next print
 	}
 	if pr.SObj != nil {
 		rep := map[string]bool{}
@@ -198,24 +208,34 @@ func read3MFObjects(filePath string, wantPlate int) ([]SkipObject, error) {
 	// When no plate was chosen, the sliced plate is the lowest one with
 	// gcode, else the lowest with a plate json, else 1.
 	if wantPlate <= 0 {
-		best := 0
+		best, count := 0, 0
 		for _, f := range zr.File {
 			if m := plateGcodeRe.FindStringSubmatch(f.Name); m != nil {
-				if n, _ := strconv.Atoi(m[1]); n > 0 && (best == 0 || n < best) {
-					plate = n
-					best = n
+				if n, _ := strconv.Atoi(m[1]); n > 0 {
+					count++
+					if best == 0 || n < best {
+						plate = n
+						best = n
+					}
 				}
 			}
 		}
 		if best == 0 {
 			for _, f := range zr.File {
 				if m := plateJSONRe.FindStringSubmatch(f.Name); m != nil {
-					if n, _ := strconv.Atoi(m[1]); n > 0 && (best == 0 || n < best) {
-						plate = n
-						best = n
+					if n, _ := strconv.Atoi(m[1]); n > 0 {
+						count++
+						if best == 0 || n < best {
+							plate = n
+							best = n
+						}
 					}
 				}
 			}
+		}
+		// Guessing could list another plate's objects: refuse instead.
+		if count > 1 {
+			return nil, &SkipUnsupported{"Bridge could not tell which plate of this project is printing, so it cannot list the objects safely."}
 		}
 	}
 
@@ -288,15 +308,18 @@ func parseSliceInfoObjects(b []byte, plate int) []SkipObject {
 		}
 		var objs []SkipObject
 		for _, o := range p.Objects {
-			if o.IdentifyID == "" {
+			// Only numeric ids can be sent to the printer.
+			n, err := strconv.Atoi(strings.TrimSpace(o.IdentifyID))
+			if err != nil {
 				continue
 			}
+			id := strconv.Itoa(n)
 			name := o.Name
 			if name == "" {
-				name = "Object " + o.IdentifyID
+				name = "Object " + id
 			}
 			objs = append(objs, SkipObject{
-				ID:      o.IdentifyID,
+				ID:      id,
 				Name:    name,
 				Skipped: strings.EqualFold(o.Skipped, "true"),
 			})
@@ -353,10 +376,15 @@ func pickSkipFile(files []PrinterFile, gcodeFile, subtask string, bridgeJob bool
 		candidates = append(candidates, subtask+".gcode.3mf", subtask+".3mf")
 	}
 	for _, c := range candidates {
-		for _, f := range files {
-			if path.Base(f.Name) == c {
-				return f.Name, true
+		// Several files can share a name: the newest is the one just printed.
+		best := -1
+		for i, f := range files {
+			if path.Base(f.Name) == c && (best < 0 || f.ModifiedAt > files[best].ModifiedAt) {
+				best = i
 			}
+		}
+		if best >= 0 {
+			return files[best].Name, true
 		}
 	}
 	return "", false
@@ -468,7 +496,7 @@ func loadSkipObjects(ctx context.Context, p Printer) ([]SkipObject, error) {
 	j.cacheKey = key
 	j.cached = append([]SkipObject(nil), objs...)
 	j.mu.Unlock()
-	// ponytail: a cache stored just after the print ended is dropped by the next idle report.
+	// A cache stored just after the print ended is dropped by the next idle report.
 	return objs, nil
 }
 
@@ -552,7 +580,10 @@ func SkipObjects(ctx context.Context, p Printer, ids []string) (SkipList, error)
 	}
 	nums := make([]int, 0, len(fresh))
 	for _, id := range fresh {
-		n, _ := strconv.Atoi(id)
+		n, err := strconv.Atoi(id)
+		if err != nil {
+			return SkipList{}, &SkipUnsupported{"One of those objects has an ID Bridge cannot send to the printer. Skip it on the printer instead."}
+		}
 		nums = append(nums, n)
 	}
 	payload := buildSkipObjects(nextSequenceID(), nums)
@@ -589,8 +620,17 @@ func SkipObjects(ctx context.Context, p Printer, ids []string) (SkipList, error)
 			}
 		}
 		j.mu.Unlock()
-		if done || time.Now().After(deadline) {
+		if done {
 			break
+		}
+		if time.Now().After(deadline) {
+			// Do not show objects as skipped that the printer never confirmed.
+			j.mu.Lock()
+			for _, id := range fresh {
+				delete(j.sent, id)
+			}
+			j.mu.Unlock()
+			return SkipList{}, errors.New("The printer did not confirm the skip. Check the plate and try again.")
 		}
 		select {
 		case <-ctx.Done():

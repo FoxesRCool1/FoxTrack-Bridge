@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
+	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"sync"
@@ -487,6 +489,7 @@ func TestResponseBodyIsCapped(t *testing.T) {
 type fakeSMTP struct {
 	addr  string
 	mu    sync.Mutex
+	mechs string // what the AUTH line offers; set under mu before sending
 	from  string
 	rcpts []string
 	auth  string
@@ -511,7 +514,7 @@ func newFakeSMTP(t *testing.T, mode string) *fakeSMTP {
 		ln = tls.NewListener(ln, cfg)
 	}
 	t.Cleanup(func() { ln.Close() })
-	f := &fakeSMTP{addr: ln.Addr().String()}
+	f := &fakeSMTP{addr: ln.Addr().String(), mechs: "PLAIN"}
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -543,7 +546,21 @@ func (f *fakeSMTP) serve(c net.Conn, cfg *tls.Config, offerTLS bool) {
 			if offerTLS {
 				say("250-STARTTLS")
 			}
-			say("250 AUTH PLAIN")
+			if f.mechs == "" {
+				say("250 OK")
+			} else {
+				say("250 AUTH " + f.mechs)
+			}
+		case up == "AUTH LOGIN":
+			b64 := base64.StdEncoding
+			say("334 " + b64.EncodeToString([]byte("Username:")))
+			u, _ := r.ReadString('\n')
+			say("334 " + b64.EncodeToString([]byte("Password:")))
+			p, _ := r.ReadString('\n')
+			du, _ := b64.DecodeString(strings.TrimSpace(u))
+			dp, _ := b64.DecodeString(strings.TrimSpace(p))
+			f.auth = "LOGIN " + string(du) + " " + string(dp)
+			say("235 ok")
 		case up == "STARTTLS":
 			say("220 go ahead")
 			c = tls.Server(c, cfg)
@@ -668,5 +685,126 @@ func TestEmailWithoutPictureAndErrors(t *testing.T) {
 	dead.SMTP.Port = 1
 	if err := send(dead, m); err == nil || !strings.Contains(err.Error(), "could not reach the mail server") {
 		t.Fatalf("dead: %v", err)
+	}
+}
+
+func TestPickAuth(t *testing.T) {
+	mech := func(offered string) string {
+		a, err := pickAuth(offered, "u", "p", "mail.example.com")
+		if err != nil {
+			return "none"
+		}
+		name, _, _ := a.Start(&smtp.ServerInfo{Name: "mail.example.com", TLS: true})
+		return name
+	}
+	for offered, want := range map[string]string{
+		"PLAIN LOGIN": "PLAIN", "LOGIN PLAIN": "PLAIN", "plain": "PLAIN",
+		"CRAM-MD5 LOGIN": "LOGIN", "login": "LOGIN",
+		"CRAM-MD5": "CRAM-MD5", "XOAUTH2": "none", "": "none",
+	} {
+		if got := mech(offered); got != want {
+			t.Errorf("server offers %q: picked %s, want %s", offered, got, want)
+		}
+	}
+}
+
+func TestLoginAuth(t *testing.T) {
+	a := loginAuth{"bridge", "pw"}
+	name, first, err := a.Start(&smtp.ServerInfo{Name: "mail.example.com", TLS: true})
+	if name != "LOGIN" || first != nil || err != nil {
+		t.Fatalf("Start = %q %q %v", name, first, err)
+	}
+	if got, err := a.Next([]byte("Username:"), true); string(got) != "bridge" || err != nil {
+		t.Errorf("username answer = %q, %v", got, err)
+	}
+	if got, err := a.Next([]byte("Password:"), true); string(got) != "pw" || err != nil {
+		t.Errorf("password answer = %q, %v", got, err)
+	}
+	if _, err := a.Next([]byte("Surprise:"), true); err == nil {
+		t.Error("an unknown question was answered")
+	}
+	if got, err := a.Next(nil, false); got != nil || err != nil {
+		t.Errorf("end of the exchange = %q, %v", got, err)
+	}
+	if _, _, err := a.Start(&smtp.ServerInfo{Name: "mail.example.com"}); err == nil {
+		t.Error("LOGIN started over an unencrypted connection to another machine")
+	}
+	if _, _, err := a.Start(&smtp.ServerInfo{Name: "127.0.0.1"}); err != nil {
+		t.Errorf("LOGIN refused on this machine: %v", err)
+	}
+}
+
+// The server offers only LOGIN, so the Bridge signs in that way.
+func TestEmailSignsInWithLogin(t *testing.T) {
+	f := newFakeSMTP(t, "none")
+	f.mu.Lock()
+	f.mechs = "LOGIN"
+	f.mu.Unlock()
+	if err := send(emailChannel(f, "none"), Compose(finished())); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.auth != "LOGIN bridge pw" {
+		t.Errorf("auth = %q", f.auth)
+	}
+}
+
+func TestEmailSignInErrors(t *testing.T) {
+	f := newFakeSMTP(t, "none")
+	m := Compose(finished())
+	for mechs, want := range map[string]string{
+		"XOAUTH2": "offers no sign-in the Bridge can use (it offers: XOAUTH2)",
+		"":        "does not offer sign-in",
+	} {
+		f.mu.Lock()
+		f.mechs = mechs
+		f.mu.Unlock()
+		if err := send(emailChannel(f, "none"), m); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("server offers %q: %v, want %q", mechs, err, want)
+		}
+	}
+}
+
+func TestEmailSignInNeedsEncryption(t *testing.T) {
+	smtpCfg := func(host, security, user string) *config.SMTP {
+		return &config.SMTP{Host: host, Username: user, Password: "pw", From: "b@example.com", Security: security}
+	}
+	for _, c := range []struct {
+		s    *config.SMTP
+		deny bool
+	}{
+		{smtpCfg("mail.example.com", "none", "bridge"), true},
+		{smtpCfg("mail.example.com", "none", ""), false},
+		{smtpCfg("mail.example.com", "starttls", "bridge"), false},
+		{smtpCfg("mail.example.com", "", "bridge"), false},
+		{smtpCfg("mail.example.com", "tls", "bridge"), false},
+		{smtpCfg("localhost", "none", "bridge"), false},
+		{smtpCfg("127.0.0.1", "none", "bridge"), false},
+		{smtpCfg("::1", "none", "bridge"), false},
+	} {
+		err := checkSignIn(c.s)
+		if c.deny != (err != nil) || (err != nil && !strings.Contains(err.Error(), "Sign-in needs TLS or STARTTLS")) {
+			t.Errorf("%s/%s/%q: %v", c.s.Host, c.s.Security, c.s.Username, err)
+		}
+	}
+	// Sending refuses too, before it connects to anything.
+	ch := config.NotifyChannel{Kind: "email", Target: "a@example.com", SMTP: smtpCfg("mail.example.com", "none", "bridge")}
+	if err := send(ch, Compose(finished())); err == nil || !strings.Contains(err.Error(), "Sign-in needs TLS or STARTTLS") {
+		t.Errorf("send = %v", err)
+	}
+}
+
+// Only 535 means a wrong username or password; other codes say what they say.
+func TestSMTPErrWording(t *testing.T) {
+	const refused = "The mail server refused the username or password"
+	if got := smtpErr("signing in", &textproto.Error{Code: 535, Msg: "5.7.8 Bad credentials"}); got.Error() != refused {
+		t.Errorf("535: %v", got)
+	}
+	for _, code := range []int{530, 534} {
+		got := smtpErr("signing in", &textproto.Error{Code: code, Msg: " 5.7.0 Must issue a\n STARTTLS command first "}).Error()
+		if got == refused || !strings.Contains(got, strconv.Itoa(code)+" 5.7.0 Must issue a STARTTLS command first") {
+			t.Errorf("%d: %q", code, got)
+		}
 	}
 }

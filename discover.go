@@ -423,7 +423,7 @@ func scanLAN(ctx context.Context) []discoveredPrinter {
 
 // scanTargets lists the hosts to probe: the /24 around each private interface
 // address, minus this computer's own addresses, at most limit in total.
-// ponytail: only the host's /24 is scanned even on a wider mask; widen if users ask.
+// Only the host's /24 is scanned even on a wider mask; widen if users ask.
 func scanTargets(nets []*net.IPNet, limit int) []string {
 	own := map[string]bool{}
 	for _, n := range nets {

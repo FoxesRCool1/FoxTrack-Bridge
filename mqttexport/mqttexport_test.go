@@ -385,7 +385,10 @@ func TestFriendly(t *testing.T) {
 }
 
 func TestClientID(t *testing.T) {
-	if id := ClientID(); !strings.HasPrefix(id, "foxtrack-bridge-") || len(id) != len("foxtrack-bridge-")+6 {
+	if id := ClientID("abcd1234"); !strings.HasPrefix(id, "foxtrack-bridge-") || len(id) != len("foxtrack-bridge-")+6 {
 		t.Errorf("client ID = %q", id)
+	}
+	if ClientID("abcd1234") == ClientID("efgh5678") {
+		t.Error("two Bridge IDs on one host must not share a client ID")
 	}
 }

@@ -1,11 +1,11 @@
 // Maintenance: reminders that come due after some hours of printing. The hours
 // are counted from each printer's print history on this machine.
-const mt = { root: null, printers: null, open: new Set(), editing: null, undo: null, undoTimer: 0 };
+const mt = { root: null, printers: null, open: new Set(), editing: null, pending: new Map() };
 
 const mtStyle = document.createElement('style');
 mtStyle.textContent = `
 #settings-maintenance .mt-printer { margin-top: 1.5rem; }
-#settings-maintenance .mt-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+#settings-maintenance .mt-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding-bottom: .625rem; }
 #settings-maintenance .mt-task { padding: .75rem 0; border-top: 1px solid var(--border); }
 #settings-maintenance .mt-line { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 #settings-maintenance .mt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; font-weight: 500; }
@@ -23,7 +23,6 @@ mtStyle.textContent = `
 #settings-maintenance .mt-form { display: grid; grid-template-columns: 1fr; gap: .75rem; padding: .75rem; margin-top: .5rem; border: 1px solid var(--border); border-radius: var(--radius); }
 @media (min-width: 640px) { #settings-maintenance .mt-form { grid-template-columns: 1fr 9rem; } #settings-maintenance .mt-form .mt-wide { grid-column: 1 / -1; } }
 #settings-maintenance .mt-form-acts { display: flex; justify-content: flex-end; gap: .5rem; }
-#settings-maintenance .mt-undo { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: 1rem; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2); font-size: .875rem; }
 #settings-maintenance .mt-skel { height: 4.5rem; border-radius: var(--radius); background: var(--panel-2); margin-top: .75rem; }
 @media (max-width: 640px) {
   #settings-maintenance .field, #settings-maintenance .btn-primary, #settings-maintenance .btn-outline, #settings-maintenance .btn-ghost { min-height: 2.75rem; }
@@ -59,24 +58,25 @@ function mtFormHtml({ name = '', interval = '', id = '', presets = [] }) {
     const pick = presets.length
         ? '<div class="mt-wide"><label class="field-label" for="mtPick-' + escHtml(k) + '">Start from a suggestion</label><div class="select-wrap"><select id="mtPick-' + escHtml(k) + '" class="field" data-mt-pick>'
             + '<option value="">Custom task</option>'
-            + presets.map((p, i) => '<option value="' + i + '">' + escHtml(p.name) + ' (every ' + escHtml(mtHours(p.interval_hours)) + ' h)</option>').join('')
+            + presets.map((p, i) => '<option data-no-i18n value="' + i + '">' + escHtml(p.name) + ' (every ' + escHtml(mtHours(p.interval_hours)) + ' h)</option>').join('')
             + '</select><i class="fas fa-chevron-down"></i></div></div>'
         : '';
     return '<div class="mt-form" data-form="' + escHtml(k) + '">' + pick
-        + '<div><label class="field-label" for="mtName-' + escHtml(k) + '">Task</label><input id="mtName-' + escHtml(k) + '" type="text" class="field" maxlength="80" autocomplete="off" data-mt-name value="' + escHtml(name) + '" placeholder="Oil the Z axis"></div>'
+        + '<div><label class="field-label" for="mtName-' + escHtml(k) + '">Task</label><input id="mtName-' + escHtml(k) + '" type="text" class="field" maxlength="80" autocomplete="off" data-no-i18n data-mt-name value="' + escHtml(name) + '" placeholder="Oil the Z axis"></div>'
         + '<div><label class="field-label" for="mtEvery-' + escHtml(k) + '">Every (printing hours)</label><input id="mtEvery-' + escHtml(k) + '" type="text" inputmode="decimal" class="field" autocomplete="off" data-mt-every value="' + escHtml(interval) + '" placeholder="100"></div>'
         + '<p class="mt-wide text-xs text-danger hidden" data-mt-error></p>'
         + '<div class="mt-wide mt-form-acts"><button type="button" class="btn-ghost" data-mt-act="cancel">Cancel</button><button type="button" class="btn-primary" data-mt-act="save">' + (id ? 'Save' : 'Add task') + '</button></div></div>';
 }
 
 function mtPrinterHtml(p) {
-    const body = p.tasks.length
-        ? p.tasks.map(mtTaskHtml).join('')
+    const tasks = p.tasks.filter(t => !mt.pending.has(t.id));
+    const body = tasks.length
+        ? tasks.map(mtTaskHtml).join('')
         : '<div class="mt-task"><p class="text-sm text-text-2">No reminders for this printer yet. The suggested tasks start counting from now.</p>'
             + '<button type="button" class="btn-primary mt-3" data-mt-act="suggested">Add the suggested tasks</button></div>';
     const adding = mt.open.has(p.id);
     return '<div class="mt-printer" data-printer="' + escHtml(p.id) + '">'
-        + '<div class="mt-head"><div class="min-w-0"><h3 class="text-sm font-medium truncate">' + escHtml(p.name) + '</h3></div>'
+        + '<div class="mt-head"><div class="min-w-0"><h3 class="text-sm font-medium truncate" data-no-i18n>' + escHtml(p.name) + '</h3></div>'
         + (adding ? '' : '<button type="button" class="btn-outline btn-xs" data-mt-act="add">Add a task</button>') + '</div>'
         + body
         + (adding ? mtFormHtml({ presets: p.presets }) : '')
@@ -96,25 +96,26 @@ function mtRenderAll() {
     box.innerHTML = mt.printers.map(mtPrinterHtml).join('');
 }
 
-function mtShowUndo(task) {
-    const bar = mt.root.querySelector('#mtUndo');
-    mt.undo = task;
-    bar.innerHTML = '<span>Deleted “' + escHtml(task.name) + '”.</span><button type="button" class="btn-outline btn-xs" data-mt-act="undo">Undo</button>';
-    bar.classList.remove('hidden');
-    clearTimeout(mt.undoTimer);
-    mt.undoTimer = setTimeout(() => { bar.classList.add('hidden'); mt.undo = null; }, 10000);
-}
-
 async function mtLoad(quiet) {
     const box = mt.root.querySelector('#mtBody');
     if (!quiet || !mt.printers) box.innerHTML = '<div class="mt-skel"></div><div class="mt-skel"></div>';
     try {
         const d = await apiFetch('/api/maintenance');
         mt.printers = d.printers || [];
+        // A delete still in its undo window stays hidden across a reload.
+        for (const t of mt.pending.values()) {
+            const f = mtFind(t.id);
+            if (f) f.p.tasks.push(t);
+        }
         mt.open = new Set([...mt.open].filter(id => mt.printers.some(p => p.id === id)));
         mtRenderAll();
     } catch (e) {
-        if (mt.printers) return; // keep showing what we have
+        if (mt.printers) {
+            // Keep showing what we have, but say the refresh failed.
+            toast(friendlyError(e.message), 'error');
+            mtRenderAll();
+            return;
+        }
         box.innerHTML = '<p class="mt-5 text-sm text-danger">The reminders could not be loaded: ' + escHtml(friendlyError(e.message)) + '</p>'
             + '<button type="button" class="btn-outline btn-xs mt-3" data-mt-act="retry">Try again</button>';
     }
@@ -139,33 +140,35 @@ async function mtMarkDone(id) {
     if (again) again.focus();
 }
 
-async function mtDelete(id) {
+function mtDelete(id) {
     const f = mtFind(id);
-    if (!f) return;
-    const index = f.p.tasks.indexOf(f.t);
-    f.p.tasks.splice(index, 1);
+    if (!f || mt.pending.has(id)) return;
+    mt.pending.set(id, f.t);
+    f.p.tasks.splice(f.p.tasks.indexOf(f.t), 1);
     mtRenderPrinter(f.p.id);
-    try {
-        const removed = await apiFetch('/api/maintenance/' + encodeURIComponent(id), { method: 'DELETE' });
-        mtShowUndo(removed);
-    } catch (e) {
-        f.p.tasks.splice(index, 0, f.t);
-        mtRenderPrinter(f.p.id);
-        toast(friendlyError(e.message), 'error');
-    }
-}
-
-async function mtUndo() {
-    const task = mt.undo;
-    if (!task) return;
-    mt.undo = null;
-    mt.root.querySelector('#mtUndo').classList.add('hidden');
-    try {
-        await apiFetch('/api/maintenance', { method: 'POST', body: JSON.stringify({ id: task.id, printer_id: task.printer_id, name: task.name, interval_hours: task.interval_hours, last_done_at: task.last_done_at, note: task.note || '' }) });
-        await mtLoad(true);
-    } catch (e) {
-        toast(friendlyError(e.message), 'error');
-    }
+    undoBar('Deleted', f.t.name, {
+        ms: 10000,
+        onUndo() {
+            // The task is still on the server; no request needed.
+            const task = mt.pending.get(id);
+            if (!task) return;
+            mt.pending.delete(id);
+            const again = mtFind(id);
+            if (again) again.p.tasks.push(task);
+            mtRenderPrinter(task.printer_id);
+        },
+        onCommit() {
+            (async () => {
+                try {
+                    await apiFetch('/api/maintenance/' + encodeURIComponent(id), { method: 'DELETE' });
+                } catch (e) {
+                    toast(friendlyError(e.message), 'error');
+                }
+                mt.pending.delete(id);
+                mtLoad(true);
+            })();
+        },
+    });
 }
 
 async function mtSuggested(printerId) {
@@ -196,7 +199,10 @@ async function mtSaveForm(form) {
         mt.editing = null;
         await mtLoad(true);
     } catch (e) {
-        btn.disabled = false;
+        // mtLoad re-rendered the printer, so the old button is gone; find the
+        // new one and re-enable it, or the form sits open with Save disabled.
+        const fresh = mt.root.querySelector('.mt-form[data-form="' + CSS.escape(id || 'new') + '"] [data-mt-act="save"]');
+        if (fresh) fresh.disabled = false; else btn.disabled = false;
         fail(friendlyError(e.message));
     }
 }
@@ -205,8 +211,7 @@ function mtMount(section) {
     mt.root = section;
     section.innerHTML = `
 <h2 class="font-heading text-xl font-medium leading-tight">Maintenance</h2>
-<p class="mt-1.5 text-sm text-text-2">Reminders that come due after some hours of printing, counted from each printer's print history. Nothing leaves this machine.</p>
-<div id="mtUndo" class="mt-undo hidden" role="status"></div>
+<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Reminders that come due after some hours of printing, counted from each printer's print history. ${tip('Nothing leaves this machine.', 'About the maintenance reminders')}</p>
 <div id="mtBody" aria-live="polite"></div>`;
 
     section.addEventListener('click', e => {
@@ -218,7 +223,6 @@ function mtMount(section) {
         const taskId = taskEl ? taskEl.dataset.task : '';
         if (act === 'done') mtMarkDone(taskId);
         else if (act === 'delete') mtDelete(taskId);
-        else if (act === 'undo') mtUndo();
         else if (act === 'retry') mtLoad();
         else if (act === 'suggested') mtSuggested(printerId);
         else if (act === 'add') { mt.open.add(printerId); mtRenderPrinter(printerId); const i = section.querySelector('.mt-printer[data-printer="' + CSS.escape(printerId) + '"] [data-mt-name]'); if (i) i.focus(); }

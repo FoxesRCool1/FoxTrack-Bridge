@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
@@ -42,9 +43,11 @@ var (
 	featuresJS   []byte
 )
 
-// handleFeaturesJS serves every web/features/*.js in name order, each in its
-// own block so one file's top-level names cannot clash with another's, and a
-// file that throws cannot stop the next one.
+// handleFeaturesJS serves every web/features/*.js in name order. Each file runs
+// through an indirect eval inside try, so a file with a syntax error or one
+// that throws cannot stop the next one. Top-level let and const stay inside
+// their file; function declarations and var still become globals (inline
+// onclick handlers rely on that), so two files must not share those names.
 func handleFeaturesJS(w http.ResponseWriter, r *http.Request) {
 	featuresOnce.Do(func() {
 		var names []string
@@ -62,9 +65,8 @@ func handleFeaturesJS(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[features] %s: %v", n, err)
 				continue
 			}
-			b.WriteString("// " + n + "\ntry {\n")
-			b.Write(data)
-			b.WriteString("\n} catch (e) { console.error('" + n + "', e); }\n")
+			src, _ := json.Marshal(string(data) + "\n//# sourceURL=" + n)
+			b.WriteString("// " + n + "\ntry { (0, eval)(" + string(src) + "); } catch (e) { console.error('" + n + "', e); }\n")
 		}
 		featuresJS = b.Bytes()
 	})

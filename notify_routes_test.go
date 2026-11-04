@@ -268,6 +268,12 @@ func TestNotificationTest(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"ok":true`) || got.URL != "https://discord.com/api/webhooks/1/HOOKSECRET" || string(msg.Snapshot) != "jpeg" {
 		t.Fatalf("unsaved form: %s %+v snap %q", rec.Body, got, msg.Snapshot)
 	}
+	notifyMu.Lock()
+	_, kept := notifyLast["d1"]
+	notifyMu.Unlock()
+	if kept {
+		t.Fatal("a test of an unsaved form was recorded against the saved channel")
+	}
 
 	// A form for a channel that was never saved has no stored secret to fall back on.
 	rec = notifyCall(t, handleNotificationTest, "POST", "/api/notifications/test", `{"channel":{"kind":"telegram","target":"1"}}`)

@@ -1,7 +1,6 @@
 // Settings > Timelapse: the on/off switch and its options, then a gallery of
 // the videos the Bridge has built. Served by /api/timelapse (timelapse_routes.go).
 
-const TL_UNDO_MS = 8000;
 const TL_REFRESH_MS = 10000;
 
 const tl = {
@@ -9,7 +8,7 @@ const tl = {
     data: null,        // last answer from GET /api/timelapse
     loadSeq: 0,
     filled: false,     // the form holds the saved settings
-    pending: null,     // { id, timer }: a delete waiting out its undo window
+    pending: new Set(), // ids of deletes waiting out their undo window
 };
 
 function tlStyle() {
@@ -34,9 +33,6 @@ function tlStyle() {
 }
 #settings-timelapse #tlEnabled { position: relative; }
 #settings-timelapse #tlEnabled::after { content: ''; position: absolute; inset: -.75rem -.5rem; }
-#tlUndo { position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 200; display: flex; justify-content: center; pointer-events: none; }
-#tlUndo > div { pointer-events: auto; display: flex; align-items: center; gap: .75rem; max-width: 28rem; width: 100%; justify-content: space-between; }
-#tlUndo .tl-btn { min-height: 2.75rem; padding: 0 1rem; font-size: .8125rem; }
 `;
     document.head.appendChild(s);
 }
@@ -74,7 +70,7 @@ function tlMount(section) {
     <h2 class="font-heading text-xl font-medium leading-tight">Timelapse</h2>
     <button id="tlEnabled" type="button" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Record timelapses"><span class="switch-thumb"></span></button>
 </div>
-<p class="mt-1.5 text-sm text-text-2">Takes a picture from each printer's camera while it prints and turns them into a video when the print ends. The pictures and videos stay on this machine.</p>
+<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Takes a picture from each printer's camera while it prints and turns them into a video when the print ends. ${tip('The pictures and videos stay on this machine.', 'About the timelapse')}</p>
 <p id="tlFFmpegNote" class="hidden mt-3 text-xs leading-relaxed text-warning">ffmpeg isn't installed, so timelapses are saved as animated GIFs: bigger files and lower quality. Cameras on X1, H2 and P2S printers need ffmpeg to show at all. Install it (see the README) and restart the Bridge.</p>
 
 <div class="mt-5 tl-grid">
@@ -121,7 +117,6 @@ function tlMount(section) {
         if (del) tlDelete(del.dataset.tlDelete);
         if (e.target.closest('[data-tl-retry]')) tlLoad(false);
     });
-    window.addEventListener('pagehide', tlFlushDelete);
     tlLock(true);
     setInterval(() => {
         if (!document.hidden && tl.section.offsetParent !== null) tlLoad(false);
@@ -211,15 +206,15 @@ function tlFillForm(d) {
 
 function tlRenderLive(d) {
     const el = document.getElementById('tlLive');
-    const parts = (d.recording || []).map(r => '<span data-no-i18n>' + escHtml(r.printer_name) + '</span>: ' + r.frames + (r.frames === 1 ? ' picture' : ' pictures') + ' so far');
-    if (d.building) parts.push('Building ' + d.building + (d.building === 1 ? ' video' : ' videos') + '…');
+    const parts = (d.recording || []).map(r => '<span><span data-no-i18n>' + escHtml(r.printer_name) + ':</span> ' + fill(r.frames === 1 ? '{0} picture so far' : '{0} pictures so far', r.frames) + '</span>');
+    if (d.building) parts.push('<span>' + fill(d.building === 1 ? 'Building {0} video…' : 'Building {0} videos…', d.building) + '</span>');
     el.innerHTML = parts.join(' · ');
     el.classList.toggle('hidden', !parts.length);
 }
 
 function tlCard(m) {
     const url = '/api/timelapse/file/' + encodeURIComponent(m.id);
-    const label = 'Timelapse of ' + (m.file || 'a print') + ' on ' + m.printer_name;
+    const label = m.file ? fill('Timelapse of {0} on {1}', m.file, m.printer_name) : fill('Timelapse of a print on {0}', m.printer_name);
     const media = m.format === 'gif'
         ? '<img class="tl-media" src="' + url + '" alt="' + escHtml(label) + '" loading="lazy">'
         : '<video class="tl-media" controls preload="none" playsinline aria-label="' + escHtml(label) + '"' + (m.poster ? ' poster="' + url + '?poster=1"' : '') + ' src="' + url + '"></video>';
@@ -232,13 +227,13 @@ function tlCard(m) {
         + '<p class="mt-1.5 text-xs text-text-2 tl-num">' + escHtml(tlFmtDate(m.end)) + ' · ' + tlFmtLength(m.duration_sec) + ' · ' + tlFmtSize(m.size) + '</p>'
         + '<div class="mt-3 flex items-center gap-2">'
         + '<a class="btn-outline btn-xs tl-btn" href="' + url + '" download="' + escHtml(tlFileName(m)) + '">Download</a>'
-        + '<button type="button" class="btn-danger btn-xs tl-btn" data-tl-delete="' + escHtml(m.id) + '" aria-label="Delete the timelapse of ' + escHtml(m.file || 'this print') + ' on ' + escHtml(m.printer_name) + '">Delete</button>'
+        + '<button type="button" class="btn-danger btn-xs tl-btn" data-tl-delete="' + escHtml(m.id) + '" aria-label="' + escHtml(m.file ? fill('Delete the timelapse of {0} on {1}', m.file, m.printer_name) : fill('Delete the timelapse of this print on {0}', m.printer_name)) + '">Delete</button>'
         + '</div></div></article>';
 }
 
 function tlRenderGallery() {
     const el = document.getElementById('tlGallery');
-    const items = (tl.data.items || []).filter(m => !tl.pending || m.id !== tl.pending.id);
+    const items = (tl.data.items || []).filter(m => !tl.pending.has(m.id));
     if (!items.length) {
         el.dataset.sig = '';
         el.innerHTML = '<p class="text-sm text-text-2">' + (tl.data.enabled
@@ -287,55 +282,32 @@ async function tlSave() {
 
 // Deleting waits out an undo window: the card goes at once, the file only
 // when the toast runs out.
-function tlUndoBar() {
-    let bar = document.getElementById('tlUndo');
-    if (bar) return bar;
-    bar = document.createElement('div');
-    bar.id = 'tlUndo';
-    bar.className = 'hidden';
-    bar.setAttribute('role', 'status');
-    bar.setAttribute('aria-live', 'polite');
-    bar.innerHTML = '<div class="floating px-4 py-2.5 rounded-lg text-sm border bg-surface border-border text-text shadow-xl"><span>Timelapse deleted.</span><button type="button" class="btn-outline btn-xs tl-btn" id="tlUndoBtn">Undo</button></div>';
-    document.body.appendChild(bar);
-    bar.querySelector('#tlUndoBtn').addEventListener('click', tlUndo);
-    return bar;
-}
-
 function tlDelete(id) {
-    tlCommit(); // one undo at a time: an earlier delete is final now
-    tl.pending = { id, timer: setTimeout(tlCommit, TL_UNDO_MS) };
-    tlUndoBar().classList.remove('hidden');
+    tl.pending.add(id);
+    undoBar('Deleted', tlTitle(id), {
+        ms: 8000,
+        onUndo() {
+            tl.pending.delete(id);
+            tlRenderGallery();
+        },
+        onCommit() {
+            (async () => {
+                try {
+                    await apiFetch('/api/timelapse/file/' + encodeURIComponent(id), { method: 'DELETE' });
+                } catch (e) {
+                    if (!/does not exist/.test(e.message)) toast("Couldn't delete the timelapse: " + e.message, 'error');
+                }
+                tl.pending.delete(id);
+                tlLoad(false);
+            })();
+        },
+    });
     tlRenderGallery();
-    document.getElementById('tlUndoBtn').focus(); // the delete button is gone; keep keyboard users in reach of Undo
 }
 
-function tlUndo() {
-    if (!tl.pending) return;
-    clearTimeout(tl.pending.timer);
-    tl.pending = null;
-    tlUndoBar().classList.add('hidden');
-    tlRenderGallery();
-}
-
-async function tlCommit() {
-    const p = tl.pending;
-    if (!p) return;
-    clearTimeout(p.timer);
-    tlUndoBar().classList.add('hidden');
-    try {
-        await apiFetch('/api/timelapse/file/' + encodeURIComponent(p.id), { method: 'DELETE' });
-    } catch (e) {
-        if (!/does not exist/.test(e.message)) toast("Couldn't delete the timelapse: " + e.message, 'error');
-    }
-    if (tl.pending === p) tl.pending = null;
-    tlLoad(false);
-}
-
-// Leaving the page inside the undo window: the delete still happens.
-function tlFlushDelete() {
-    if (!tl.pending) return;
-    fetch('/api/timelapse/file/' + encodeURIComponent(tl.pending.id), { method: 'DELETE', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    tl.pending = null;
+function tlTitle(id) {
+    const m = (tl.data && tl.data.items || []).find(m => m.id === id);
+    return m ? m.file || m.printer_name : '';
 }
 
 registerSettingsTab({ id: 'timelapse', label: 'Timelapse', group: 'Printing', order: 20, mount: tlMount, onShow: tlOnShow });

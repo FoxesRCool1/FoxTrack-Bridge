@@ -368,7 +368,7 @@ func (m *Manager) applyReading(e *entry, r Reading) {
 }
 
 // beginPrint marks the counters at the start of a print. Caller holds m.mu.
-// ponytail: the poll runs every 10 s, so up to 10 s of heating is missed; a
+// The poll runs every 10 s, so up to 10 s of heating is missed; a
 // start hook from the pollers would close that if anyone needs it.
 func (m *Manager) beginPrint(e *entry) {
 	e.inPrint = true
