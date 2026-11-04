@@ -277,3 +277,47 @@ func TestExporterClearsOldStatesOnNewPrefix(t *testing.T) {
 	waitFor(t, "the old state to be cleared", func() bool { return b.has("foxtrack_bridge/p1/state", "", true) })
 	waitFor(t, "the new state", func() bool { return b.hasTopic("other/p1/state") })
 }
+
+type fakeMsg struct{ topic, payload string }
+
+func (m fakeMsg) Duplicate() bool   { return false }
+func (m fakeMsg) Qos() byte         { return 1 }
+func (m fakeMsg) Retained() bool    { return false }
+func (m fakeMsg) Topic() string     { return m.topic }
+func (m fakeMsg) MessageID() uint16 { return 0 }
+func (m fakeMsg) Payload() []byte   { return []byte(m.payload) }
+func (m fakeMsg) Ack()              {}
+
+func TestCommandFloodIsCapped(t *testing.T) {
+	c, err := Resolve(config.MQTTExport{Enabled: true, Broker: "127.0.0.1:1883", BridgeID: "abcd1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	var mu sync.Mutex
+	ran := 0
+	s := &session{cfg: c, cmds: make(chan struct{}, maxCommands), host: Host{
+		Printers: func() []config.Printer { return []config.Printer{bambu} },
+		Control: func(string, string) error {
+			mu.Lock()
+			ran++
+			mu.Unlock()
+			<-release
+			return nil
+		},
+	}}
+	for range 3 * maxCommands {
+		s.onCommand(nil, fakeMsg{"foxtrack_bridge/p1/command", "pause"})
+	}
+	waitFor(t, "the first commands", func() bool { mu.Lock(); defer mu.Unlock(); return ran == maxCommands })
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	if ran != maxCommands {
+		t.Errorf("%d commands ran at once, want %d", ran, maxCommands)
+	}
+	mu.Unlock()
+	close(release)
+	waitFor(t, "the slots to free", func() bool { return len(s.cmds) == 0 })
+	s.onCommand(nil, fakeMsg{"foxtrack_bridge/p1/command", "pause"})
+	waitFor(t, "a command after the flood", func() bool { mu.Lock(); defer mu.Unlock(); return ran == maxCommands+1 })
+}
