@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"foxtrack-bridge/config"
+	"foxtrack-bridge/costs"
 	"foxtrack-bridge/history"
 	"foxtrack-bridge/lan"
 	mqttpkg "foxtrack-bridge/mqtt"
@@ -121,6 +122,8 @@ func StartServer(port int) {
 
 	go autoUpdateLoop()
 	go pollBridgeCommands()
+	startEventWatcher()
+	runStartupHooks()
 
 	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/logo.png", handleLogo)
@@ -156,7 +159,7 @@ func StartServer(port int) {
 	http.HandleFunc("/api/virtual-printer", handleVirtualPrinter) // GET: virtual printer address and key
 
 	printStartupBanner(port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), guardWrites(http.DefaultServeMux)); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), guardWrites(requireAuth(http.DefaultServeMux))); err != nil {
 		log.Printf("Server error: %v", err)
 	}
 }
@@ -460,6 +463,9 @@ func fontHandler(w http.ResponseWriter, r *http.Request) {
 // so the merged result is translated through configStore.Printers before encoding.
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
+	if r.Method == "OPTIONS" {
+		return
+	}
 	merged := mqttpkg.GetPrintersState()
 	for k, v := range lanCtrl.GetStates() {
 		merged[k] = v
@@ -693,27 +699,87 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	if isPlugCommand(command) {
-		if err := runPlugCommand(printerName, command); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-	} else if printerIsBambu(printerName) {
-		if err := mqttpkg.SendCommandWithArgs(printerName, command, args); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-	} else {
-		if err := lanCtrl.SendCommand(printerName, command, args); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
+	idem := controlKey(printerName, command, r.Header.Get("Idempotency-Key"))
+	if seenControlKey(idem, time.Now()) {
+		// The same click again (a retry of one that worked): done already.
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "command": command, "printer": printerName})
+		return
 	}
+	if err := runControl(printerName, command, args); err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, errControlBlocked) {
+			code = http.StatusConflict
+		}
+		w.WriteHeader(code)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	rememberControlKey(idem, time.Now()) // only a command that ran: a failed one may be retried
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "command": command, "printer": printerName})
+}
+
+// runControl sends one control command to a printer of any kind: its plug,
+// the Bambu MQTT session, or the LAN driver. /api/control and the Home
+// Assistant MQTT export both go through it.
+func runControl(printerName, command string, args map[string]interface{}) error {
+	switch {
+	case isPlugCommand(command):
+		return runPlugCommand(printerName, command)
+	case printerIsBambu(printerName):
+		// A printer that refuses control (no Developer Mode) is not sent
+		// more commands it will refuse; the error says how to fix it. Pause
+		// and stop always go out: a stale refusal must never block them.
+		if mqttpkg.ControlBlocked(printerName) && command != "stop" && command != "pause" {
+			return errControlBlocked
+		}
+		return mqttpkg.SendCommandWithArgs(printerName, command, args)
+	}
+	return lanCtrl.SendCommand(printerName, command, args)
+}
+
+var errControlBlocked = errors.New(mqttpkg.ControlBlockedMsg)
+
+// Idempotency keys the dashboard sends with each click, remembered for 10
+// minutes, so a retried request runs its command once.
+var (
+	controlKeysMu sync.Mutex
+	controlKeys   = map[string]time.Time{}
+)
+
+// controlKey is what a key is remembered under: the same key sent for
+// another printer or command is a different request. Empty without a key.
+func controlKey(printer, command, key string) string {
+	if key == "" || len(key) > 100 {
+		return ""
+	}
+	return printer + "\x00" + command + "\x00" + key
+}
+
+func seenControlKey(key string, now time.Time) bool {
+	if key == "" {
+		return false
+	}
+	controlKeysMu.Lock()
+	defer controlKeysMu.Unlock()
+	t, ok := controlKeys[key]
+	return ok && now.Sub(t) < 10*time.Minute
+}
+
+func rememberControlKey(key string, now time.Time) {
+	if key == "" {
+		return
+	}
+	controlKeysMu.Lock()
+	defer controlKeysMu.Unlock()
+	if len(controlKeys) > 500 {
+		for k, t := range controlKeys {
+			if now.Sub(t) >= 10*time.Minute {
+				delete(controlKeys, k)
+			}
+		}
+	}
+	controlKeys[key] = now
 }
 
 // handleCamera proxies the BambuLab MJPEG camera stream.
@@ -768,6 +834,10 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	if found.IsCloud() && found.LANCode == "" {
 		http.Error(w, "camera needs the printer's LAN access code, which the Bambu account did not report", http.StatusServiceUnavailable)
+		return
+	}
+	if useRTSP(found) {
+		rtspCameraStream(w, r, found, ip)
 		return
 	}
 	bambuCameraStream(w, ip, found.LANCode, printerName)
@@ -1276,6 +1346,7 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 		}
 	}
 	applyStoredSecrets(&newCfg, old)
+	config.KeepFeatureBlocks(&newCfg, old)
 	return &newCfg, nil
 }
 
@@ -1965,7 +2036,19 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"records": records})
+	// costs[i] prices records[i] with the Costs settings; currency is what
+	// the user typed. Both are empty until prices are set.
+	out := map[string]interface{}{"records": records}
+	configMutex.RLock()
+	if c := configStore.Costs; c != nil {
+		bs := make([]costs.Breakdown, len(records))
+		for i, rec := range records {
+			bs[i] = costs.ForRecord(c, rec)
+		}
+		out["costs"], out["currency"] = bs, c.Currency
+	}
+	configMutex.RUnlock()
+	json.NewEncoder(w).Encode(out)
 }
 
 // handleHistoryByPrinter returns print history for a single printer.

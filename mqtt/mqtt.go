@@ -82,31 +82,36 @@ type AmsSlot struct {
 }
 
 type TelemetryData struct {
-	Status         string    `json:"status"`
-	FileName       string    `json:"file_name"`
-	Progress       int       `json:"progress"`
-	Error          string    `json:"error"`
-	PrinterID      string    `json:"printer_id"`
-	Timestamp      int64     `json:"timestamp"`
-	NozzleTemp     float64   `json:"nozzle_temp"`
-	NozzleTarget   float64   `json:"nozzle_target"`
-	BedTemp        float64   `json:"bed_temp"`
-	BedTarget      float64   `json:"bed_target"`
-	LightOn        bool      `json:"light_on"`
-	TimeRemaining  int       `json:"time_remaining"`            // minutes
-	SpeedLevel     int       `json:"speed_level"`               // 1=Silent 2=Standard 3=Sport 4=Ludicrous
-	AMS            []AmsSlot `json:"ams,omitempty"`             // nil when no AMS
-	ActiveExtruder  string  `json:"active_extruder,omitempty"`   // non-default active extruder for multi-toolhead printers
-	CoolingFanPct   int     `json:"cooling_fan_pct,omitempty"`   // 0-100, absent when not reported
-	FilamentUsedMM  float64 `json:"filament_used_mm,omitempty"`
-	TotalPrintHours float64 `json:"total_print_hours,omitempty"` // lifetime hours: from printer for Bambu/Klipper, Bridge-tracked otherwise
-	PrinterModel    string  `json:"printer_model,omitempty"`     // e.g. "X1 Carbon", "P1S", "Klipper"
-	ExternalSpool   *AmsSlot `json:"external_spool,omitempty"`   // Bambu vt_tray, Slot = ExternalSlot; nil until reported
+	Status          string    `json:"status"`
+	FileName        string    `json:"file_name"`
+	Progress        int       `json:"progress"`
+	Error           string    `json:"error"`
+	PrinterID       string    `json:"printer_id"`
+	Timestamp       int64     `json:"timestamp"`
+	NozzleTemp      float64   `json:"nozzle_temp"`
+	NozzleTarget    float64   `json:"nozzle_target"`
+	BedTemp         float64   `json:"bed_temp"`
+	BedTarget       float64   `json:"bed_target"`
+	LightOn         bool      `json:"light_on"`
+	TimeRemaining   int       `json:"time_remaining"`            // minutes
+	SpeedLevel      int       `json:"speed_level"`               // 1=Silent 2=Standard 3=Sport 4=Ludicrous
+	AMS             []AmsSlot `json:"ams,omitempty"`             // nil when no AMS
+	ActiveExtruder  string    `json:"active_extruder,omitempty"` // non-default active extruder for multi-toolhead printers
+	CoolingFanPct   int       `json:"cooling_fan_pct,omitempty"` // 0-100, absent when not reported
+	FilamentUsedMM  float64   `json:"filament_used_mm,omitempty"`
+	TotalPrintHours float64   `json:"total_print_hours,omitempty"` // lifetime hours: from printer for Bambu/Klipper, Bridge-tracked otherwise
+	PrinterModel    string    `json:"printer_model,omitempty"`     // e.g. "X1 Carbon", "P1S", "Klipper"
+	ExternalSpool   *AmsSlot  `json:"external_spool,omitempty"`    // Bambu vt_tray, Slot = ExternalSlot; nil until reported
 	// Alarms is what the printer reports as wrong right now (Bambu HMS and
 	// print_error, Klipper shutdowns, PrusaLink and OctoPrint error text).
 	Alarms []webhook.RelayAlarm `json:"alarms,omitempty"`
 	// Plug is the printer's smart plug, nil without one.
 	Plug *webhook.RelayPlug `json:"plug,omitempty"`
+	// ControlBlocked: the printer refused a control command (Bambu firmware
+	// wants LAN Only Mode with Developer Mode on). Filled when the state is
+	// read (GetPrinterState, GetPrintersState), never stored, and not part of
+	// the FoxTrack relay payload, which is built field by field.
+	ControlBlocked bool `json:"control_blocked,omitempty"`
 }
 
 type BambuReport struct {
@@ -114,11 +119,11 @@ type BambuReport struct {
 }
 
 type BambuPrint struct {
-	Msg                int     `json:"msg"`
-	GcodeState         string  `json:"gcode_state"`
-	SubTaskName        string  `json:"subtask_name"`
+	Msg                int      `json:"msg"`
+	GcodeState         string   `json:"gcode_state"`
+	SubTaskName        string   `json:"subtask_name"`
 	McPercent          *int     `json:"mc_percent"` // pointers: nil when absent, 0 is a real value
-	McPrintErrorCode   string  `json:"mc_print_error_code"`
+	McPrintErrorCode   string   `json:"mc_print_error_code"`
 	NozzleTemper       *float64 `json:"nozzle_temper"`
 	NozzleTargetTemper *float64 `json:"nozzle_target_temper"`
 	BedTemper          *float64 `json:"bed_temper"`
@@ -127,12 +132,12 @@ type BambuPrint struct {
 		Node string `json:"node"`
 		Mode string `json:"mode"`
 	} `json:"lights_report"`
-	McRemainingTime    int     `json:"mc_remaining_time"`
-	SpdLvl             int     `json:"spd_lvl"`
-	AmsStatus          int     `json:"ams_status"`
-	CoolingFanSpeed    *flexInt `json:"cooling_fan_speed"`   // raw 0-15 value; nil when field absent (incremental update), 0 when fan is off
-	TotalRunTimeSec    int64   `json:"total_run_time"`       // lifetime seconds on the printer; only present in pushall responses
-	MachineType        string  `json:"machine_type"`         // model identifier, e.g. "X1C", "P1S"; only present in pushall responses
+	McRemainingTime int      `json:"mc_remaining_time"`
+	SpdLvl          int      `json:"spd_lvl"`
+	AmsStatus       int      `json:"ams_status"`
+	CoolingFanSpeed *flexInt `json:"cooling_fan_speed"` // raw 0-15 value; nil when field absent (incremental update), 0 when fan is off
+	TotalRunTimeSec int64    `json:"total_run_time"`    // lifetime seconds on the printer; only present in pushall responses
+	MachineType     string   `json:"machine_type"`      // model identifier, e.g. "X1C", "P1S"; only present in pushall responses
 	Ams             *struct {
 		AMS []struct {
 			ID   json.RawMessage `json:"id"` // raw AMS unit id: "0".."3", "128".. for an AMS HT (raw so an odd type never fails the message)
@@ -298,7 +303,9 @@ func GetPrinterState(name string) *TelemetryData {
 	stateMutex.RLock()
 	defer stateMutex.RUnlock()
 	if s, ok := printerStates[name]; ok {
-		return copyTelemetry(s)
+		c := copyTelemetry(s)
+		c.ControlBlocked = c.Status != "disconnected" && ControlBlocked(name)
+		return c
 	}
 	return &TelemetryData{Status: "disconnected", PrinterID: name}
 }
@@ -317,14 +324,9 @@ func GetPrintersState() map[string]*TelemetryData {
 	out := make(map[string]*TelemetryData, len(printerStates))
 	for k, v := range printerStates {
 		out[k] = copyTelemetry(v)
+		out[k].ControlBlocked = v.Status != "disconnected" && ControlBlocked(k)
 	}
 	return out
-}
-
-// SendCommand sends a control command to a named printer via MQTT.
-// command is one of: "pause", "resume", "stop", "light_on", "light_off", "start", "toggle_light"
-func SendCommand(printerName, command string) error {
-	return SendCommandWithArgs(printerName, command, nil)
 }
 
 // SendCommandWithArgs sends a command with optional arguments.
@@ -788,10 +790,12 @@ func ConnectPrinter(p Printer) {
 
 			// Always update status to disconnected right away so the UI
 			// disables controls instead of showing stale "idle/printing" state.
+			// Error says why in a plain sentence (the card shows it under Offline).
 			UpdatePrinterState(p.Name, TelemetryData{
 				Status:    "disconnected",
 				PrinterID: p.Name,
 				Timestamp: time.Now().Unix(),
+				Error:     connectProblem(p.IP, err),
 			})
 
 			select {
@@ -821,8 +825,15 @@ func connectAndListen(p Printer, stop <-chan struct{}) error {
 	opts.SetClientID(fmt.Sprintf("foxtrack-%s-%d", p.Serial, time.Now().UnixNano()))
 	opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
 	opts.SetConnectTimeout(10 * time.Second)
-	opts.SetKeepAlive(20 * time.Second) // under typical 30s NAT TCP-idle timeout
-	opts.SetPingTimeout(5 * time.Second)
+	// X1C owners report the link dropping every few minutes: the printer can be
+	// slow to answer a ping while it sends a big report, and a 5 s wait was too
+	// tight. The pushall below goes out every 30 s and the printer reports all
+	// the time, so a longer keepalive does not let a NAT entry go idle.
+	opts.SetKeepAlive(30 * time.Second)
+	opts.SetPingTimeout(10 * time.Second)
+	// Say 3.1.1 outright. Left unset, paho retries a refused login as MQTT 3.1,
+	// which hides a wrong access code behind a protocol error (probe.go does the same).
+	opts.SetProtocolVersion(4)
 	opts.SetAutoReconnect(false)
 	opts.SetCleanSession(true)
 
@@ -857,7 +868,13 @@ func connectAndListen(p Printer, stop <-chan struct{}) error {
 		client.Disconnect(250)
 		return err
 	}
+	if st, ok := subToken.(*mqtt.SubscribeToken); ok && st.Result()[topic] == 0x80 {
+		client.Disconnect(250)
+		return errBadSerial // the broker refused the subscription
+	}
 	log.Printf("[%s] subscribed to %s", p.Name, topic)
+	subscribedAt := time.Now()
+	clearControlBlocked(p.Name) // a new session: the printer may have been set up since
 
 	UpdatePrinterState(p.Name, TelemetryData{
 		Status:    "connected",
@@ -888,7 +905,12 @@ func connectAndListen(p Printer, stop <-chan struct{}) error {
 	select {
 	case <-done:
 		client.Disconnect(250)
-		return fmt.Errorf("connection lost")
+		// Hung up within seconds of login, before a single report: the sign of a
+		// serial number the printer does not own.
+		if time.Since(subscribedAt) < 15*time.Second && GetPrinterState(p.Name).Status == "connected" {
+			return errBadSerial
+		}
+		return errConnectionLost
 	case <-stop:
 		client.Disconnect(250)
 		return nil
@@ -969,6 +991,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		pr := report.Print
 		noteReportedError(p.Name, msg.Payload(), pr.McPrintErrorCode)
 		projectReply := noteCommandReply(p.Name, msg.Payload()) // logged in full there
+		noteSkipFields(p.Name, msg.Payload())                   // gcode_file and s_obj, for skip objects
 
 		// Ignore messages that carry no print or system data at all.
 		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
@@ -1213,19 +1236,25 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			}
 			filaments := pairFilaments(sess.Spools, spoolsAt(amsSlots, extSpool))
 			rec := history.Record{
-				PrinterName: p.Name,
-				FileName:    sess.FileName,
-				NozzleTemp:  sess.NozzleTemp,
-				BedTemp:     sess.BedTemp,
-				StartTime:   sess.StartTime,
-				EndTime:     now,
-				Duration:    now - sess.StartTime,
-				Result:      result,
-				TempSamples: sess.TempSamples,
+				PrinterName:  p.Name,
+				FileName:     sess.FileName,
+				NozzleTemp:   sess.NozzleTemp,
+				BedTemp:      sess.BedTemp,
+				StartTime:    sess.StartTime,
+				EndTime:      now,
+				Duration:     now - sess.StartTime,
+				Result:       result,
+				TempSamples:  sess.TempSamples,
+				PercentAtEnd: percentAtEnd,
+				Filaments:    historyFilaments(filaments),
 			}
 			delete(activeSessions, p.Name)
 			sessionMu.Unlock()
 			go func() {
+				// printEnergy hands the reading over once, so take it here
+				// for both the local record and FoxTrack.
+				energy := printEnergy(p.Name)
+				rec.EnergyWh = energy
 				if err := history.Append(rec); err != nil {
 					log.Printf("[%s] history write error: %v", p.Name, err)
 				}
@@ -1244,7 +1273,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						Timestamp:    time.Now().UTC().Format(time.RFC3339),
 						PercentAtEnd: percentAtEnd,
 						Filaments:    filaments,
-						EnergyWh:     printEnergy(p.Name),
+						EnergyWh:     energy,
 					})
 				}
 			}()

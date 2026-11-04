@@ -1,0 +1,95 @@
+"""List the dashboard's user-visible English strings for translation.
+
+Usage, from the repo root: python3 scripts/i18n-extract.py . web/i18n/_source.json
+then translate the new keys into each web/i18n/<lang>.json and check them with
+python3 web/i18n/_check.py. Reads web/ui.html, web/login.html and
+web/features/*.js: HTML text, placeholder/title/aria-label, and JS strings.
+"""
+import glob, html.parser, json, os, re, sys
+
+ROOT = sys.argv[1]
+OUT = sys.argv[2]
+found = set()
+
+
+class P(html.parser.HTMLParser):
+    skip = 0
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style', 'code', 'pre', 'kbd'):
+            self.skip += 1
+        for k, v in attrs:
+            if k in ('placeholder', 'title', 'aria-label') and v:
+                add(v)
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style', 'code', 'pre', 'kbd') and self.skip:
+            self.skip -= 1
+    def handle_data(self, d):
+        if not self.skip:
+            add(d)
+
+
+def add(s):
+    s = re.sub(r'\s+', ' ', html.unescape(s)).strip()
+    if len(s) < 2 or len(s) > 400 or not re.search(r'[A-Za-z]{2}', s):
+        return
+    if re.fullmatch(r'[\w.\-/:#?=&%{}$]+', s) and ' ' not in s and not re.fullmatch(r'[A-Z][a-z]+', s):
+        return  # identifiers, URLs, class names
+    if re.search(r'[{};]|=>|\bfunction\b|\(\)|\.\w+\(', s):
+        return  # code
+    found.add(s)
+
+
+def html_text(s):
+    p = P()
+    try:
+        p.feed(s)
+        p.close()
+    except Exception:
+        pass
+
+
+CLASSY = re.compile(r'^[a-z0-9:\[\]./%#\s-]+$')  # tailwind class lists, ids
+
+def js_strings(src):
+    for m in re.finditer(r"'((?:\\.|[^'\\\n])*)'|\"((?:\\.|[^\"\\\n])*)\"|`((?:\\.|[^`\\])*)`", src):
+        s = m.group(1) if m.group(1) is not None else m.group(2) if m.group(2) is not None else m.group(3)
+        if s is None:
+            continue
+        s = s.replace("\\'", "'").replace('\\"', '"').replace('\\n', ' ')
+        if '<' in s and '>' in s:
+            # Template pieces like '<p class="x">Text</p>'.
+            html_text(re.sub(r'\$\{[^}]*\}', ' ', s))
+            continue
+        s = re.sub(r'\$\{[^}]*\}', '', s)
+        if CLASSY.match(s.strip()):
+            continue
+        if not re.search(r'[A-Z]|\s', s.strip()):
+            continue
+        add(s)
+
+
+ui = open(os.path.join(ROOT, 'web/ui.html')).read()
+parts = re.split(r'(<script[^>]*>|</script>)', ui)
+markup, scripts, in_script = [], [], False
+for p in parts:
+    if p.startswith('<script'):
+        in_script = True
+    elif p == '</script>':
+        in_script = False
+    elif in_script:
+        scripts.append(p)
+    else:
+        markup.append(p)
+html_text(''.join(markup))
+html_text(open(os.path.join(ROOT, 'web/login.html')).read().split('<script>')[0])
+for s in scripts:
+    js_strings(s)
+js_strings(open(os.path.join(ROOT, 'web/login.html')).read().split('<script>')[-1])
+for f in sorted(glob.glob(os.path.join(ROOT, 'web/features/*.js'))):
+    js_strings(open(f).read())
+
+# Drop markup and code fragments that slipped through.
+JUNK = re.compile(r'^#|:not\(|[<>=\[\]{}]|^["\'.,:;)\-]|^\w+_\w+$|@example|ftb_|ftk_|https?:')
+out = sorted(x for x in found if not JUNK.search(x))
+json.dump(out, open(OUT, 'w'), indent=0, ensure_ascii=False)
+print(len(out), 'strings')

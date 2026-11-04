@@ -28,3 +28,16 @@ var fontsCSS []byte
 
 //go:embed web/fonts
 var fontsFS embed.FS
+
+// Feature scripts: every web/features/*.js, served joined as /features.js.
+//
+//go:embed web/features
+var featuresFS embed.FS
+
+// Dashboard translations, one web/i18n/<lang>.json per language.
+//
+//go:embed web/i18n
+var i18nFS embed.FS
+
+//go:embed web/login.html
+var loginHTML []byte

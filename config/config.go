@@ -35,6 +35,16 @@ type Config struct {
 	// VirtualPrinter is the OctoPrint look-alike that slicers upload to.
 	// Optional and additive: absent means off.
 	VirtualPrinter *VirtualPrinter `json:"virtual_printer,omitempty"`
+
+	// Standalone features (features.go). Optional and additive.
+	Security      *Security      `json:"security,omitempty"`
+	Notifications *Notifications `json:"notifications,omitempty"`
+	Spoolman      *Spoolman      `json:"spoolman,omitempty"`
+	Costs         *Costs         `json:"costs,omitempty"`
+	Maintenance   *Maintenance   `json:"maintenance,omitempty"`
+	MQTTExport    *MQTTExport    `json:"mqtt_export,omitempty"`
+	Metrics       *Metrics       `json:"metrics,omitempty"`
+	Timelapse     *Timelapse     `json:"timelapse,omitempty"`
 }
 
 // VirtualPrinter pretends to be an OctoPrint server on its own port, so
@@ -302,6 +312,7 @@ func (c *Config) Clone() *Config {
 		vp := *c.VirtualPrinter
 		out.VirtualPrinter = &vp
 	}
+	cloneFeatureBlocks(&out, c)
 	return &out
 }
 

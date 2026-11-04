@@ -12,11 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"foxtrack-bridge/history"
 	"foxtrack-bridge/webhook"
 )
 
@@ -155,6 +157,20 @@ func pairFilaments(start, end []AmsSlot) []webhook.HistoryFilament {
 	return out
 }
 
+// historyFilaments turns the FoxTrack filament pairs into local history
+// entries with grams estimated from the remain drop and the spool weight.
+func historyFilaments(fs []webhook.HistoryFilament) []history.FilamentUse {
+	var out []history.FilamentUse
+	for _, f := range fs {
+		u := history.FilamentUse{Slot: f.Slot, Material: f.Material, Color: f.Color, TagUID: f.TagUID}
+		if f.RemainStart >= 0 && f.RemainEnd >= 0 && f.RemainStart > f.RemainEnd && f.TrayWeight > 0 {
+			u.Grams = math.Round(float64(f.RemainStart-f.RemainEnd)*float64(f.TrayWeight)) / 100
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
 // historyRemain is a slot's remain for the history: 0-100, -1 when unknown.
 // The external spool's 0 means unknown too (mergeExternalSpool folds -1 into 0).
 func historyRemain(s AmsSlot) int {
@@ -277,7 +293,10 @@ func SetFilament(name, serial string, slot int, material, color string) error {
 		return errPrintNoClient
 	}
 	log.Printf("[%s] set_filament: sent %s", name, payload)
-	time.AfterFunc(400*time.Millisecond, func() { requestPushall(name) }) // the printer does not report the change by itself
+	// The printer does not report the change by itself. The variable is read now:
+	// tests swap it, and this timer outlives them.
+	pushall := requestPushall
+	time.AfterFunc(400*time.Millisecond, func() { pushall(name) })
 
 	deadline := time.Now().Add(filamentVerifyWait)
 	for {

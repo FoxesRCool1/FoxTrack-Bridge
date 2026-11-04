@@ -137,15 +137,17 @@ func (c *Controller) updateSession(name string, t *mqttpkg.TelemetryData, pollEr
 func endOf(name string, sess *printSession, result string, percent int, filamentMM float64, now int64) *sessionEnd {
 	return &sessionEnd{
 		rec: history.Record{
-			PrinterName: name,
-			FileName:    sess.FileName,
-			NozzleTemp:  sess.NozzleTemp,
-			BedTemp:     sess.BedTemp,
-			StartTime:   sess.StartTime,
-			EndTime:     now,
-			Duration:    now - sess.StartTime,
-			Result:      result,
-			TempSamples: sess.TempSamples,
+			PrinterName:  name,
+			FileName:     sess.FileName,
+			NozzleTemp:   sess.NozzleTemp,
+			BedTemp:      sess.BedTemp,
+			StartTime:    sess.StartTime,
+			EndTime:      now,
+			Duration:     now - sess.StartTime,
+			Result:       result,
+			TempSamples:  sess.TempSamples,
+			PercentAtEnd: percent,
+			FilamentMM:   filamentMM,
 		},
 		percentAtEnd:   percent,
 		filamentUsedMM: filamentMM,
@@ -155,6 +157,9 @@ func endOf(name string, sess *printSession, result string, percent int, filament
 // recordEnd writes an ended print to the local history and tells FoxTrack.
 func (c *Controller) recordEnd(name, fox2APIKey string, end *sessionEnd) {
 	rec := end.rec
+	// PrintEnergy hands the reading over once: take it for both.
+	energy := mqttpkg.PrintEnergy(name)
+	rec.EnergyWh = energy
 	if err := history.Append(rec); err != nil {
 		log.Printf("[%s] history write error: %v", name, err)
 	}
@@ -175,7 +180,7 @@ func (c *Controller) recordEnd(name, fox2APIKey string, end *sessionEnd) {
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		PercentAtEnd:   end.percentAtEnd,
 		FilamentUsedMM: end.filamentUsedMM,
-		EnergyWh:       mqttpkg.PrintEnergy(name),
+		EnergyWh:       energy,
 	})
 }
 
@@ -565,7 +570,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 
 			t, relayPayload, err := fetchTelemetry(p)
 			if err != nil {
-				t = mqttpkg.TelemetryData{Status: "disconnected", Error: err.Error()}
+				t = mqttpkg.TelemetryData{Status: "disconnected", Error: pollErrorText(err)}
 			}
 
 			t.PrinterID = p.Name
@@ -650,6 +655,50 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 		default:
 		}
 	}
+}
+
+// pollErrorText words a failed poll for the card's Offline line. A raw Go error
+// (the request URL, "dial tcp ...: i/o timeout") tells a user nothing, and the
+// dashboard only rewrites some of them; the full error is in the log. An error
+// that is already a sentence passes through as it is.
+func pollErrorText(err error) string {
+	msg := err.Error()
+	var code int
+	if _, e := fmt.Sscanf(msg, "HTTP %d", &code); e == nil && strings.HasPrefix(msg, "HTTP ") {
+		switch code {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return errMoonKey.Error()
+		case http.StatusNotFound:
+			return "The printer answered, but not as expected (HTTP 404). Check the address in the printer settings in Bridge."
+		}
+		return fmt.Sprintf("The printer answered with an error (HTTP %d). Check that its software is running.", code)
+	}
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		return "The address answered, but not like the printer's software. Check the address in the printer settings in Bridge."
+	}
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return msg
+	}
+	host := "the printer"
+	if u, e := url.Parse(ue.URL); e == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	low := strings.ToLower(msg)
+	if strings.Contains(low, "no such host") {
+		return fmt.Sprintf("Can't find %s. Check the address in the printer settings in Bridge.", host)
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return fmt.Sprintf("Can't reach %s. Check that the printer is on and on the same network.", host)
+	}
+	for _, s := range []string{"connection refused", "no route to host", "unreachable", "host is down", "dial tcp", "eof", "reset by peer"} {
+		if strings.Contains(low, s) {
+			return fmt.Sprintf("Can't reach %s. Check that the printer is on and on the same network.", host)
+		}
+	}
+	return msg
 }
 
 func sendJSONRequest(client *http.Client, method, u string, headers map[string]string, body io.Reader) (map[string]interface{}, error) {

@@ -188,6 +188,7 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 		return err
 	}
 	logf("print started after %s", time.Since(published).Round(time.Second))
+	noteBridgeJob(p.Name, firstNonEmpty(opts.TaskName, "FoxTrack print")) // skip objects finds the stored file by it
 	return nil
 }
 
@@ -501,12 +502,14 @@ func forgetPrintFileState(name string) {
 	printErrMu.Unlock()
 }
 
-// noteCommandReply logs the printer's answer to project_file or
-// ams_filament_setting in full (the only trace of why it refused) and
+// noteCommandReply logs the printer's answer to project_file,
+// ams_filament_setting or skip_objects in full (the only trace of why it refused) and
 // remembers a "fail" for the waiting caller. It reports whether payload was
-// such an answer.
+// such an answer. Every answer to a command also feeds the control check
+// (NoteControlReply): a refusal with "verify failed" marks the printer.
 func noteCommandReply(name string, payload []byte) bool {
-	if !bytes.Contains(payload, []byte(`"project_file"`)) && !bytes.Contains(payload, []byte(`"ams_filament_setting"`)) {
+	NoteControlReply(name, payload)
+	if !bytes.Contains(payload, []byte(`"project_file"`)) && !bytes.Contains(payload, []byte(`"ams_filament_setting"`)) && !bytes.Contains(payload, []byte(`"skip_objects"`)) {
 		return false
 	}
 	var probe struct {
@@ -525,6 +528,8 @@ func noteCommandReply(name string, payload []byte) bool {
 		log.Printf("[%s] print_file: printer answered project_file: %s", name, payload)
 	case "ams_filament_setting":
 		log.Printf("[%s] set_filament: printer answered ams_filament_setting: %s", name, payload)
+	case "skip_objects":
+		log.Printf("[%s] skip_objects: printer answered: %s", name, payload)
 	default:
 		return false
 	}

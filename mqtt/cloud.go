@@ -232,13 +232,6 @@ func CloudIP(serial string) string {
 	return cloudIPs[serial]
 }
 
-// ForgetCloudIP drops the learned IP for a removed printer.
-func ForgetCloudIP(serial string) {
-	cloudIPsMu.Lock()
-	delete(cloudIPs, serial)
-	cloudIPsMu.Unlock()
-}
-
 // RetryCloudNow ends a backoff or hold early. It is the one place a human can
 // speed the loop up, and it still refuses more than one retry a minute.
 func RetryCloudNow() error {

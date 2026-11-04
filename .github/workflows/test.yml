@@ -20,7 +20,8 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
+          check-latest: true
 
       # Most root-package tests carry //go:build headless, so the tag is required
       # or go test silently skips them.

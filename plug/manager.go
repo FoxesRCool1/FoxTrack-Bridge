@@ -26,7 +26,6 @@ type Manager struct {
 	now     func() time.Time
 	read    func(ctx context.Context, g config.Plug) (Reading, error)
 	switchF func(ctx context.Context, g config.Plug, on bool) error
-	stopAll chan struct{}
 }
 
 type entry struct {

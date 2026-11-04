@@ -79,6 +79,17 @@ docker run -d \
 
 The first package published from a fork may be private by default. If you want a server to pull it without authenticating, make the package public in the repository package settings. Otherwise, run `docker login ghcr.io` on the server before pulling.
 
+## Cameras and timelapse
+
+The image includes `ffmpeg`, which the Bridge uses for two things:
+
+- **Bambu X1, H2 and P2S cameras.** These printers stream their camera over RTSP on port 322, which the Bridge reads with ffmpeg. A1 and P1 printers use a different stream and do not need it. Make sure Liveview is switched on in the printer's settings, and that the container can reach the printer on port 322 (`--network host` does).
+- **Timelapse.** With ffmpeg the Bridge builds an MP4 video from the pictures it takes while a printer prints. Without it, it saves an animated GIF instead, which is bigger and lower quality.
+
+Timelapse pictures and videos are stored in the Bridge's data folder, so they sit in `/data` and survive container updates. The pictures are deleted once the video is built, and videos older than 30 days are deleted automatically (change this under Settings > Timelapse).
+
+If you run the Bridge outside Docker, install ffmpeg yourself (for example `apt install ffmpeg`, `brew install ffmpeg` or `winget install ffmpeg`) and restart the Bridge. To use an ffmpeg that is not on the `PATH`, set `FOXTRACK_BRIDGE_FFMPEG` to its full path.
+
 ## Notes
 
 - The image runs as a non-root `foxtrack` user.

@@ -3,9 +3,9 @@
 ![GitHub release](https://img.shields.io/github/v/release/FoxesRCool1/FoxTrack-Bridge)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 
-FoxTrack Bridge is a local dashboard and integration server for 3D printers. Run it on any machine on the same network as your printers to get a web dashboard for status, live camera feeds, print history, and basic controls. It can also connect to [FoxTrack](https://foxtrack.studio/) so you can monitor your printers remotely.
+FoxTrack Bridge is a free, open-source dashboard for 3D printers. Run it on any machine on the same network as your printers: Bambu Lab, Klipper, PrusaLink and OctoPrint in one place, with live cameras, alerts to your phone, timelapses, print history with costs, maintenance reminders, Spoolman, Home Assistant and Prometheus. No account, no cloud and no subscription. It can also connect to the [FoxTrack](https://foxtrack.studio/) app if you use it, but everything here works without it.
 
-The dashboard runs fully offline. Its CSS, fonts, and icons are embedded in the binary, so no external network or CDN is needed to load the UI.
+The dashboard runs fully offline. Its CSS, fonts, and icons are embedded in the binary, so no external network or CDN is needed to load the UI. Nothing leaves your network unless you turn on a feature that sends it somewhere you chose (a notification service, your MQTT broker, Spoolman, FoxTrack).
 
 ## A note on AI
 
@@ -17,6 +17,28 @@ Among many other tools, AI was used to develop this program. If you have a probl
 
 ## Features
 
+**Watching your printers**
+- Notifications to Discord, Slack, Telegram, ntfy, Pushover, Gotify, email or any webhook: print started, paused, finished, failed or cancelled, printer errors, a printer going offline, maintenance due. With a camera picture where the service allows it, per-printer and per-event filters, and quiet hours (errors still get through). See [Notifications](#notifications).
+- Readable Bambu errors: HMS and print error codes come with Bambu's own description and a link to the wiki
+- Timelapse of every print, recorded by the Bridge from the camera (MP4 with ffmpeg, an animated picture without it). See [Cameras and timelapse](#cameras-and-timelapse).
+- Live camera for every Bambu Lab printer: A1 and P1 directly, X1, H2 and P2S through ffmpeg
+- Skip objects: cancel one object on the plate while the rest keeps printing (Bambu Lab in LAN Only Mode with Developer Mode, Klipper with `[exclude_object]`)
+- Clear connection problems: a wrong access code, an unreachable address or a printer that refuses control (Developer Mode off) is said in plain words on the card
+
+**Records and upkeep**
+- Print history with filament used, electricity used and the cost of each print, and a CSV export
+- Costs: price per kg (per material) and per kWh, totals per printer
+- Maintenance reminders that come due after hours of printing (lubricate rods, check belts, clean the nozzle), with suggested tasks per printer
+- Spoolman: filament used per print is booked to the right spool (Bambu AMS slots, matched by RFID tag where possible)
+
+**Connecting**
+- Home Assistant over MQTT: each printer appears as a device on its own (discovery), with sensors, pause, resume, stop and the light. See [Home Assistant and Prometheus](#home-assistant-and-prometheus).
+- Prometheus metrics at `/metrics`, for Grafana
+- Optional dashboard password and API tokens. See [Security](#security).
+- Command menu (Ctrl+K or ⌘K) and keyboard shortcuts (`?` lists them)
+- Dashboard in English, Deutsch, Español, Français, Italiano, Nederlands and Português
+
+**Printers and control**
 - Live status for Bambu Lab, Klipper/Moonraker, PrusaLink and OctoPrint printers, and read-only status for printers in Home Assistant
 - Printer alarms: Bambu HMS and print error codes, Klipper shutdowns, PrusaLink and OctoPrint error text, on the card and in FoxTrack's Alarms view
 - Smart plugs (Shelly, Tasmota, Kasa): on/off and watts on the card, auto off after a print, energy per print into FoxTrack
@@ -37,7 +59,7 @@ Among many other tools, AI was used to develop this program. If you have a probl
 - An assistant that diagnoses printer connections, helps you add a printer, and
   can look at the camera to judge a print (experimental; you supply the AI
   provider)
-- Browser push notifications when prints finish, fail, or pause
+- Browser notifications when prints finish, fail, or pause (while the dashboard is open)
 - Print history stored locally, shown in the History view
 - Automatic updates with staged installation
 - Headless mode for servers, NAS devices, and Raspberry Pi
@@ -87,7 +109,7 @@ Replace `<asset-name>` with the file you downloaded, for example `FoxTrack-Bridg
 1. Download the binary for your platform from the [releases page](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest) (see [Supported platforms](#supported-platforms)) and run it. On Windows and macOS the dashboard opens in your browser and a tray icon appears.
 2. On Linux (headless) or in Docker, open the address printed in the log, for example `http://localhost:8080`. From another device on your network use the "on your network" address from the same line (you may need to disable WiFi AP isolation on your router). Linux users can instead run the [scripted installer](#scripted-install-linuxinstallsh), which offers to start Bridge for you.
 3. The welcome screen looks for printers on your network. Click **Add** next to yours and type the access code (Bambu Lab) or API key (Klipper with authentication, PrusaLink).
-4. Optional: connect to FoxTrack by pasting your `ftb_` token, or click **Skip** to use Bridge on its own. Create a token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/app/settings?tab=integrations). See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
+4. Optional: if you use the FoxTrack app, click **Link FoxTrack** and paste your `ftb_` token. Otherwise there is nothing more to do. Create a token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/app/settings?tab=integrations). See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
 
 Before a printer is saved, Bridge checks the connection and tells you what to fix if it cannot sign in. You can also add printers by hand at any time (see below).
 
@@ -162,6 +184,69 @@ FoxTrack takes `.gcode` and `.gcode.3mf` files up to 50 MB, at most 50 waiting a
 ### Changing a printer later
 
 To change a saved printer, for example after its IP address changes, click the pencil icon on its card, edit the details, and click Save. Leave the access code, API key or Home Assistant token blank to keep the saved one. See [Change a printer later](docs/foxtrack.md#change-a-printer-later).
+
+---
+
+## Notifications
+
+**Settings > Notifications** sends print events to the services you add. Each channel picks its events and printers, and can attach a camera picture (Discord, Telegram, ntfy, Pushover, email, webhook). **Send test** checks a channel before you save it. Quiet hours hold back everything except failures and errors.
+
+| Service | What you need |
+|---|---|
+| Discord | A webhook URL: Server settings, Integrations, Webhooks |
+| Slack | An incoming webhook URL |
+| Telegram | A bot token from @BotFather and your chat ID |
+| ntfy | The topic URL (ntfy.sh or your own server), optional access token |
+| Pushover | An application token and your user key |
+| Gotify | The server address and an application token |
+| Email | An SMTP server, port, username, password and the address to send to |
+| Webhook | Any URL that accepts a JSON POST (Node-RED, n8n, Home Assistant webhooks) |
+
+Messages go from the Bridge straight to the service. Tokens and passwords stay in `config.json` and are never shown again in the dashboard.
+
+---
+
+## Cameras and timelapse
+
+The Bambu Lab A1 and P1 series send camera pictures the Bridge reads directly. The X1, H2 and P2S series stream video over RTSP, which the Bridge reads with **ffmpeg**:
+
+- Docker: included in the image.
+- Linux: install it from your package manager (`sudo apt install ffmpeg`, `sudo dnf install ffmpeg`, `sudo pacman -S ffmpeg`).
+- macOS: `brew install ffmpeg`.
+- Windows: `winget install ffmpeg`, or download it from ffmpeg.org and put `ffmpeg.exe` on your PATH.
+
+Restart the Bridge after installing it. If ffmpeg is somewhere else, set `FOXTRACK_BRIDGE_FFMPEG` to its full path. The printer's Liveview must be switched on (printer screen, Settings).
+
+**Settings > Timelapse** records a picture every few seconds while a printer prints and turns them into a video when the print ends: an MP4 with ffmpeg, an animated picture without it. Videos are kept on this machine for 30 days by default and can be watched, downloaded and deleted from the same page.
+
+---
+
+## Home Assistant and Prometheus
+
+**Settings > Home Assistant** connects the Bridge to your MQTT broker (the Mosquitto add-on works). With discovery on, every printer shows up in Home Assistant under Settings, Devices and services, MQTT, with its status, progress, temperatures, time left, and buttons for pause, resume, stop and the light. Printer state is published to `foxtrack_bridge/<printer id>/state` and events to `foxtrack_bridge/<printer id>/event`, so any MQTT client can use them.
+
+This is separate from the read-only *Home Assistant printer* type under [Adding printers](#home-assistant-read-only), which reads a printer that Home Assistant already knows.
+
+**Settings > Prometheus** turns on `/metrics` (printer up, printing, progress, temperatures, time left, alarms, job counts, print time and energy). If you set a dashboard password, create an API token and send it as a bearer token:
+
+```yaml
+scrape_configs:
+  - job_name: foxtrack-bridge
+    static_configs:
+      - targets: ["192.168.1.20:8080"]
+    authorization:
+      credentials: ftk_your_token
+```
+
+---
+
+## Security
+
+By default anyone on your network can open the dashboard and control your printers, as on most printer interfaces. **Settings > Security** sets a password: after that, every page and API call needs a signed-in browser or an API token (`Authorization: Bearer ftk_...`). Passwords are stored as salted PBKDF2 hashes, tokens as SHA-256 hashes, and wrong passwords are slowed down after five tries.
+
+Forgot the password? Stop the Bridge, run it once with `--reset-password`, then start it again (Docker: `docker compose stop`, `docker compose run --rm foxtrack-bridge --reset-password`, `docker compose up -d`). On Windows and macOS, quit the Bridge from the tray, then run it once from a terminal or command prompt with `--reset-password` (for example `FoxTrack-Bridge-Windows.exe --reset-password`); it removes the password and exits without opening anything. API tokens are kept.
+
+The FoxTrack app's direct controls from the web app go through the cloud command queue instead while a password is set; nothing else changes for FoxTrack.
 
 ---
 

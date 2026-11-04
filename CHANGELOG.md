@@ -1,5 +1,69 @@
 # Changelog
 
+## Unreleased
+
+The Bridge now stands on its own as a full printer dashboard: everything below
+works without an account, a cloud or the FoxTrack app, and every feature is
+off until you turn it on. Existing configs load unchanged.
+
+**Alerts and watching**
+- Notifications to Discord, Slack, Telegram, ntfy, Pushover, Gotify, email
+  and webhooks, for prints started, paused, resumed, finished, failed or
+  cancelled, printer errors, printers going offline and maintenance due. With
+  a camera picture, per-printer and per-event filters, quiet hours and a test
+  button. Prints started on the printer screen are covered too.
+- Bambu HMS and print error codes show Bambu's own description (4,928 HMS and
+  959 print error codes), on the card, in notifications and in FoxTrack.
+- A Bambu printer that refuses control (Developer Mode off) says so on its
+  card, with what to change. Pause and stop are always sent.
+- Connection problems in plain words: a wrong access code, an unreachable
+  address, a TLS failure or a wrong serial number. The MQTT keepalive is now
+  30 s with a 10 s ping timeout.
+- Cameras for the X1, H2 and P2S series (RTSP, through ffmpeg; included in
+  the Docker image). One stream per printer is shared by every viewer.
+- Timelapse of every print, made by the Bridge: MP4 with ffmpeg, an animated
+  picture without it. Gallery with playback, download and delete.
+- Skip objects during a print: Bambu (LAN Only Mode with Developer Mode) and
+  Klipper (`[exclude_object]`), with a drawing of the plate.
+
+**Records**
+- Print history records filament (grams per spool for Bambu, length for
+  Klipper and OctoPrint) and smart-plug energy. History shows what each print
+  used and cost; the CSV export has the same columns.
+- Costs: price per kg (per material) and per kWh, with a 30-day summary.
+- Maintenance reminders after hours of printing, with suggested tasks per
+  printer.
+- Spoolman: filament used is booked to the mapped spool after each print,
+  matched by RFID tag when no spool is mapped.
+
+**Connecting**
+- Home Assistant over MQTT with discovery: each printer is a device with
+  sensors, pause, resume, stop and the light.
+- Prometheus metrics at `/metrics` (off by default).
+- Optional dashboard password, with API tokens for scripts. `--reset-password`
+  removes a forgotten one.
+
+**Dashboard**
+- Settings is grouped into Printing, Connect and Bridge; links name the
+  section (`#settings/notifications`) and Back works between views and closes
+  dialogs.
+- Command menu (Ctrl+K or ⌘K) and keyboard shortcuts (`?`).
+- English, Deutsch, Español, Français, Italiano, Nederlands and Português.
+- The FoxTrack app is one optional section: the header chip shows only once
+  it is linked, and the welcome screen no longer asks for a token up front.
+- Phones: dialogs are sheets that a swipe down closes, notches and home bars
+  are respected, and every control has a 44 px touch area.
+- Card-shaped placeholders while loading, steady numbers, balanced headings.
+
+**Security and maintenance**
+- Go 1.26 and golang.org/x/net 0.62 (17 known vulnerabilities in the old
+  version, none reachable from the Bridge). CI and Docker build with the
+  version in go.mod.
+- Third-party GitHub Actions are pinned to commit hashes.
+- With a password set, the dashboard cannot be framed by another site.
+- Control commands carry an idempotency key, so a retried click runs once.
+- Removed unused code (the old v1 status webhook, an unused MQTT helper).
+
 ## v2.5.3
 
 **Smart plugs**
