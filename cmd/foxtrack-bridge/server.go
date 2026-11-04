@@ -448,7 +448,7 @@ func cssHandler(body []byte) http.HandlerFunc {
 // fontHandler serves the embedded Inter woff2 files from web/fonts.
 func fontHandler(w http.ResponseWriter, r *http.Request) {
 	name := path.Base(r.URL.Path) // path.Base strips any traversal segments
-	data, err := fontsFS.ReadFile("web/fonts/" + name)
+	data, err := fontsFS.ReadFile("fonts/" + name)
 	if err != nil {
 		http.NotFound(w, r)
 		return

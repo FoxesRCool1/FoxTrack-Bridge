@@ -13,8 +13,8 @@ import (
 // and left the bridge down until someone started it by hand.
 func TestShippedSystemdUnitsRestartAfterCleanExit(t *testing.T) {
 	for _, path := range []string{
-		"linux/foxtrack-bridge-user.service",
-		"linux/foxtrack-bridge@.service",
+		"../../linux/foxtrack-bridge-user.service",
+		"../../linux/foxtrack-bridge@.service",
 	} {
 		body, err := os.ReadFile(path)
 		if err != nil {

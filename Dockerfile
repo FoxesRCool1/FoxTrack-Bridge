@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -tags headless \
     -trimpath \
     -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION} -X foxtrack-bridge/version.AppBuildVariant=headless" \
-    -o /out/foxtrack-bridge .
+    -o /out/foxtrack-bridge ./cmd/foxtrack-bridge
 
 FROM alpine:3.22
 

@@ -1,6 +1,6 @@
 # Built binaries
-foxtrack-bridge
-foxtrack-bridge.exe
+/foxtrack-bridge
+/foxtrack-bridge.exe
 FoxTrack-Bridge-*
 
 # Local build artifacts (release binaries are built by CI and attached to Releases)
@@ -20,7 +20,7 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
-foxtrack-bridge-linux
+/foxtrack-bridge-linux
 
 # Logs
 build.log

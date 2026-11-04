@@ -338,10 +338,10 @@ You need Go 1.24 or later. Always set the version, otherwise update checks are t
 
 ```bash
 # Linux, headless
-CGO_ENABLED=0 go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
+CGO_ENABLED=0 go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge ./cmd/foxtrack-bridge
 
 # Windows and macOS with the tray (needs CGO and a C toolchain)
-go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
+go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge ./cmd/foxtrack-bridge
 
 # Tests (the headless tag is required, or most tests are skipped)
 go test -tags headless ./...

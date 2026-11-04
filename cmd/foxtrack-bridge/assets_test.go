@@ -68,7 +68,7 @@ func TestUIReferencesLocalAssets(t *testing.T) {
 }
 
 func TestFontsEmbedded(t *testing.T) {
-	data, err := fontsFS.ReadFile("web/fonts/inter-latin.woff2")
+	data, err := fontsFS.ReadFile("fonts/inter-latin.woff2")
 	if err != nil {
 		t.Fatalf("embedded font web/fonts/inter-latin.woff2 missing: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestAllUsedIconsDefined(t *testing.T) {
 }
 
 func TestHeadingFontEmbedded(t *testing.T) {
-	data, err := fontsFS.ReadFile("web/fonts/cormorant-garamond-latin-500.woff2")
+	data, err := fontsFS.ReadFile("fonts/cormorant-garamond-latin-500.woff2")
 	if err != nil {
 		t.Fatalf("embedded font web/fonts/cormorant-garamond-latin-500.woff2 missing: %v", err)
 	}
