@@ -98,6 +98,7 @@ type session struct {
 	client paho.Client
 	stop   chan struct{}
 	done   chan struct{}
+	cmds   chan struct{} // one slot per command still running
 
 	mu        sync.Mutex
 	connected bool
@@ -107,7 +108,7 @@ type session struct {
 }
 
 func (e *Exporter) start(c config.MQTTExport) *session {
-	s := &session{host: e.host, cfg: c, stop: make(chan struct{}), done: make(chan struct{}), syn: newSyncer(c, e.host.Version)}
+	s := &session{host: e.host, cfg: c, stop: make(chan struct{}), done: make(chan struct{}), cmds: make(chan struct{}, maxCommands), syn: newSyncer(c, e.host.Version)}
 	o := options(c, ClientID(c.BridgeID)).
 		SetAutoReconnect(true).SetMaxReconnectInterval(time.Minute).
 		SetWill(availabilityTopic(c), "offline", 1, true).
@@ -192,12 +193,22 @@ func (s *session) onConfig(_ paho.Client, m paho.Message) {
 	}
 }
 
+// maxCommands is how many broker commands may run at once.
+const maxCommands = 4
+
 func (s *session) onCommand(_ paho.Client, m paho.Message) {
 	id, cmd, ok := ParseCommand(s.cfg, m.Topic(), string(m.Payload()), m.Retained())
 	if !ok {
 		return
 	}
+	select {
+	case s.cmds <- struct{}{}:
+	default: // a flood of commands must not start a goroutine each
+		log.Printf("[mqtt-export] command %q dropped: %d earlier ones still running", cmd, maxCommands)
+		return
+	}
 	go func() { // control can take seconds; do not hold up the broker connection
+		defer func() { <-s.cmds }()
 		for _, p := range s.host.Printers() {
 			if p.ID == id {
 				if err := s.host.Control(p.Name, cmd); err != nil {

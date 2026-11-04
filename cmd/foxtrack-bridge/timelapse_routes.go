@@ -172,6 +172,18 @@ func timelapseTick(now time.Time) {
 			rec.End(id, "cancelled")
 		}
 	}
+	for id := range tlIdle {
+		if !known[id] {
+			delete(tlIdle, id)
+		}
+	}
+	tlMu.Lock()
+	for id := range tlFailing {
+		if !known[id] {
+			delete(tlFailing, id)
+		}
+	}
+	tlMu.Unlock()
 }
 
 func timelapseCapture(rec *timelapse.Recorder, p config.Printer, interval time.Duration) {
