@@ -178,10 +178,9 @@ The Bridge logs once at startup when the override is active.
 
 Click **Camera** on a printer's card to see a live picture.
 
-**Bambu Lab:** the Bridge shows the camera of **A1, A1 mini, P1P and P1S**
-printers. Other models, such as the X1 and H2 series, send their camera over a
-different kind of video stream (RTSP) that the Bridge cannot read yet. Their
-status and controls still work.
+**Bambu Lab:** the Bridge reads the camera of **A1, A1 mini, P1P and P1S**
+printers directly. The X1, H2 and P2S series stream over RTSP, which needs
+ffmpeg on the machine running the Bridge (see the README's Cameras section).
 
 **Klipper:** the Bridge finds the webcam through Moonraker. If that does not
 work, set **Webcam URL** on the printer (click the pencil icon).
@@ -198,6 +197,11 @@ FoxTrack shows a camera picture in two ways:
   and about every 10 minutes otherwise. When the printer is idle, the snapshot
   does not update. For Klipper printers, the Bridge sends snapshots only when
   **Webcam URL** is set on the printer.
+
+With a dashboard password set (Settings, Security), FoxTrack can no longer talk
+to the Bridge directly from your browser. Live pictures stop, and pause, resume
+and stop go through FoxTrack's command queue instead, which takes a few seconds
+longer. Snapshots and everything else keep working.
 
 ## Troubleshooting
 

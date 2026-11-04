@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 
 // TempSample holds a single temperature reading taken during a print.
 type TempSample struct {
-	T          int64   `json:"t"`           // seconds elapsed since print start
+	T          int64   `json:"t"` // seconds elapsed since print start
 	NozzleTemp float64 `json:"nozzle_temp"`
 	BedTemp    float64 `json:"bed_temp"`
 }
@@ -30,6 +31,52 @@ type Record struct {
 	Duration    int64        `json:"duration"` // seconds
 	Result      string       `json:"result"`   // "finished" | "cancelled" | "error"
 	TempSamples []TempSample `json:"temp_samples,omitempty"`
+	// Optional and additive: records written before v2.6 have none of these.
+	PercentAtEnd int           `json:"percent_at_end,omitempty"`
+	FilamentMM   float64       `json:"filament_mm,omitempty"` // Klipper and OctoPrint report length
+	Filaments    []FilamentUse `json:"filaments,omitempty"`   // Bambu AMS and external spool
+	EnergyWh     *float64      `json:"energy_wh,omitempty"`   // from the printer's smart plug
+}
+
+// FilamentUse is one spool's share of a print. Grams is estimated from the
+// spool's remain percentage and weight, so it is 0 when either is unknown.
+type FilamentUse struct {
+	Slot     int     `json:"slot"`
+	Material string  `json:"material,omitempty"`
+	Color    string  `json:"color,omitempty"`
+	TagUID   string  `json:"tag_uid,omitempty"`
+	Grams    float64 `json:"grams,omitempty"`
+}
+
+// TotalGrams adds up the estimated grams over every spool.
+func (r Record) TotalGrams() float64 {
+	var g float64
+	for _, f := range r.Filaments {
+		g += f.Grams
+	}
+	return g
+}
+
+var (
+	listenersMu sync.Mutex
+	listeners   []func(Record)
+)
+
+// OnAppend registers fn to run, on its own goroutine, after each record is
+// written. Notifications, Spoolman and maintenance hang off this.
+func OnAppend(fn func(Record)) {
+	listenersMu.Lock()
+	listeners = append(listeners, fn)
+	listenersMu.Unlock()
+}
+
+func notifyAppend(r Record) {
+	listenersMu.Lock()
+	fns := slices.Clone(listeners)
+	listenersMu.Unlock()
+	for _, fn := range fns {
+		go fn(r)
+	}
 }
 
 var mu sync.Mutex
@@ -93,7 +140,11 @@ func Append(r Record) error {
 		records = []Record{}
 	}
 	records = append(records, r)
-	return save(records)
+	if err := save(records); err != nil {
+		return err
+	}
+	notifyAppend(r)
+	return nil
 }
 
 // ForPrinter returns all records for the named printer.

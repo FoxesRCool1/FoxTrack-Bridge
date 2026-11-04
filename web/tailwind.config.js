@@ -4,7 +4,7 @@
 // as bg-panel, text-text-2, border-border and bg-brand follow the theme.
 // Names mirror the FoxTrack web app (src/styles.css) so the two stay in step.
 module.exports = {
-  content: ['./web/ui.html'],
+  content: ['./web/ui.html', './web/login.html', './web/features/*.js'],
   theme: {
     extend: {
       colors: {

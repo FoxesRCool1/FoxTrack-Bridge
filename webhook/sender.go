@@ -345,24 +345,6 @@ func runRelayRetry(item retryItem) {
 	}
 }
 
-// Payload is the JSON body sent to FoxTrack on every status change.
-// Keep this in sync with the FoxTrack webhook endpoint schema.
-type Payload struct {
-	PrinterName   string  `json:"printer_name"`  // Matches the name in FoxTrack
-	Serial        string  `json:"serial"`        // BambuLab serial number
-	Status        string  `json:"status"`        // idle | printing | paused | finished | error | disconnected
-	FileName      string  `json:"file_name"`     // Current file, empty if idle
-	Progress      int     `json:"progress"`      // 0–100
-	ErrorCode     string  `json:"error_code"`    // Empty string if no error
-	Timestamp     int64   `json:"timestamp"`     // Unix seconds (UTC)
-	NozzleTemp    float64 `json:"nozzle_temp"`   // Celsius
-	NozzleTarget  float64 `json:"nozzle_target"` // Celsius
-	BedTemp       float64 `json:"bed_temp"`      // Celsius
-	BedTarget     float64 `json:"bed_target"`    // Celsius
-	LightOn       bool    `json:"light_on"`
-	TimeRemaining int     `json:"time_remaining"` // Minutes
-}
-
 // RelayPayload mirrors the Bambu relay payload shape.
 type RelayPayload struct {
 	Print RelayPrint `json:"print"`
@@ -509,35 +491,6 @@ type RelayPlug struct {
 	Reachable bool     `json:"reachable"` // false when the last poll failed; On is then the last known state
 }
 
-// Send posts a Payload to the FoxTrack webhook URL.
-// The API key is sent as a Bearer token.
-func Send(apiKey, webhookURL string, p Payload) error {
-	body, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := relayHTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("FoxTrack webhook returned HTTP %d", resp.StatusCode)
-	}
-
-	log.Printf("[webhook] Sent status for %s → %s (%d%%)", p.PrinterName, p.Status, p.Progress)
-	return nil
-}
-
 // HistoryPayload is sent to FoxTrack when a print job completes.
 // StartTime, EndTime, and Timestamp are RFC 3339 strings (Go time.Time default
 // JSON encoding) so that Postgres can cast them to timestamptz directly.
@@ -615,7 +568,7 @@ func historyDelay(attempts int) time.Duration {
 
 // scheduleHistoryRetry runs item after its backoff on its own timer. Items
 // older than historyMaxAge are discarded.
-// ponytail: retries live in memory only and do not survive a restart; persist
+// Retries live in memory only and do not survive a restart; persist
 // them to disk if losing a history post across a restart ever matters.
 func scheduleHistoryRetry(item historyRetryItem) {
 	if pendingHistoryRetries.Add(1) > maxPendingRetries {

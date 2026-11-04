@@ -1,0 +1,294 @@
+{
+  "homeassistant/binary_sensor/ftb_abcd1234/bridge/config": {
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234"
+      ],
+      "manufacturer": "FoxTrack",
+      "model": "Bridge",
+      "name": "FoxTrack Bridge",
+      "sw_version": "2.6.0"
+    },
+    "device_class": "connectivity",
+    "has_entity_name": true,
+    "name": "Connected",
+    "payload_off": "offline",
+    "payload_on": "online",
+    "state_topic": "foxtrack_bridge/bridge/availability",
+    "unique_id": "ftb_abcd1234_bridge"
+  },
+  "homeassistant/binary_sensor/ftb_abcd1234/p1_online/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "device_class": "connectivity",
+    "has_entity_name": true,
+    "name": "Online",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "unique_id": "ftb_abcd1234_p1_online",
+    "value_template": "{{ 'ON' if value_json.online else 'OFF' }}"
+  },
+  "homeassistant/binary_sensor/ftb_abcd1234/p1_printing/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "device_class": "running",
+    "has_entity_name": true,
+    "name": "Printing",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "unique_id": "ftb_abcd1234_p1_printing",
+    "value_template": "{{ 'ON' if value_json.status == 'printing' else 'OFF' }}"
+  },
+  "homeassistant/binary_sensor/ftb_abcd1234/p1_problem/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "device_class": "problem",
+    "has_entity_name": true,
+    "name": "Problem",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "unique_id": "ftb_abcd1234_p1_problem",
+    "value_template": "{{ 'ON' if value_json.alarms > 0 else 'OFF' }}"
+  },
+  "homeassistant/button/ftb_abcd1234/p1_pause/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "command_topic": "foxtrack_bridge/p1/command",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "has_entity_name": true,
+    "icon": "mdi:pause",
+    "name": "Pause",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "payload_press": "pause",
+    "unique_id": "ftb_abcd1234_p1_pause"
+  },
+  "homeassistant/button/ftb_abcd1234/p1_resume/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "command_topic": "foxtrack_bridge/p1/command",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "has_entity_name": true,
+    "icon": "mdi:play",
+    "name": "Resume",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "payload_press": "resume",
+    "unique_id": "ftb_abcd1234_p1_resume"
+  },
+  "homeassistant/button/ftb_abcd1234/p1_stop/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "command_topic": "foxtrack_bridge/p1/command",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "has_entity_name": true,
+    "icon": "mdi:stop",
+    "name": "Stop",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "payload_press": "stop",
+    "unique_id": "ftb_abcd1234_p1_stop"
+  },
+  "homeassistant/light/ftb_abcd1234/p1_light/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "command_topic": "foxtrack_bridge/p1/command",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "has_entity_name": true,
+    "name": "Light",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "payload_off": "light_off",
+    "payload_on": "light_on",
+    "state_off": "OFF",
+    "state_on": "ON",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "state_value_template": "{{ 'ON' if value_json.light else 'OFF' }}",
+    "unique_id": "ftb_abcd1234_p1_light"
+  },
+  "homeassistant/sensor/ftb_abcd1234/p1_bed_temp/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "device_class": "temperature",
+    "has_entity_name": true,
+    "name": "Bed temperature",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_class": "measurement",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "suggested_display_precision": 1,
+    "unique_id": "ftb_abcd1234_p1_bed_temp",
+    "unit_of_measurement": "°C",
+    "value_template": "{{ value_json.bed_temp }}"
+  },
+  "homeassistant/sensor/ftb_abcd1234/p1_file/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "has_entity_name": true,
+    "icon": "mdi:file-outline",
+    "name": "Current file",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "unique_id": "ftb_abcd1234_p1_file",
+    "value_template": "{{ value_json.file[:250] }}"
+  },
+  "homeassistant/sensor/ftb_abcd1234/p1_nozzle_temp/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "device_class": "temperature",
+    "has_entity_name": true,
+    "name": "Nozzle temperature",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_class": "measurement",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "suggested_display_precision": 1,
+    "unique_id": "ftb_abcd1234_p1_nozzle_temp",
+    "unit_of_measurement": "°C",
+    "value_template": "{{ value_json.nozzle_temp }}"
+  },
+  "homeassistant/sensor/ftb_abcd1234/p1_progress/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "has_entity_name": true,
+    "icon": "mdi:progress-clock",
+    "name": "Progress",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_class": "measurement",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "unique_id": "ftb_abcd1234_p1_progress",
+    "unit_of_measurement": "%",
+    "value_template": "{{ value_json.progress }}"
+  },
+  "homeassistant/sensor/ftb_abcd1234/p1_status/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "has_entity_name": true,
+    "icon": "mdi:printer-3d",
+    "name": "Status",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "unique_id": "ftb_abcd1234_p1_status",
+    "value_template": "{{ value_json.status }}"
+  },
+  "homeassistant/sensor/ftb_abcd1234/p1_time_remaining/config": {
+    "availability_topic": "foxtrack_bridge/bridge/availability",
+    "device": {
+      "identifiers": [
+        "ftb_abcd1234_p1"
+      ],
+      "manufacturer": "Bambu Lab",
+      "model": "P1S",
+      "name": "Monsieur",
+      "via_device": "ftb_abcd1234"
+    },
+    "device_class": "duration",
+    "has_entity_name": true,
+    "name": "Time remaining",
+    "payload_available": "online",
+    "payload_not_available": "offline",
+    "state_class": "measurement",
+    "state_topic": "foxtrack_bridge/p1/state",
+    "unique_id": "ftb_abcd1234_p1_time_remaining",
+    "unit_of_measurement": "min",
+    "value_template": "{{ value_json.time_remaining }}"
+  }
+}

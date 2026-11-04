@@ -1,220 +1,286 @@
-# FoxTrack Bridge
+<div align="center">
 
-![GitHub release](https://img.shields.io/github/v/release/FoxesRCool1/FoxTrack-Bridge)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+  <img src="assets/logo-light.png" width="88" alt="">
+</picture>
 
-FoxTrack Bridge is a local dashboard and integration server for 3D printers. Run it on any machine on the same network as your printers to get a web dashboard for status, live camera feeds, print history, and basic controls. It can also connect to [FoxTrack](https://foxtrack.studio/) so you can monitor your printers remotely.
+<h1>FoxTrack Bridge</h1>
 
-The dashboard runs fully offline. Its CSS, fonts, and icons are embedded in the binary, so no external network or CDN is needed to load the UI.
+<p><strong>All your 3D printers on one dashboard.</strong></p>
 
-## A note on AI
+<p>Bambu Lab, Klipper, PrusaLink and OctoPrint side by side, with live cameras, phone alerts,<br>timelapses and print costs. Free, open source, and it runs on your own network.</p>
 
-Among many other tools, AI was used to develop this program. If you have a problem with that, you may look for alternative programs made by people with more time or contribute human-made code.
+[![Latest release](https://img.shields.io/github/v/release/FoxesRCool1/FoxTrack-Bridge?label=release&color=c2410c)](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/FoxesRCool1/FoxTrack-Bridge/total?color=c2410c)](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases)
+[![Platforms](https://img.shields.io/badge/runs%20on-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker%20%7C%20Raspberry%20Pi-555)](#downloads)
+[![License: MIT](https://img.shields.io/badge/license-MIT-555)](LICENSE)
 
-<img width="2519" height="1255" alt="screenshot-2026-05-21_16-45-12" src="https://github.com/user-attachments/assets/3b25ea5a-f462-459b-b5b3-6c7a5244bb86" />
+<p>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-you-get">Features</a> ·
+  <a href="#printers-it-works-with">Printers</a> ·
+  <a href="#setup-guides">Setup guides</a> ·
+  <a href="#contributing">Contributing</a>
+</p>
 
----
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard.png">
+  <img src="docs/images/dashboard-light.png" alt="The FoxTrack Bridge dashboard showing four printers with live status" width="100%">
+</picture>
 
-## Features
+</div>
 
-- Live status for Bambu Lab, Klipper/Moonraker, PrusaLink and OctoPrint printers, and read-only status for printers in Home Assistant
-- Printer alarms: Bambu HMS and print error codes, Klipper shutdowns, PrusaLink and OctoPrint error text, on the card and in FoxTrack's Alarms view
-- Smart plugs (Shelly, Tasmota, Kasa): on/off and watts on the card, auto off after a print, energy per print into FoxTrack
-- Virtual printer: OrcaSlicer and PrusaSlicer send a sliced file to FoxTrack through the Bridge's OctoPrint-style upload
-- Print progress, temperatures, elapsed time, and ETA
-- Live camera feed (Bambu Lab A1 and P1 series, and Klipper webcams) and light toggle
-- Edit a saved printer, for example after its IP address changes
-- AMS filament slot display with colors and material types (Bambu Lab only)
-- Print speed selector: Silent, Standard, Sport, Ludicrous (Bambu Lab only)
-- Fan speed control (Bambu Lab and Klipper)
-- Nozzle and bed targets and Home, from the card's Temps panel or from FoxTrack (Bambu Lab in LAN mode, Klipper and OctoPrint)
-- Files on the printer: FoxTrack lists the files already on a printer and can start one (Bambu Lab in LAN mode, Klipper and OctoPrint)
-- Pause, resume and stop from FoxTrack (Bambu Lab in LAN mode, Klipper, PrusaLink and OctoPrint)
-- Print a sliced file from FoxTrack: the Bridge fetches it, puts it on the printer and starts it (Bambu Lab in LAN Only Mode with Developer Mode, Klipper, PrusaLink and OctoPrint with a `.gcode` file)
-- GCode console for sending single commands (Bambu Lab, Advanced mode only)
-- Per-printer camera hiding, saved on the Bridge so it applies in every browser
-- Bambu Cloud sign-in for printers that are not in LAN mode (experimental)
-- An assistant that diagnoses printer connections, helps you add a printer, and
-  can look at the camera to judge a print (experimental; you supply the AI
-  provider)
-- Browser push notifications when prints finish, fail, or pause
-- Print history stored locally, shown in the History view
-- Automatic updates with staged installation
-- Headless mode for servers, NAS devices, and Raspberry Pi
+## Why it exists
 
----
+Most printer software only talks to one brand. If you run a Bambu next to a Voron and a Prusa, you end up with three apps, three sets of alerts and no single place to see what is printing. FoxTrack Bridge puts them in one dashboard that you host yourself. It needs no account or subscription, and nothing leaves your network unless you connect a service such as Discord or Home Assistant.
 
-## Bridge runs in the background
+## What you get
 
-FoxTrack Bridge is a persistent background service, not an app you open to check on a print. MQTT connections to Bambu Lab printers, print history recording, browser push notifications, and syncing to FoxTrack all only happen while the Bridge process is running. Anything a printer does while Bridge is stopped is not recorded and is not synced.
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/history.png" alt="Print history for three printers">
+<h3>Every print, with its cost</h3>
+History keeps each print's result, time and filament per printer. Set your prices under Costs to see what each print cost, and export it all as CSV.
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/notifications.png" alt="Notification channels in Settings">
+<h3>Alerts on your phone</h3>
+Discord, Slack, Telegram, ntfy, Pushover, Gotify, email or any webhook, with a camera picture attached. Quiet hours still let failures through.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/timelapse.png" alt="Timelapse settings and recorded videos">
+<h3>A timelapse of every print</h3>
+The Bridge takes a picture every few seconds and turns them into a video when the print ends. Videos stay on your machine.
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/maintenance.png" alt="Maintenance reminders per printer">
+<h3>Maintenance that keeps count</h3>
+Reminders come due after hours of printing, counted from each printer's history: oil the rods, check the belts, clean the nozzle.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/command-menu.png" alt="Command menu opened with Ctrl+K">
+<h3>Fast to drive</h3>
+Press Ctrl+K (or ⌘K) to jump to any printer or setting, and <code>?</code> for keyboard shortcuts. The dashboard speaks English, Deutsch, Español, Français, Italiano, Nederlands and Português.
+</td>
+<td width="50%" valign="top" align="center">
+<img src="docs/images/mobile.png" alt="The dashboard on a phone" width="46%">
+<h3>Works on your phone</h3>
+Open the dashboard from any device on your network. No app to install.
+</td>
+</tr>
+</table>
 
-On Windows and macOS, use the system tray's "Enable: Start at Login" option to keep it running continuously. On Linux, see [Running on Linux](#running-on-linux) below for the equivalent systemd setups.
+It also does:
 
----
+- Pause, resume and stop. Set nozzle and bed temperatures, home, change fans, print speed and the light, or start a file that is already on the printer.
+- Skip a failed part on the plate while the rest keeps printing.
+- Printer alarms in plain words: Bambu HMS codes with their description and a wiki link, Klipper shutdowns, PrusaLink and OctoPrint errors. A wrong access code or a printer that refuses control is explained on its card.
+- Shelly, Tasmota and Kasa smart plugs: see the watts, switch the printer off, or have the Bridge turn it off once a finished print has cooled.
+- Spoolman support, so the filament each print used comes off the right spool.
+- Home Assistant over MQTT, with each printer as its own device, and Prometheus metrics for Grafana.
+- An optional dashboard password and API tokens.
+- An experimental assistant that can tell you why a printer is offline or how a print looks, using an AI provider you choose.
+- Automatic updates, a tray app on Windows and macOS, and a headless mode for servers and Raspberry Pi.
 
-## Supported platforms
+## Printers it works with
 
-| Platform | Asset | Tray or headless |
-|---|---|---|
-| Windows x64 | `FoxTrack-Bridge-Windows.exe` | System tray |
-| macOS Intel | `FoxTrack-Bridge-macOS-Intel.zip` | System tray |
-| macOS Apple Silicon | `FoxTrack-Bridge-macOS-Apple-Silicon.zip` | System tray |
-| Linux x64 | `FoxTrack-Bridge-Linux` | Headless |
-| Linux ARM64 | `FoxTrack-Bridge-Linux-ARM64` | Headless |
-| Linux ARM32 | `FoxTrack-Bridge-Linux-ARM32` | Headless |
+| | Live status | Camera | Pause / stop | Temps and home | Start a file | Skip objects | Alarms |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| **Bambu Lab** (LAN mode) | ✓ | ✓ ¹ | ✓ | ✓ | ✓ | ✓ ² | ✓ |
+| **Bambu Lab** (cloud) | ✓ | ✓ ³ | | | | | ✓ |
+| **Klipper** (Moonraker) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ ⁴ | ✓ |
+| **OctoPrint** | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| **PrusaLink** (MK4, XL, MINI, Core One) | ✓ | ⁵ | ✓ | | | | ✓ |
+| **Home Assistant** (read-only) | ✓ | | | | | | ✓ |
 
-Download the latest builds from the [releases page](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest).
+<sub>¹ X1, H2 and P2S need ffmpeg. ² Needs Developer Mode. ³ When the printer is on the same network. ⁴ Needs <code>[exclude_object]</code>. ⁵ A separate webcam URL.</sub>
 
-Every Linux build is headless: there is no system tray, so control it from the terminal or systemd instead (see [Running on Linux](#running-on-linux)). Linux ARM32 is built for ARMv7 and later; it will not run on ARMv6 boards such as the original Raspberry Pi Zero or Raspberry Pi 1 (see [Raspberry Pi and other ARM boards](#raspberry-pi-and-other-arm-boards)).
+## How it fits together
 
----
-
-## Verifying a download
-
-Every release includes a `checksums.txt` with SHA-256 hashes for all six assets above. After downloading a binary, verify it before running it:
-
-```bash
-curl -fsSLO https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest/download/checksums.txt
-grep <asset-name> checksums.txt | sha256sum -c -
+```mermaid
+flowchart LR
+    subgraph lan [Your network]
+        B[Bambu Lab] --> FB
+        K[Klipper] --> FB
+        O[OctoPrint] --> FB
+        P[PrusaLink] --> FB
+        FB((FoxTrack<br>Bridge))
+        FB --> D[Dashboard in<br>any browser]
+        FB --> HA[Home Assistant]
+        FB --> S[Spoolman]
+        FB --> G[Prometheus<br>and Grafana]
+    end
+    FB -. only if you set it up .-> N[Discord, Telegram,<br>ntfy, email...]
 ```
 
-Replace `<asset-name>` with the file you downloaded, for example `FoxTrack-Bridge-Linux-ARM64`. On macOS, use `shasum -a 256 -c -` instead of `sha256sum -c -`; macOS doesn't ship `sha256sum` by default.
-
----
+The Bridge talks to each printer the way the printer prefers: MQTT for Bambu Lab, HTTP for Moonraker, PrusaLink and OctoPrint. Leave it running on an always-on computer, a NAS or a Raspberry Pi. It only records prints and sends alerts while it runs.
 
 ## Quick start
 
-1. Download the binary for your platform from the [releases page](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest) (see [Supported platforms](#supported-platforms)) and run it. On Windows and macOS the dashboard opens in your browser and a tray icon appears.
-2. On Linux (headless) or in Docker, open the address printed in the log, for example `http://localhost:8080`. From another device on your network use the "on your network" address from the same line (you may need to disable WiFi AP isolation on your router). Linux users can instead run the [scripted installer](#scripted-install-linuxinstallsh), which offers to start Bridge for you.
-3. The welcome screen looks for printers on your network. Click **Add** next to yours and type the access code (Bambu Lab) or API key (Klipper with authentication, PrusaLink).
-4. Optional: connect to FoxTrack by pasting your `ftb_` token, or click **Skip** to use Bridge on its own. Create a token in [FoxTrack Settings > Integrations > FoxTrack Bridge](https://foxtrack.studio/app/settings?tab=integrations). See [Using FoxTrack Bridge with FoxTrack](docs/foxtrack.md) for the full walkthrough, including how to link printers you already have in FoxTrack.
+**Windows and macOS.** Download the file from the [latest release](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest) and run it. The dashboard opens in your browser and an icon appears in the tray. Tick **Start at Login** in the tray menu to keep it running.
 
-Before a printer is saved, Bridge checks the connection and tells you what to fix if it cannot sign in. You can also add printers by hand at any time (see below).
+**Linux.** Install it for your user, with a systemd service that starts at login:
 
----
+```bash
+curl -fsSL https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/linux/install.sh | sh
+```
 
-## Adding printers
-
-The first-run welcome and **Printers > Add printer** scan your network for Bambu Lab printers (SSDP broadcast), Klipper/Moonraker, PrusaLink and OctoPrint printers (a quick scan of your local /24 subnet). Pick one, enter its access code or API key, and click Connect. Bridge checks the connection before saving and explains what to fix: a wrong Bambu access code, a wrong API key, an unreachable address, or a rejected Home Assistant token.
-
-Printers on another subnet or VLAN, and anything the scan misses, can be added by hand as below.
-
-### Bambu Lab
-
-1. On the printer touchscreen, enable **LAN Only Mode** under Network settings.
-2. Enable **Developer Mode** under About.
-3. Note the **IP address**, **Serial Number**, and **LAN Access Code** (shown on the screen after enabling LAN Only Mode).
-4. In the dashboard, open Printers, click **Add printer**, select **Bambu Lab (LAN mode)**, enter those values, and click Connect.
-
-### Klipper / Moonraker
-
-1. Find your Moonraker URL, usually `http://192.168.x.x:7125`.
-2. In the dashboard, open Printers, click **Add printer**, select **Klipper / Moonraker**, enter the URL, and click Connect.
-3. If Moonraker has authentication enabled, also provide the Moonraker API key.
-
-### PrusaLink (Prusa MK4, XL, MINI, Core One)
-
-1. On the printer, turn on PrusaLink in the network settings. Note the printer's IP address and the API key shown on its PrusaLink settings screen.
-2. In the dashboard, open Printers, click **Add printer**, select **Prusa (PrusaLink)**, enter the URL (for example `http://192.168.1.50`) and the API key, and click Connect.
-3. PrusaLink has no camera stream. If you have a separate webcam, enter its URL.
-
-The Bridge reports status, progress, temperatures, file name and time left, and FoxTrack can pause, resume and stop a print. FoxTrack knows a PrusaLink printer by its name in the Bridge.
-
-Known limits:
-
-- The API key is the only way to sign in (the `X-Api-Key` header). HTTP Digest login with a username and password is not supported, so a printer that only offers Digest cannot be added yet.
-- Printing a file from FoxTrack takes plain `.gcode` only. Binary `.bgcode` files are not accepted.
-- FoxTrack sees the printer model as "PrusaLink" for every Prusa printer, not the exact model.
-- Fan speed control is not available.
-
-### Home Assistant (read-only)
-
-If Home Assistant already shows your printer (for example through its PrusaLink, OctoPrint or Bambu Lab integration), the Bridge can read the printer's status from Home Assistant. FoxTrack then sees the status but cannot pause, stop or start a print.
-
-1. In Home Assistant, open your profile, then **Security**, and create a **long-lived access token**.
-2. Find your printer's entity IDs under **Settings > Devices & services > Entities**. You need the entity that holds the printer's state. Progress, nozzle temperature, bed temperature, file name and time left are optional.
-3. In the dashboard, open Printers, click **Add printer**, select **Home Assistant (read-only)**, enter the Home Assistant URL (usually `http://homeassistant.local:8123`), the token and the entity IDs, and click Connect.
-
-The state entity can read idle, printing, paused, finished or error (running, standby, complete and failed work too). Unavailable or unknown shows the printer as offline. A time left entity can count seconds, minutes or hours (the Bridge reads its unit), or hold the time the print will finish.
-
-### OctoPrint
-
-1. In OctoPrint, make an API key: **Settings > Application Keys** (one for the Bridge), or copy the global key under **Settings > API**.
-2. In the dashboard, open Printers, click **Add printer**, select **OctoPrint**, enter the address (for example `http://octopi.local`, or `http://192.168.1.60:5000` when OctoPrint is not behind a web server) and the API key, and click Connect. The network scan also finds OctoPrint on ports 80 and 5000.
-3. The webcam is read from OctoPrint's own webcam settings. Enter a webcam URL only if the camera button does not work.
-
-The Bridge reports status, progress, temperatures, file name and time left, records finished prints, and reports an OctoPrint printer error as an alarm. FoxTrack can pause, resume and stop a print, and can send a `.gcode` file: the Bridge uploads it to OctoPrint and starts it. FoxTrack knows an OctoPrint printer by its name in the Bridge.
-
-### Smart plugs (Shelly, Tasmota, Kasa)
-
-A printer can be powered through a smart plug the Bridge reads and switches over your network; no maker's cloud is called. Supported: Shelly Gen1, Gen2 and Plus; Tasmota; Kasa plugs on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) is not supported yet.
-
-Set the plug on the printer: click the pencil on its card (or add the printer), scroll to **Smart plug**, choose the type, enter the plug's address and click **Check plug**. Tick **Turn the plug off after a print** to have the Bridge switch it off a set number of minutes after a print ends, once the nozzle is under 50 C. A new print in that time cancels it.
-
-The card then shows `Plug on · 142 W` and a **Plug on** / **Plug off** button. Off is disabled while the printer prints or is paused, and refused while the nozzle is above 50 C. The energy each print used (from the plug's counter, or watts summed over time for a plug without one) is sent to FoxTrack with the print history and shows in Reports under Printer use. FoxTrack's own plug buttons work through the Bridge.
-
-### Virtual printer (send from the slicer to FoxTrack)
-
-Under **Settings > Virtual printer**, the Bridge can look like an OctoPrint host to OrcaSlicer and PrusaSlicer. Turn it on (the Bridge must be connected to FoxTrack), then in the slicer add a physical printer / print host of type **OctoPrint** with the address shown (this computer, port 8090) and the API key shown. The slicer's send button then puts the sliced file on FoxTrack's Printers page under **From the slicer**, where you attach it to a product and print it from FoxTrack. It never goes to a printer directly.
-
-FoxTrack takes `.gcode` and `.gcode.3mf` files up to 50 MB, at most 50 waiting at once. Bambu Studio cannot send to it (it only talks to Bambu printers); use OrcaSlicer.
-
-### Changing a printer later
-
-To change a saved printer, for example after its IP address changes, click the pencil icon on its card, edit the details, and click Save. Leave the access code, API key or Home Assistant token blank to keep the saved one. See [Change a printer later](docs/foxtrack.md#change-a-printer-later).
-
----
-
-## Running with Docker
-
-The repository's [docker-compose.yml](docker-compose.yml) runs the published image (`ghcr.io/foxesrcool1/foxtrack-bridge`). Download it and start it:
+**Docker.** Grab [docker-compose.yml](docker-compose.yml), then:
 
 ```bash
 docker compose up -d
 docker compose logs foxtrack-bridge   # shows the dashboard address
 ```
 
-Settings and print history live in the `foxtrack-bridge-data` volume. The compose file uses `network_mode: host` on purpose: Bambu printers are found by SSDP broadcasts, which do not cross Docker's default bridge network, so without host networking discovery finds nothing (adding printers by address still works). Because of that, `ports:` is ignored; to change the port set `FOXTRACK_BRIDGE_PORT` in the file. Host networking is for Linux hosts; on Docker Desktop (Windows, macOS), add printers by address if discovery finds nothing.
+Then open the dashboard. The welcome screen looks for printers on your network: click **Add** next to yours and enter its access code (Bambu Lab) or API key. The Bridge tests the connection before saving and tells you what to fix if it can't sign in.
 
-Self-update does not run inside Docker because the binary is not writable. To update, run `docker compose pull && docker compose up -d`. See [Docker documentation](docs/docker.md) for building your own image.
+## Downloads
 
----
+| System | File | Interface |
+|---|---|---|
+| Windows x64 | `FoxTrack-Bridge-Windows.exe` | Tray app |
+| macOS Intel | `FoxTrack-Bridge-macOS-Intel.zip` | Tray app |
+| macOS Apple Silicon | `FoxTrack-Bridge-macOS-Apple-Silicon.zip` | Tray app |
+| Linux x64 | `FoxTrack-Bridge-Linux` | Headless |
+| Linux ARM64 (Pi 3 or later, Pi Zero 2 W) | `FoxTrack-Bridge-Linux-ARM64` | Headless |
+| Linux ARM32 (ARMv7 or later) | `FoxTrack-Bridge-Linux-ARM32` | Headless |
 
-## Configuration and history files
+Each release has a `checksums.txt`. Check a download with `grep <file> checksums.txt | sha256sum -c -` (on macOS, `shasum -a 256 -c -`).
 
-FoxTrack Bridge stores `config.json` and `history.json` in your OS's standard per-user configuration directory:
+## Setup guides
 
-| OS | Location |
+<details>
+<summary><b>Bambu Lab</b></summary>
+
+1. On the printer, turn on **LAN Only Mode** in the network settings. The access code is shown there.
+2. Turn on **Developer Mode** (next to LAN Only Mode on 2025 firmware and later, under About on older firmware). Pause, stop, printing files and skipping objects need it.
+3. In the dashboard, choose **Bambu Lab (LAN mode)** and enter the IP address, serial number and access code.
+
+The A1 and P1 series send camera pictures the Bridge reads directly. The X1, H2 and P2S series stream over RTSP, which needs [ffmpeg](https://ffmpeg.org) (`sudo apt install ffmpeg`, `brew install ffmpeg` or `winget install ffmpeg`; the Docker image already has it). Restart the Bridge after installing it, or set `FOXTRACK_BRIDGE_FFMPEG` to its full path. Liveview must be on in the printer's settings.
+
+Printers that aren't in LAN mode can be added through your Bambu account. See **Bambu Cloud** below.
+
+</details>
+
+<details>
+<summary><b>Klipper, OctoPrint and PrusaLink</b></summary>
+
+**Klipper:** choose **Klipper / Moonraker** and enter the Moonraker address, usually `http://192.168.x.x:7125`. Add the API key if Moonraker has authentication turned on.
+
+**OctoPrint:** create an API key under **Settings > Application Keys** (or copy the global key under **Settings > API**). Choose **OctoPrint** and enter the address, for example `http://octopi.local`, and the key. The webcam is read from OctoPrint's own settings.
+
+**PrusaLink:** turn on PrusaLink in the printer's network settings. Choose **Prusa (PrusaLink)** and enter the printer's address and the API key from its PrusaLink screen. Only API key sign-in is supported (not HTTP Digest), only plain `.gcode` files can be printed (not `.bgcode`), and there is no fan control. PrusaLink has no camera stream, so enter a separate webcam URL if you have one.
+
+The network scan finds Klipper, OctoPrint and PrusaLink on your local /24 subnet. Printers on another subnet or VLAN can be added by address.
+
+</details>
+
+<details>
+<summary><b>A printer that Home Assistant already knows (read-only)</b></summary>
+
+1. In Home Assistant, open your profile, then **Security**, and create a long-lived access token.
+2. Find the printer's entity IDs under **Settings > Devices & services > Entities**. Only the state entity is required. Progress, temperatures, file name and time left are optional.
+3. Choose **Home Assistant (read-only)** and enter the Home Assistant URL (usually `http://homeassistant.local:8123`), the token and the entity IDs.
+
+You get status and progress, but no print controls.
+
+</details>
+
+<details>
+<summary><b>Smart plugs</b></summary>
+
+Supported: Shelly Gen1, Gen2 and Plus; Tasmota; Kasa on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) isn't supported yet. The Bridge talks to the plug over your network and never uses the maker's cloud.
+
+Click the pencil on a printer's card, scroll to **Smart plug**, choose the type, enter the plug's address and click **Check plug**. With **Turn off after a print** ticked, the plug switches off a set number of minutes after a print ends, once the nozzle is below 50 °C. A new print in that time cancels it. The off button is disabled while the printer is printing or hot.
+
+</details>
+
+<details>
+<summary><b>Notifications</b></summary>
+
+Add channels under **Settings > Notifications**. Each one picks its events (print started, paused, finished, failed, printer error, offline, maintenance due) and printers, and can attach a camera picture. **Send test** checks a channel before you save it. During quiet hours only failures and errors are sent.
+
+| Service | What you need |
 |---|---|
-| Linux | `~/.config/FoxTrack-Bridge/` (or `$XDG_CONFIG_HOME/FoxTrack-Bridge` if set) |
-| macOS | `~/Library/Application Support/FoxTrack-Bridge/` |
-| Windows | `%AppData%\FoxTrack-Bridge\` |
+| Discord | A webhook URL (Server settings > Integrations > Webhooks) |
+| Slack | An incoming webhook URL |
+| Telegram | A bot token from @BotFather and your chat ID |
+| ntfy | A topic URL on ntfy.sh or your own server, and an access token if the topic is protected |
+| Pushover | An application token and your user key |
+| Gotify | The server address and an application token |
+| Email | An SMTP server, port, username, password and recipient |
+| Webhook | Any URL that accepts a JSON POST (Node-RED, n8n, Home Assistant) |
 
-If `config.json` isn't found there, older builds' location, `<the executable's directory>/config/config.json`, is read automatically and migrated to the new location on the next save. This fallback is config-only: `history.json` has no equivalent, so history recorded by a very old install at the legacy location will not appear after upgrading.
+Messages go straight from the Bridge to the service. Tokens and passwords are saved in `config.json` and never shown again in the dashboard.
 
-If either file fails to load, for example because it's corrupted, Bridge backs the broken file up next to itself as `config.json.corrupt-<timestamp>` or `history.json.corrupt-<timestamp>` and starts fresh rather than deleting or overwriting it.
+</details>
 
----
+<details>
+<summary><b>Timelapse</b></summary>
 
-## Changing the listen port
+Turn on **Settings > Timelapse** to take a picture every few seconds while a printer prints. When the print ends the pictures become an MP4 (or an animated GIF without ffmpeg). Videos are kept for 30 days by default, and you can watch, download and delete them on the same page.
 
-Bridge listens on port 8080 by default. Change it with the `--port` flag or the `FOXTRACK_BRIDGE_PORT` environment variable; if both are set, `--port` wins:
+</details>
 
-```bash
-./foxtrack-bridge --port 9000
-# or
-FOXTRACK_BRIDGE_PORT=9000 ./foxtrack-bridge
+<details>
+<summary><b>Home Assistant and Prometheus</b></summary>
+
+**Settings > Home Assistant** connects the Bridge to your MQTT broker (the Mosquitto add-on works). With discovery on, each printer appears under **Settings > Devices & services > MQTT** with its status, progress, temperatures, time left and pause, resume, stop and light buttons. State is published to `foxtrack_bridge/<printer id>/state` and events to `foxtrack_bridge/<printer id>/event`, so any MQTT client can use them.
+
+**Settings > Prometheus** turns on `/metrics`: printer up, printing, progress, temperatures, time left, alarms, job counts, print time and energy. With a dashboard password set, create an API token and send it as a bearer token:
+
+```yaml
+scrape_configs:
+  - job_name: foxtrack-bridge
+    static_configs:
+      - targets: ["192.168.1.20:8080"]
+    authorization:
+      credentials: ftk_your_token
 ```
 
-This matters on Klipper setups in particular: 8080 is also the default webcam port for mjpg-streamer on Mainsail and Fluidd, so running Bridge on the same machine can collide with it unless you move one of them off 8080.
+</details>
 
----
+<details>
+<summary><b>Password and API tokens</b></summary>
 
-## Running on Linux
+Out of the box, anyone on your network can open the dashboard and control your printers, as with most printer interfaces. Set a password under **Settings > Security** and every page and API call then needs a signed-in browser or an API token (`Authorization: Bearer ftk_...`). Passwords are stored as salted PBKDF2 hashes and tokens as SHA-256 hashes. After five wrong passwords, sign-in slows down.
 
-### Manual install (recommended)
+To reset a forgotten password, stop the Bridge, run it once with `--reset-password`, then start it again. API tokens are kept. On Windows and macOS, quit from the tray first and run it from a terminal. With Docker: `docker compose stop`, `docker compose run --rm foxtrack-bridge --reset-password`, `docker compose up -d`.
 
-Download the asset matching your CPU architecture (see [Supported platforms](#supported-platforms)), verify it (see [Verifying a download](#verifying-a-download)), then place it somewhere your own user account owns, so auto-update can work later (see [Auto-update and install location](#auto-update-and-install-location)):
+</details>
+
+<details>
+<summary><b>Bambu Cloud (experimental)</b></summary>
+
+Bambu printers that aren't in LAN mode can be added through your Bambu account. Open **Settings > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer of type **Bambu Lab (cloud, experimental)** and pick it from the list.
+
+Status, temperatures, progress, AMS, the light and smart plugs work. The camera works when the printer is on the same network as the Bridge. Pause, stop, speed, fan and GCode don't: Bambu's 2025 and later firmware rejects every command except the light from third-party software, so those buttons are hidden.
+
+Bambu bans accounts for 24 hours to 7 days when it sees too many connections, so the Bridge keeps one MQTT connection for the whole account, backs off from 5 seconds to 5 minutes between reconnects, waits 30 minutes after 10 failures, never signs in by itself, and asks each printer for its full status at most once a minute. Tokens last about 90 days and the dashboard warns you a week before. If Cloudflare blocks sign-in, **Use a token instead** accepts a token from a signed-in Bambu session. Details: [docs/bambu-cloud.md](docs/bambu-cloud.md).
+
+</details>
+
+<details>
+<summary><b>Assistant (experimental)</b></summary>
+
+The assistant (the sparkle button in the top bar) answers questions about your printers from live status, print history and the Bridge log. It walks you through adding a printer, works out why a printer won't connect, and can look at a camera picture to spot a warped or detached print.
+
+It is off until you add an AI provider under **Settings > Assistant**, and you pay that provider. Anything that speaks the OpenAI chat completions API works: OpenAI, Google Gemini, Anthropic, a custom endpoint, or a local server such as Ollama (`http://localhost:11434/v1`). Requests go straight from the Bridge to the provider, and conversations are not saved.
+
+The assistant can only read. It can't change printers, control prints or change settings, and it says when it doesn't know. Access codes, API keys and tokens are removed from log lines before it sees them. Camera access is a separate switch, off by default; with a cloud provider it sends pictures of your printer to that provider. Without a dashboard password, anyone on your network can use the assistant and spend credit on your key.
+
+</details>
+
+<details>
+<summary><b>Running on Linux without the installer</b></summary>
+
+Keep the binary somewhere your own account can write to, so automatic updates work:
 
 ```bash
 mkdir -p ~/.local/bin
@@ -222,54 +288,17 @@ mv FoxTrack-Bridge-Linux-ARM64 ~/.local/bin/foxtrack-bridge
 chmod +x ~/.local/bin/foxtrack-bridge
 ```
 
-Make sure `~/.local/bin` is on your `PATH`, then run it:
-
-```bash
-foxtrack-bridge
-```
-
-The startup output lists the local addresses where the dashboard is available. To keep it running in the background, see [Systemd user service](#systemd-user-service-recommended-for-desktop-linux) below.
-
-### Scripted install (linux/install.sh)
-
-The repository includes `linux/install.sh`, a per-user installer that installs the binary, an icon, a desktop launcher, and a systemd user unit under `$HOME`, with no sudo required. The release binary and `checksums.txt` always come from the GitHub release. Run it from a checkout of this repository and it reads the icon, desktop entry, and unit file from that checkout, which is useful for testing unreleased changes:
-
-```bash
-git clone https://github.com/FoxesRCool1/FoxTrack-Bridge.git
-cd FoxTrack-Bridge
-./linux/install.sh
-```
-
-Run it without a checkout and it downloads those same three files from the matching release's source tarball instead, so they always match the binary being installed:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/linux/install.sh | sh
-```
-
-When it finishes it asks "Start FoxTrack Bridge now and at login? [Y/n]"; answer yes (or pass `--yes` to skip the question) and it enables the service, prints the dashboard address and opens it if you have a desktop session. If you answer no, or there is no terminal to ask, it prints the `systemctl --user enable --now` and `loginctl enable-linger` commands to run yourself (also covered below). On a headless box, run `loginctl enable-linger "$(whoami)"` so the service keeps running after you log out. It also installs a desktop launcher entry named "FoxTrack Bridge" that opens the dashboard in your browser; the launcher assumes the default port 8080. See [Uninstalling](#uninstalling) for `linux/install.sh --uninstall`.
-
-### Systemd user service (recommended for desktop Linux)
-
-Fetch the unit file from the repository and enable it as a user service:
+As a systemd user service:
 
 ```bash
 mkdir -p ~/.config/systemd/user
 curl -fsSL -o ~/.config/systemd/user/foxtrack-bridge.service \
   https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/linux/foxtrack-bridge-user.service
 systemctl --user enable --now foxtrack-bridge
+loginctl enable-linger "$(whoami)"   # keep it running after you log out
 ```
 
-A user service normally only runs while you're logged in. To have it run at boot without a login session, enable linger for your account:
-
-```bash
-loginctl enable-linger "$(whoami)"
-```
-
-This is the same unit `linux/install.sh` installs to the same path.
-
-### Systemd system service (servers and appliances)
-
-For a machine dedicated to running Bridge under a specific system account, use the system-wide template unit instead:
+As a system service under a dedicated account:
 
 ```bash
 sudo cp FoxTrack-Bridge-Linux-ARM64 /usr/local/bin/foxtrack-bridge
@@ -278,230 +307,77 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now foxtrack-bridge@<username>
 ```
 
-Replace `<username>` with the account that should run the process; it doesn't need to be the account you're logged in as. Replace the asset name with the one matching your hardware from [Supported platforms](#supported-platforms). A binary copied in with `sudo cp` is owned by root, which affects auto-update; see below.
+A binary in `/usr/local/bin` belongs to root, so a non-root service account can't update it. The dashboard then shows a download link instead of **Update now**. `linux/install.sh --uninstall` removes an installer setup and keeps your settings.
 
-### Auto-update and install location
+To reach the dashboard from another device, open the port in your firewall (`sudo ufw allow 8080/tcp`, or `firewall-cmd --permanent --add-port=8080/tcp`), and check your router's AP or client isolation if it still can't connect.
 
-Whether Bridge can update itself depends on whether the account running it can write to the directory holding the running binary, not on who owns the machine. When it can't, Bridge doesn't fail silently: it logs an `[auto-update] unavailable in this environment` message explaining that the binary location is read-only, and the dashboard's update prompt shows a manual download link instead of an "Update now" button.
+</details>
 
-This is why `~/.local/bin` is recommended: a binary placed there by your own account, as in [Manual install](#manual-install-recommended) and the [systemd user service](#systemd-user-service-recommended-for-desktop-linux) above, stays writable by that account. A binary copied in with `sudo cp` into `/usr/local/bin`, as in the system service above, is owned by root; if the system service then runs it as a normal, non-root user, that user can't write to `/usr/local/bin`, so auto-update is unavailable there. The same applies inside Docker, where the binary's directory is never writable; update by pulling a new image instead.
+<details>
+<summary><b>Docker details</b></summary>
 
-### Firewall access
+The compose file runs `ghcr.io/foxesrcool1/foxtrack-bridge` with `network_mode: host`, because Bambu discovery relies on SSDP broadcasts that don't cross Docker's default network. With host networking `ports:` is ignored, so set `FOXTRACK_BRIDGE_PORT` to change the port. On Docker Desktop (Windows, macOS), add printers by address if discovery finds nothing. Settings and history live in the `foxtrack-bridge-data` volume.
 
-If Bridge and your browser are on different machines, the listen port (8080 by default, see [Changing the listen port](#changing-the-listen-port)) needs to be reachable across your LAN:
+The Bridge can't update itself inside Docker; run `docker compose pull && docker compose up -d`. [docs/docker.md](docs/docker.md) covers building your own image.
 
-```bash
-# ufw (Debian, Ubuntu)
-sudo ufw allow 8080/tcp
+</details>
 
-# firewalld (Fedora, RHEL, openSUSE)
-sudo firewall-cmd --permanent --add-port=8080/tcp
-sudo firewall-cmd --reload
-```
+<details>
+<summary><b>Settings files and port</b></summary>
 
-Some Wi-Fi routers also block device-to-device traffic by default (AP or client isolation); if the dashboard is unreachable from another device on the same network even with the firewall open, check that setting on your router.
+`config.json` and `history.json` live in `~/.config/FoxTrack-Bridge/` on Linux (or `$XDG_CONFIG_HOME/FoxTrack-Bridge`), `~/Library/Application Support/FoxTrack-Bridge/` on macOS and `%AppData%\FoxTrack-Bridge\` on Windows. If a file is damaged, the Bridge keeps it as `config.json.corrupt-<timestamp>` (or `history.json.corrupt-<timestamp>`) and starts fresh. It never deletes it.
 
-### Raspberry Pi and other ARM boards
+The Bridge listens on port 8080. Change it with `--port 9000` or `FOXTRACK_BRIDGE_PORT=9000`; the flag wins if both are set. On Klipper machines 8080 is also the usual webcam port for Mainsail and Fluidd, so move one of them.
 
-Linux ARM64 covers 64-bit Raspberry Pi OS on a Pi 3 or later, including the Pi Zero 2 W. Linux ARM32 covers 32-bit Raspberry Pi OS and targets ARMv7; it will not run on ARMv6 boards such as the original Raspberry Pi Zero or Raspberry Pi 1 (`linux/install.sh` detects an ARMv6 host and refuses to install rather than fetching a build that can't run).
+</details>
 
-### Uninstalling
+<details>
+<summary><b>Building from source</b></summary>
 
-If you installed with `linux/install.sh`:
+You need Go 1.24 or later. Always set the version, otherwise update checks are turned off:
 
 ```bash
-./linux/install.sh --uninstall
-```
-
-This stops and disables the user service, then removes the binary, icon, desktop entry, and systemd user unit it installed. It does not touch `~/.config/FoxTrack-Bridge`, so your printers, settings, and print history are kept (see [Configuration and history files](#configuration-and-history-files)).
-
-For a manual install with the user service, remove the same pieces yourself:
-
-```bash
-systemctl --user disable --now foxtrack-bridge
-rm -f ~/.local/bin/foxtrack-bridge
-rm -f ~/.config/systemd/user/foxtrack-bridge.service
-rm -f ~/.local/share/applications/foxtrack-bridge.desktop
-rm -f ~/.local/share/icons/hicolor/512x512/apps/foxtrack-bridge.png
-```
-
-For a system service install:
-
-```bash
-sudo systemctl disable --now foxtrack-bridge@<username>
-sudo rm -f /usr/local/bin/foxtrack-bridge
-sudo rm -f /etc/systemd/system/foxtrack-bridge@.service
-sudo systemctl daemon-reload
-```
-
-Either way, your configuration and print history stay in place (see [Configuration and history files](#configuration-and-history-files)) unless you remove that directory yourself.
-
----
-
-## Building from source
-
-Requires Go 1.24 or later.
-
-Always pass `-X foxtrack-bridge/version.AppVersion=<version>` in `-ldflags`. Without it, `AppVersion` stays `dev`, which the dashboard footer shows as `vdev`, and update checks are disabled by design: `dev` isn't a version number GitHub releases can be compared against.
-
-Windows and macOS (with system tray):
-
-```bash
-go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
-```
-
-These builds need CGO enabled (the Go default) and a C toolchain: Xcode Command Line Tools on macOS, a MinGW-w64/gcc toolchain on Windows.
-
-Linux, headless (recommended, no system tray, no GTK dependencies):
-
-```bash
+# Linux, headless
 CGO_ENABLED=0 go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
-```
 
-Linux, with system tray (requires `gcc` and the `gtk3` and `libayatana-appindicator3` development headers, for example `sudo apt-get install gcc libgtk-3-dev libayatana-appindicator3-dev` on Debian or Ubuntu):
+# Windows and macOS with the tray (needs CGO and a C toolchain)
+go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
 
-```bash
-CGO_ENABLED=1 go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
-```
-
-Cross-compiling for another architecture, for example a 64-bit Raspberry Pi (use `GOARCH=arm GOARM=7` instead of `GOARCH=arm64` for the ARM32/ARMv7 build):
-
-```bash
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge-arm64 .
-```
-
-Docker:
-
-```bash
-docker build --build-arg APP_VERSION=v2.3.0 -t foxtrack-bridge .
-docker run -d --name foxtrack-bridge --network host -v foxtrack-bridge-data:/data --restart unless-stopped foxtrack-bridge
-```
-
-See [Docker documentation](docs/docker.md) for fork, branch, and server deployment examples.
-
-Run tests:
-
-```bash
+# Tests (the headless tag is required, or most tests are skipped)
 go test -tags headless ./...
 ```
 
-The `headless` tag runs the suite without the system tray dependency and includes the embedded-asset tests.
+A Linux build with the tray needs `gcc`, `libgtk-3-dev` and `libayatana-appindicator3-dev`. For a Raspberry Pi, add `GOOS=linux GOARCH=arm64` (or `GOARCH=arm GOARM=7` for 32-bit).
 
----
-
-## Bambu Cloud (printers not in LAN mode)
-
-This feature is experimental. It is labelled that way in the dashboard too.
-
-Bambu printers can also be added through your Bambu account instead of LAN mode. Open **Settings > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer with the type **Bambu Lab (cloud, experimental)** and pick it from the list.
-
-What cloud printers can do:
-
-- Status, temperatures, progress, AMS and the light toggle work.
-- A smart plug works too: the Bridge switches it on your network, not through the cloud. Set it on the printer's pencil, under **Smart plug**.
-- Pause, stop, speed, fan and GCode do **not** work over the cloud. Bambu's 2025+ firmware rejects every command except the light from third-party clients, so those buttons are hidden. Use LAN mode for full control.
-- The camera works when the printer is on the same network as the Bridge. The account hands back the printer's LAN access code, and the printer reports its own LAN address, so nothing needs typing. You can also enter the IP when adding the printer.
-
-How the Bridge stays inside Bambu's limits (Bambu bans accounts for 24 hours to 7 days when it sees connection churn):
-
-- One MQTT connection for the whole account, no matter how many cloud printers.
-- Reconnects back off from 5 seconds to 5 minutes with jitter. After 10 failures, or 3 refused connections in a row, it pauses for 30 minutes and tells you why.
-- A rejected sign-in is final: the Bridge stops and asks you to link the account again. It never signs in on its own.
-- Sign-in is limited to once a minute, a Cloudflare block pauses sign-in for 5 minutes, and the device list is cached for a minute.
-- A full state request goes to a printer at most once a minute.
-
-Tokens last about 90 days and cannot be renewed. The dashboard warns a week before the token expires. If sign-in is blocked by Cloudflare, "Paste a token instead" accepts a token from a signed-in Bambu session.
-
-Config: the account is stored under `bambu_cloud` in `config.json` (the file is mode 0600) and each cloud printer carries `"connection": "cloud"`. Both are additive; existing configs and LAN printers are untouched. Design notes and sources: [docs/bambu-cloud.md](docs/bambu-cloud.md).
-
----
-
-## Assistant (experimental)
-
-The dashboard has a built-in assistant. Open it with the sparkle button in the
-top bar. It can:
-
-- Answer questions about your printers from live telemetry, print history and the
-  Bridge's own logs.
-- Walk you through adding a Bambu Lab printer in LAN mode or through the cloud,
-  a Klipper printer through Moonraker,
-  a Prusa printer through PrusaLink, or a read-only printer from Home Assistant.
-- Diagnose a printer that will not come online, and tell "not reachable on the
-  network" apart from "reachable but refusing the credentials".
-- Look at a printer's camera and tell you how a print actually looks, such as whether it
-  has warped, lifted or come loose.
-
-**You supply the AI provider and pay for it.** The Bridge ships with none, and
-the assistant is off until you set one up in **Settings > Assistant**. Anything
-that speaks the OpenAI chat-completions API works:
-
-| Provider | What to enter |
-|---|---|
-| OpenAI | Your API key and a model, e.g. `gpt-4o-mini` |
-| Google Gemini | Your API key and a model, e.g. `gemini-2.5-flash` |
-| Anthropic | Your API key and a model |
-| Custom | The OpenAI-compatible base URL, a key if it needs one, and a model |
-| Local | The base URL of a model server on your machine, e.g. `http://localhost:11434/v1` for Ollama |
-
-Requests go from the machine running the Bridge straight to the provider. Nothing
-about the assistant passes through FoxTrack, and no conversation is written to
-disk. A browser refresh starts a new one.
-
-**What it will not do.** The assistant is read-only: it cannot add, edit or
-remove a printer, cannot start, pause or stop a print, and cannot change a
-setting. It answers only from a tool result or from a help library compiled into
-the binary, so it will say it does not know rather than invent a printer, a
-temperature or a log line, and it will not guess what a printer error code means.
-
-**Cameras.** Letting the assistant look at a printer camera is a separate switch
-and is off by default, because it is the one thing that sends a picture of your
-workshop somewhere. With a cloud provider, switching it on sends a photograph of
-your printer to that provider; with a local model it stays on your machine. The
-provider's model has to support image input. Every frame sent is written to the
-Bridge log.
-
-**Secrets.** Printer access codes, API keys and the Bambu token are stripped out
-of log lines before the assistant sees them, and the provider key you save is
-never sent back to the browser.
-
-**One caveat worth reading.** The Bridge dashboard has no login. Anyone who can
-reach it on your network can use the assistant and spend credit on the key you
-save.
-
----
-
-## Regenerating dashboard assets
-
-The dashboard loads no external resources. Tailwind CSS, the fonts, and the icons are committed under `web/` and embedded in the binary. Attribution is in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
-
-Design: the dashboard follows the FoxTrack web app's design system. Colours are tokens (`--bg`, `--panel`, `--panel-2`, `--surface`, `--border`, `--text`, `--text-2`, `--accent`, `--accent-2`, `--link`, `--danger`, `--warning`) defined in the `<style>` block of `web/ui.html` for two themes, Paper (light, the default) and Ink (dark). The theme button in the top bar switches them; the choice is stored in the browser under `foxtrack.theme`. Tailwind utilities such as `bg-panel`, `text-text-2`, `border-border` and `bg-brand` map onto the tokens through `web/tailwind.config.js`. Never put a Tailwind palette colour or a hex value in the markup; `go test -tags headless ./...` fails if one appears.
-
-Tailwind: after changing classes in `web/ui.html`, regenerate `web/tailwind.css` with the standalone CLI (no Node required):
+The dashboard is `web/ui.html` plus one script per Settings section in `web/features/`. Translations live in `web/i18n/`, keyed by the English text: run `python3 scripts/i18n-extract.py . web/i18n/_source.json` after changing text, then `python3 web/i18n/_check.py`. Styles, fonts and icons are committed under `web/` and built into the binary, so nothing is downloaded at build time or run time. Colours come from the tokens in `web/ui.html`; never put a Tailwind palette colour or a hex value in the markup (the tests check). After changing classes, regenerate Tailwind with the standalone CLI:
 
 ```bash
-# one-time: download the pinned CLI (git-ignored)
-curl -sL -o web/tailwindcss \
-  https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64
+curl -sL -o web/tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64
 chmod +x web/tailwindcss
 ./web/tailwindcss -c web/tailwind.config.js -i web/tailwind.input.css -o web/tailwind.css --minify
 ```
 
-Fonts: `web/fonts/inter-latin.woff2` is a latin subset of Inter (variable, weights 400 to 600) for every control and label, and `web/fonts/cormorant-garamond-latin-500.woff2` is the heading face used for titles and big numbers (`font-heading`). Both are served through `web/fonts.css`. Replace a file to update it.
+Third-party credits are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-Icons: `web/icons.css` holds the Lucide icons used by `web/ui.html`, encoded as inline SVG masks so they take the current text colour. Class names keep the historical `.fa-<name>` form. To add an icon, add a `.fa-<name>` rule with the Lucide SVG body (same format as the existing rules). `go test -tags headless ./...` fails if `web/ui.html` uses an icon that `web/icons.css` does not define.
+</details>
 
-Logos: `assets/logo-light.png` and `assets/logo-dark.png` are the FoxTrack header marks, one per theme, served at `/logo-light.png` and `/logo-dark.png`. `assets/logo.png` stays as the app icon and notification image.
+<details>
+<summary><b>Using it with the FoxTrack app</b></summary>
 
-The generated files are committed. No asset tooling runs during `go build` or the Docker build.
+The Bridge works on its own. If you also use the [FoxTrack](https://foxtrack.studio/) print-farm app, you can link the two under **Settings** to see your printers in FoxTrack from anywhere. [docs/foxtrack.md](docs/foxtrack.md) explains how.
 
----
+</details>
 
 ## Contributing
 
-Contributions are welcome. If you find a bug, want a feature, or want to improve the docs, open an issue or a pull request. Small fixes and additions are appreciated, including edits to this README.
+FoxTrack Bridge is a community project, and pull requests are very welcome. Support for another printer or plug, a fix for something that annoyed you, a better translation, or a clearer sentence in these docs all make it better for everyone.
 
----
+For a small change, just open the pull request. For something bigger, open an issue first so we can agree on the approach before you put the time in. If you found a bug, [open an issue](https://github.com/FoxesRCool1/FoxTrack-Bridge/issues/new) with your printer model, the Bridge version and what the Bridge log showed.
+
+Run `go test -tags headless ./...` before you send code. The [Building from source](#setup-guides) guide has the details.
+
+<a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/graphs/contributors"><img src="https://contrib.rocks/image?repo=FoxesRCool1/FoxTrack-Bridge" alt="Contributors"></a>
 
 ## License
 
-MIT. Free to use, modify, and redistribute with attribution.
+[MIT](LICENSE).

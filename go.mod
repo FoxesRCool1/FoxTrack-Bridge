@@ -1,11 +1,11 @@
 module foxtrack-bridge
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/getlantern/systray v1.2.2
-	golang.org/x/sys v0.36.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
@@ -18,6 +18,6 @@ require (
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
-	golang.org/x/net v0.44.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
 )

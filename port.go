@@ -37,10 +37,26 @@ func resolvePort(args []string, defaultPort int) (int, error) {
 	return *port, nil
 }
 
+// handleResetPasswordFlag removes the dashboard password and exits when the
+// Bridge was started with --reset-password. The tray build calls it before
+// the tray appears.
+func handleResetPasswordFlag() {
+	for _, a := range os.Args[1:] {
+		if a == "--reset-password" || a == "-reset-password" {
+			if err := resetPasswordFromCLI(); err != nil {
+				fmt.Fprintln(os.Stderr, "Could not remove the password:", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
+}
+
 // mustResolvePort is the process-level entry point: exits 0 on -h/--help
 // (usage already printed by fs.Parse), exits 1 on any flag parse error
 // (ditto), and exits 1 with its own message on a bad FOXTRACK_BRIDGE_PORT.
 func mustResolvePort() int {
+	handleResetPasswordFlag()
 	envDefault, err := defaultPortFromEnv()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

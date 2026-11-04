@@ -14,6 +14,7 @@ import (
 )
 
 func main() {
+	handleResetPasswordFlag()
 	systray.Run(onReady, onExit)
 }
 
@@ -68,7 +69,7 @@ func onReady() {
 	}()
 }
 
-func onExit() {}
+func onExit() { rtspShutdown() }
 
 func startupMenuLabel() string {
 	if startup.IsEnabled() {

@@ -62,12 +62,11 @@ func PrintErrorCode(v int64) string {
 	return s[0:4] + "_" + s[4:8]
 }
 
-// hmsAlarm turns one HMS entry into the alarm FoxTrack stores. Bambu's own
-// text for a code is fetched by Bambu Studio from Bambu's servers, which the
-// Bridge does not do, so message stays null and FoxTrack shows the code with
-// a link to the Bambu wiki page for it.
+// hmsAlarm turns one HMS entry into the alarm FoxTrack stores. message is
+// Bambu's own text for the code (hms.go), or null for a code the table lacks;
+// FoxTrack shows the code with a link to the Bambu wiki page either way.
 func hmsAlarm(h hmsEntry) webhook.RelayAlarm {
-	return webhook.CodeAlarm(webhook.AlarmSourceHMS, HMSCode(h.Attr, h.Code), HMSSeverity(h.Code), "")
+	return webhook.CodeAlarm(webhook.AlarmSourceHMS, HMSCode(h.Attr, h.Code), HMSSeverity(h.Code), hmsText(h.Attr, h.Code))
 }
 
 // payloadHasAlarmKeys is the cheap check that decides whether a report can
@@ -106,7 +105,7 @@ func mergeAlarms(prev []webhook.RelayAlarm, payload []byte) []webhook.RelayAlarm
 	}
 	if probe.Print.PrintError != nil {
 		if v := int64(*probe.Print.PrintError); v != 0 {
-			out = append(out, webhook.CodeAlarm(webhook.AlarmSourcePrintError, PrintErrorCode(v), webhook.AlarmSerious, ""))
+			out = append(out, webhook.CodeAlarm(webhook.AlarmSourcePrintError, PrintErrorCode(v), webhook.AlarmSerious, printErrorText(v)))
 		}
 	}
 	if probe.Print.HMS != nil {

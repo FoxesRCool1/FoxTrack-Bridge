@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS build
+FROM golang:1.26-alpine AS build
 
 WORKDIR /src
 
@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 FROM alpine:3.22
 
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates ffmpeg \
     && addgroup -S foxtrack \
     && adduser -S -D -H -G foxtrack foxtrack \
     && mkdir -p /data \
