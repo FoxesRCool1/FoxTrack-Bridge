@@ -108,7 +108,7 @@ jobs:
           CGO_ENABLED: 1
           APP_VERSION: ${{ steps.version.outputs.app_version }}
         shell: pwsh
-        run: go build -ldflags="-s -w -H windowsgui -X foxtrack-bridge/version.AppVersion=$env:APP_VERSION" -o FoxTrack-Bridge-Windows.exe .
+        run: go build -ldflags="-s -w -H windowsgui -X foxtrack-bridge/version.AppVersion=$env:APP_VERSION" -o FoxTrack-Bridge-Windows.exe ./cmd/foxtrack-bridge
 
       - name: Build (macOS GUI)
         if: matrix.os == 'macos-intel' || matrix.os == 'macos-arm'
@@ -118,7 +118,7 @@ jobs:
           CGO_ENABLED: 1
           APP_VERSION: ${{ steps.version.outputs.app_version }}
         run: |
-          go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION}" -o foxtrack-bridge-bin .
+          go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION}" -o foxtrack-bridge-bin ./cmd/foxtrack-bridge
 
           APP_DIR="FoxTrack Bridge.app"
           mkdir -p "$APP_DIR/Contents/MacOS"
@@ -166,7 +166,7 @@ jobs:
           GOARCH: amd64
           CGO_ENABLED: 1
           APP_VERSION: ${{ steps.version.outputs.app_version }}
-        run: go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION} -X foxtrack-bridge/version.AppBuildVariant=headless" -o FoxTrack-Bridge-Linux .
+        run: go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION} -X foxtrack-bridge/version.AppBuildVariant=headless" -o FoxTrack-Bridge-Linux ./cmd/foxtrack-bridge
 
       - name: Build (Linux ARM64)
         if: matrix.os == 'linux-arm64'
@@ -175,7 +175,7 @@ jobs:
           GOARCH: arm64
           CGO_ENABLED: 0
           APP_VERSION: ${{ steps.version.outputs.app_version }}
-        run: go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION} -X foxtrack-bridge/version.AppBuildVariant=headless" -o FoxTrack-Bridge-Linux-ARM64 .
+        run: go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION} -X foxtrack-bridge/version.AppBuildVariant=headless" -o FoxTrack-Bridge-Linux-ARM64 ./cmd/foxtrack-bridge
 
       - name: Build (Linux ARM32)
         if: matrix.os == 'linux-arm32'
@@ -185,7 +185,7 @@ jobs:
           GOARM: 7
           CGO_ENABLED: 0
           APP_VERSION: ${{ steps.version.outputs.app_version }}
-        run: go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION} -X foxtrack-bridge/version.AppBuildVariant=headless" -o FoxTrack-Bridge-Linux-ARM32 .
+        run: go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${APP_VERSION} -X foxtrack-bridge/version.AppBuildVariant=headless" -o FoxTrack-Bridge-Linux-ARM32 ./cmd/foxtrack-bridge
 
 
       - name: Upload to GitHub Release

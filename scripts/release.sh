@@ -34,14 +34,14 @@ if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
 fi
 grep -q "^## $tag" CHANGELOG.md || { echo "CHANGELOG.md has no '## $tag' entry" >&2; exit 1; }
 
-go vet ./...
-go test -race ./...
+go vet -tags headless ./...
+go test -tags headless -race ./...
 
 echo "== build (Linux headless, version $version)"
 mkdir -p dist
 go build -tags headless \
   -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=${version} -X foxtrack-bridge/version.AppBuildVariant=headless" \
-  -o "dist/FoxTrack-Bridge-Linux-${version}" .
+  -o "dist/FoxTrack-Bridge-Linux-${version}" ./cmd/foxtrack-bridge
 echo "built dist/FoxTrack-Bridge-Linux-${version}"
 
 if [[ "$mode" == "--build" ]]; then

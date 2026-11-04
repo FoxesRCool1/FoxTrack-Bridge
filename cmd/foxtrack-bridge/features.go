@@ -51,7 +51,7 @@ var (
 func handleFeaturesJS(w http.ResponseWriter, r *http.Request) {
 	featuresOnce.Do(func() {
 		var names []string
-		_ = fs.WalkDir(featuresFS, "web/features", func(p string, d fs.DirEntry, err error) error {
+		_ = fs.WalkDir(featuresFS, "features", func(p string, d fs.DirEntry, err error) error {
 			if err == nil && !d.IsDir() && strings.HasSuffix(p, ".js") {
 				names = append(names, p)
 			}
@@ -78,7 +78,7 @@ func handleFeaturesJS(w http.ResponseWriter, r *http.Request) {
 // handleI18n serves web/i18n/<lang>.json, the dashboard's translations.
 func handleI18n(w http.ResponseWriter, r *http.Request) {
 	name := path.Base(r.URL.Path) // strips any traversal
-	data, err := i18nFS.ReadFile("web/i18n/" + name)
+	data, err := i18nFS.ReadFile("i18n/" + name)
 	if err != nil || !strings.HasSuffix(name, ".json") {
 		http.NotFound(w, r)
 		return

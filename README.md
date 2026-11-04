@@ -338,10 +338,10 @@ You need Go 1.24 or later. Always set the version, otherwise update checks are t
 
 ```bash
 # Linux, headless
-CGO_ENABLED=0 go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
+CGO_ENABLED=0 go build -tags headless -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge ./cmd/foxtrack-bridge
 
 # Windows and macOS with the tray (needs CGO and a C toolchain)
-go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge .
+go build -ldflags="-s -w -X foxtrack-bridge/version.AppVersion=<version>" -o foxtrack-bridge ./cmd/foxtrack-bridge
 
 # Tests (the headless tag is required, or most tests are skipped)
 go test -tags headless ./...
@@ -377,6 +377,12 @@ For a small change, just open the pull request. For something bigger, open an is
 Run `go test -tags headless ./...` before you send code. The [Building from source](#setup-guides) guide has the details.
 
 <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/graphs/contributors"><img src="https://contrib.rocks/image?repo=FoxesRCool1/FoxTrack-Bridge" alt="Contributors"></a>
+
+## Support the project
+
+FoxTrack Bridge is free and open source. If it's useful to you, you can support its development on Ko-fi.
+
+<a href="https://ko-fi.com/foxesrcool"><img src="https://img.shields.io/badge/Support%20on-Ko--fi-c2410c?logo=kofi&logoColor=white" alt="Support on Ko-fi"></a>
 
 ## License
 
