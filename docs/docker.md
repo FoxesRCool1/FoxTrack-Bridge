@@ -52,7 +52,7 @@ Replace the repository, branch, and `APP_VERSION` value for your own fork or rel
 
 ## Published images
 
-The Docker workflow builds images for pull requests and publishes multi-platform `linux/amd64` and `linux/arm64` images to GitHub Container Registry on pushes to `main`, on `v*` tags, and on manual workflow runs.
+The Docker workflow builds images for pull requests and publishes multi-platform `linux/amd64` and `linux/arm64` images to GitHub Container Registry on pushes to `main`, on `v*` tags, and on manual workflow runs. Only a `v*` release tag moves `latest` (and the version tags); a push to `main` publishes the `main` tag, for trying unreleased changes.
 
 For this repository, images are published as:
 

@@ -378,6 +378,12 @@ Run `go test -tags headless ./...` before you send code. The [Building from sour
 
 <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/graphs/contributors"><img src="https://contrib.rocks/image?repo=FoxesRCool1/FoxTrack-Bridge" alt="Contributors"></a>
 
+## Support the project
+
+FoxTrack Bridge is free and open source. If it's useful to you, you can support its development on Ko-fi.
+
+<a href="https://ko-fi.com/foxesrcool"><img src="https://img.shields.io/badge/Support%20on-Ko--fi-c2410c?logo=kofi&logoColor=white" alt="Support on Ko-fi"></a>
+
 ## License
 
 [MIT](LICENSE).
