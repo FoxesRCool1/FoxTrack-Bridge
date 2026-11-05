@@ -282,18 +282,46 @@ The network scan finds OctoPrint on port 80 and port 5000. The Bridge checks rea
 	{
 		ID:       "smart-plugs",
 		Title:    "Smart plugs: watts, energy per print, auto off",
-		Keywords: []string{"plug", "smart plug", "shelly", "tasmota", "kasa", "power", "watts", "energy", "kwh", "electricity", "auto off", "turn off", "switch"},
-		Body: `A printer can be powered through a smart plug the Bridge reads and switches over your network. Supported: Shelly (Gen1, Gen2 and Plus), Tasmota, and Kasa plugs on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) is not supported yet; the plug check says so. No maker's cloud is ever called. It works for every printer type the Bridge controls, a Bambu printer added through a Bambu account included.
+		Keywords: []string{"plug", "smart plug", "shelly", "tasmota", "kasa", "tapo", "tuya", "smart life", "meross", "sonoff", "esphome", "athom", "mystrom", "wiz", "home assistant", "power", "watts", "energy", "kwh", "electricity", "auto off", "turn off", "switch"},
+		Body: `A printer can be powered through a smart plug the Bridge reads and switches over your network. Supported types: Shelly, Tasmota, TP-Link Kasa, TP-Link Tapo, Tuya / Smart Life, Meross, Sonoff (DIY mode), ESPHome, myStrom, WiZ, and Home Assistant (any plug Home Assistant can switch, such as Zigbee, Matter or Hue plugs). The Bridge talks to the plug on your network and never calls a maker's cloud. It works for every printer type the Bridge controls, a Bambu printer added through a Bambu account included. What each type needs is in "Setting up each smart plug type".
 
-To set one: open the printer's pencil (edit) or add it, scroll to Smart plug, choose the type, enter the plug's address on your network, and click "Check plug". The check reports on or off and the watts if the plug has an energy meter.
+To set one: open the printer's pencil (edit) or add it, scroll to Smart plug, choose the type, fill in the fields that appear (the form shows setup help for the type you pick), and click "Check plug". The check reports on or off and the watts if the plug has an energy meter, or says what is wrong. Keys, passwords and tokens are stored only on the machine running the Bridge and are never shown again; leave such a field blank when you edit the printer to keep the saved one.
 
-The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button, also while the printer itself is switched off. "Plug off" is disabled while the printer prints or is paused, and refused while the nozzle is above 50 C, so a print is never cut.
+The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button, also while the printer itself is switched off. "Plug off" is disabled while the printer prints or is paused, refused while the nozzle is above 50 C, and refused when the Bridge cannot tell whether the printer is idle, so a print is never cut.
 
 "Turn the plug off after a print": once a print ends (finished, stopped or failed), the Bridge waits the number of minutes you set (10 by default) with the printer idle and the nozzle under 50 C, then turns the plug off. A new print in that time cancels it. The log says "plug turned off after the print".
 
-Energy per print: the Bridge reads the plug's energy counter when a print starts and ends (or sums watts over time for a plug without a counter) and sends the Wh to FoxTrack with the print history. FoxTrack shows it in Reports under Printer use as kWh and a cost. A plug without a meter switches but reports no watts or energy.
+Energy per print: the Bridge reads the plug's energy counter when a print starts and ends (Shelly, Tasmota, Kasa), or sums watts over time for a plug without a counter (Tapo, Tuya, Meross, ESPHome, myStrom, WiZ, Home Assistant), and sends the Wh to FoxTrack with the print history. FoxTrack shows it in Reports under Printer use as kWh and a cost. A plug without a meter (or a Sonoff in DIY mode) switches but reports no watts or energy.
 
 The plug is polled every 10 seconds. "Plug not answering" means the last poll failed; the Bridge keeps trying.`,
+	},
+	{
+		ID:       "smart-plug-setup",
+		Title:    "Setting up each smart plug type",
+		Keywords: []string{"plug", "smart plug", "setup", "tapo", "kasa", "tp-link", "tuya", "smart life", "local key", "tinytuya", "meross", "key", "sonoff", "diy mode", "ewelink", "esphome", "athom", "mystrom", "token", "wiz", "home assistant", "long-lived", "entity", "shelly", "tasmota", "check plug", "not answering", "login refused"},
+		Body: `Every type needs the plug's address on your network (its IP address, shown in the maker's app under device info, or in your router's list of devices). Give the plug a fixed IP address in your router so it does not move. Then pick the type and fill in what it asks for.
+
+Shelly (Gen1 to Gen4) and Tasmota: only the address. Any plug running Tasmota works, including Sonoff, Athom and Nous plugs flashed with it.
+
+TP-Link Kasa: older Kasa plugs need only the address. Newer Kasa firmware also needs the email and password of the TP-Link account used in the Kasa app. The plug checks them itself; the Bridge never contacts TP-Link.
+
+TP-Link Tapo (P100, P110, P115 and others): the address plus the email and password of the TP-Link account used in the Tapo app, both case-sensitive. Both the current (KLAP) and the older Tapo login are supported. If "Check plug" says the login was refused although it is right, turn on Third-Party Compatibility in the Tapo app (Me, Tapo Lab) and check again.
+
+Tuya / Smart Life (also sold under many other names that use the Smart Life or Tuya Smart app): the address, the device ID and the 16-character local key. The key only comes from Tuya, so get it once: 1) sign up at iot.tuya.com, create a Cloud project (Smart Home) in the data center of your Smart Life account, and link your Smart Life app to it (Devices, Link App Account, scan the QR code with the app); 2) on any computer with Python run "pip install tinytuya" and then "python -m tinytuya wizard", and give it the project's Access ID and Access Secret; 3) copy the plug's "id" and "key" from the list it prints. Leave Protocol on Auto. Re-pairing the plug in Smart Life changes its key, so fetch it again then. A Tuya plug answers one local connection at a time: close Home Assistant's Local Tuya or tinytuya if the check cannot reach it.
+
+Meross: the address; leave the key blank, most Meross plugs answer without it. Newer models that encrypt their local traffic need the Meross key and the plug's MAC address (on its label or in the Meross app's device info; on Linux the Bridge finds the MAC itself). The key belongs to your Meross account; Home Assistant's meross_lan shows it, or run "pip install meross_iot" and then: python -c "import asyncio; from meross_iot.http_api import MerossHttpClient as C; print(asyncio.run(C.async_from_user_password(api_base_url='https://iotx-eu.meross.com', email='YOUR EMAIL', password='YOUR PASSWORD')).cloud_credentials.key)".
+
+Sonoff: works in DIY mode (firmware 3.5 or later), which takes the plug off the eWeLink cloud; Itead's DIY instructions for each model show how to turn it on. A Sonoff in its normal eWeLink mode encrypts its local traffic and "Check plug" says so. DIY mode has no power reading: for watts, flash the plug with Tasmota or ESPHome, or add it through Home Assistant.
+
+ESPHome (Athom plugs ship with it): only the address, as long as the device YAML has "web_server:". The Bridge finds the relay and the power sensor itself; type their names only if it picks the wrong ones, and the login only if the web server has one.
+
+myStrom: the address, plus the API token if you secured the plug with one in the myStrom app.
+
+WiZ: the address, with "Allow local communication" turned on in the WiZ app settings.
+
+Home Assistant: the Home Assistant URL (for example http://homeassistant.local:8123), a long-lived access token (Home Assistant: your profile, Security, Long-lived access tokens, Create token), the switch entity (for example switch.printer_plug) and, for watts, the plug's power sensor entity. This covers any plug Home Assistant can switch, including Zigbee, Matter, Hue, Meross and Sonoff plugs in eWeLink mode.
+
+If "Check plug" fails: "did not answer" means the address is wrong or the plug is offline or on another network; a login, key or token message means that value is wrong. The plug and the machine running the Bridge must be on the same network (with Docker, use host networking for WiZ, which uses UDP).`,
 	},
 	{
 		ID:       "virtual-printer",

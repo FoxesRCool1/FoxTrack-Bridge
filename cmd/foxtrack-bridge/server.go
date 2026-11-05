@@ -988,8 +988,9 @@ type redactedPrinter struct {
 	HAFileEntity          string `json:"ha_file_entity,omitempty"`
 	HARemainingEntity     string `json:"ha_remaining_entity,omitempty"`
 	OctoPrintURL          string `json:"octoprint_url,omitempty"`
-	// Plug has no secret: the dashboard gets it as stored.
-	Plug *config.Plug `json:"plug,omitempty"`
+	// Plug comes as stored, minus its secrets (local key, password, token).
+	Plug          *config.Plug `json:"plug,omitempty"`
+	PlugSecretSet bool         `json:"plug_secret_set,omitempty"`
 }
 
 // redactedConfig mirrors config.Config with the FoxTrack cloud tokens blanked
@@ -1046,6 +1047,12 @@ type redactedCloud struct {
 }
 
 func redactPrinter(p config.Printer) redactedPrinter {
+	var plug *config.Plug
+	if p.Plug != nil {
+		cp := *p.Plug
+		cp.LocalKey, cp.Password, cp.Token = "", "", ""
+		plug = &cp
+	}
 	return redactedPrinter{
 		ID:           p.ID,
 		Name:         p.Name,
@@ -1068,7 +1075,8 @@ func redactPrinter(p config.Printer) redactedPrinter {
 		HAFileEntity:          p.HAFileEntity,
 		HARemainingEntity:     p.HARemainingEntity,
 		OctoPrintURL:          p.OctoPrintURL,
-		Plug:                  p.Plug,
+		Plug:                  plug,
+		PlugSecretSet:         plugHasSecret(p.Plug),
 	}
 }
 
@@ -1272,6 +1280,7 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 		if p.HomeAssistantToken == "" {
 			p.HomeAssistantToken = prev.HomeAssistantToken
 		}
+		keepPlugSecrets(p.Plug, prev.Plug)
 		// PreviousNames has no redacted-view counterpart, so a client echoing
 		// back the config it was given always omits it. Treat "absent" as "keep"
 		// rather than letting a round-trip drop the rename history.
@@ -1707,7 +1716,9 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 	}
 	if edit.Plug != nil {
 		g := *edit.Plug
+		prevPlug := p.Plug
 		p.Plug = normalizePlug(&g)
+		keepPlugSecrets(p.Plug, prevPlug)
 	}
 
 	switch {

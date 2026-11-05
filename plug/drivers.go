@@ -11,13 +11,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"foxtrack-bridge/config"
 )
 
 // A plug is read and switched over the LAN only: Shelly and Tasmota over
-// their HTTP APIs, Kasa over its TCP 9999 protocol. No maker's cloud is ever
+// their HTTP APIs, Kasa over its TCP 9999 protocol, Tuya over TCP 6668. No maker's cloud is ever
 // called.
 
 // Reading is one plug poll. Watts and EnergyWh are nil for a plug without a
@@ -29,8 +30,7 @@ type Reading struct {
 }
 
 var (
-	errKasaKLAP   = errors.New("This Kasa plug uses newer firmware that the Bridge cannot talk to yet. Older Kasa plugs (HS110, KP115, EP25 on old firmware) work.")
-	errBadKind    = errors.New("Unknown plug type. Use shelly, tasmota or kasa.")
+	errBadKind    = errors.New("Unknown plug type. Use shelly, tasmota, kasa, tapo, tuya, esphome, meross, sonoff, mystrom, wiz or home_assistant.")
 	errBadAddress = errors.New("Enter the plug's address on your network, e.g. 192.168.1.80.")
 	errNoAnswer   = errors.New("The plug did not answer. Check that it is on and on this network.")
 )
@@ -51,7 +51,23 @@ func Read(ctx context.Context, g config.Plug) (Reading, error) {
 	case config.PlugTasmota:
 		return tasmotaRead(ctx, host)
 	case config.PlugKasa:
-		return kasaRead(ctx, host)
+		return kasaRead(ctx, host, g)
+	case config.PlugTapo:
+		return klapRead(ctx, host, g)
+	case config.PlugTuya:
+		return tuyaRead(ctx, host, g)
+	case config.PlugMyStrom:
+		return mystromRead(ctx, host, g.Token)
+	case config.PlugWiZ:
+		return wizRead(ctx, host)
+	case config.PlugSonoff:
+		return sonoffRead(ctx, host)
+	case config.PlugMeross:
+		return merossRead(ctx, host, g)
+	case config.PlugHA:
+		return haPlugRead(ctx, g)
+	case config.PlugESPHome:
+		return esphomeRead(ctx, host, g)
 	}
 	return Reading{}, errBadKind
 }
@@ -68,7 +84,23 @@ func Switch(ctx context.Context, g config.Plug, on bool) error {
 	case config.PlugTasmota:
 		return tasmotaSwitch(ctx, host, on)
 	case config.PlugKasa:
-		return kasaSwitch(ctx, host, on)
+		return kasaSwitch(ctx, host, g, on)
+	case config.PlugTapo:
+		return klapSwitch(ctx, host, g, on)
+	case config.PlugTuya:
+		return tuyaSwitch(ctx, host, g, on)
+	case config.PlugMyStrom:
+		return mystromSwitch(ctx, host, g.Token, on)
+	case config.PlugWiZ:
+		return wizSwitch(ctx, host, on)
+	case config.PlugSonoff:
+		return sonoffSwitch(ctx, host, on)
+	case config.PlugMeross:
+		return merossSwitch(ctx, host, g, on)
+	case config.PlugHA:
+		return haPlugSwitch(ctx, g, on)
+	case config.PlugESPHome:
+		return esphomeSwitch(ctx, host, g, on)
 	}
 	return errBadKind
 }
@@ -302,10 +334,6 @@ func kasaExchange(ctx context.Context, host string, request string) ([]byte, err
 	d := net.Dialer{Timeout: requestTimeout}
 	conn, err := d.DialContext(ctx, "tcp", host)
 	if err != nil {
-		var opErr *net.OpError
-		if errors.As(err, &opErr) && strings.Contains(strings.ToLower(err.Error()), "refused") {
-			return nil, errKasaKLAP
-		}
 		return nil, errNoAnswer
 	}
 	defer conn.Close()
@@ -328,12 +356,59 @@ func kasaExchange(ctx context.Context, host string, request string) ([]byte, err
 	return kasaDecrypt(body), nil
 }
 
-func kasaRead(ctx context.Context, host string) (Reading, error) {
-	body, err := kasaExchange(ctx, host, `{"system":{"get_sysinfo":{}},"emeter":{"get_realtime":{}}}`)
-	if err != nil {
-		return Reading{}, err
+// kasaKLAPHosts remembers the Kasa plugs that answered over KLAP.
+var kasaKLAPHosts sync.Map
+
+// kasaDo runs a Kasa request over whichever protocol the plug speaks: the old
+// TCP 9999 one, or KLAP on newer firmware. KLAP goes first once it has worked
+// for this host or when a login is set; the other is tried when the first
+// gets no answer.
+func kasaDo(host string, g config.Plug, legacy func() error, klap func(string) error) error {
+	viaKLAP := func() error {
+		err := klap(kasaKLAPHost(host))
+		if err == nil {
+			kasaKLAPHosts.Store(host, true)
+		}
+		return err
 	}
-	return parseKasa(body)
+	first, second := legacy, viaKLAP
+	if _, ok := kasaKLAPHosts.Load(host); ok || strings.TrimSpace(g.Username) != "" {
+		first, second = viaKLAP, legacy
+	}
+	wrongProtocol := func(err error) bool {
+		return errors.Is(err, errNoAnswer) || errors.Is(err, errKlapNoKLAP) || errors.Is(err, errKlapBadReply)
+	}
+	err := first()
+	if err == nil || !wrongProtocol(err) {
+		return err
+	}
+	if err2 := second(); err2 == nil || !wrongProtocol(err2) {
+		return err2
+	}
+	return errNoAnswer
+}
+
+func kasaRead(ctx context.Context, host string, g config.Plug) (Reading, error) {
+	var r Reading
+	err := kasaDo(host, g, func() error {
+		body, err := kasaExchange(ctx, host, kasaReadRequest)
+		if err == nil {
+			r, err = parseKasa(body)
+		}
+		return err
+	}, func(h string) (err error) {
+		r, err = klapRead(ctx, h, g)
+		return err
+	})
+	return r, err
+}
+
+// kasaKLAPHost drops a ":9999" the user typed for the old protocol.
+func kasaKLAPHost(host string) string {
+	if h, port, err := net.SplitHostPort(host); err == nil && port == "9999" {
+		return h
+	}
+	return host
 }
 
 // parseKasa reads get_sysinfo.relay_state and get_realtime (power_mw or
@@ -379,24 +454,12 @@ func parseKasa(body []byte) (Reading, error) {
 	return r, nil
 }
 
-func kasaSwitch(ctx context.Context, host string, on bool) error {
-	state := 0
-	if on {
-		state = 1
-	}
-	body, err := kasaExchange(ctx, host, fmt.Sprintf(`{"system":{"set_relay_state":{"state":%d}}}`, state))
-	if err != nil {
-		return err
-	}
-	var v struct {
-		System struct {
-			Set *struct {
-				ErrCode int `json:"err_code"`
-			} `json:"set_relay_state"`
-		} `json:"system"`
-	}
-	if json.Unmarshal(body, &v) != nil || v.System.Set == nil || v.System.Set.ErrCode != 0 {
-		return errors.New("The Kasa plug refused the switch command.")
-	}
-	return nil
+func kasaSwitch(ctx context.Context, host string, g config.Plug, on bool) error {
+	return kasaDo(host, g, func() error {
+		body, err := kasaExchange(ctx, host, kasaSwitchRequest(on))
+		if err != nil {
+			return err
+		}
+		return parseKasaSwitch(body)
+	}, func(h string) error { return klapSwitch(ctx, h, g, on) })
 }

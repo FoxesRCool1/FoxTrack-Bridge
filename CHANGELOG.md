@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+**New**
+- More smart plugs, all over the LAN: TP-Link Tapo (current and older
+  firmware) and newer Kasa firmware, Tuya / Smart Life (protocol 3.3 to 3.5),
+  Meross (with or without the key, encrypted models too), Sonoff in DIY mode,
+  ESPHome, myStrom (with its API token), WiZ, and any switch in Home Assistant.
+  The plug form shows setup help for each type, and the in-app help has a
+  setup article per brand. Plug passwords, keys and tokens are never sent
+  to the dashboard.
+
 ## v2.6.0
 
 **New**

@@ -100,10 +100,64 @@ func normalizePlug(g *config.Plug) *config.Plug {
 	if !g.Configured() {
 		return nil
 	}
+	// Keep only the fields this kind uses, so a key typed under another type
+	// is never stored. Passwords keep their spaces.
+	keep := map[string]bool{}
+	switch g.Kind {
+	case config.PlugTuya:
+		keep = map[string]bool{"device_id": true, "local_key": true, "version": true}
+	case config.PlugKasa, config.PlugTapo:
+		keep = map[string]bool{"username": true, "password": true}
+	case config.PlugESPHome:
+		keep = map[string]bool{"username": true, "password": true, "entity": true, "power_entity": true}
+	case config.PlugHA:
+		keep = map[string]bool{"token": true, "entity": true, "power_entity": true}
+	case config.PlugMeross:
+		keep = map[string]bool{"local_key": true, "mac": true}
+	case config.PlugMyStrom:
+		keep = map[string]bool{"token": true}
+	}
+	for name, f := range map[string]*string{"device_id": &g.DeviceID, "local_key": &g.LocalKey, "version": &g.Version, "mac": &g.MAC,
+		"username": &g.Username, "password": &g.Password, "token": &g.Token, "entity": &g.Entity, "power_entity": &g.PowerEntity} {
+		switch {
+		case !keep[name]:
+			*f = ""
+		case name != "password":
+			*f = strings.TrimSpace(*f)
+		}
+	}
 	if g.AutoOffDelayMinutes < 0 {
 		g.AutoOffDelayMinutes = 0
 	}
 	return g
+}
+
+// keepPlugSecrets refills a plug secret (Tuya local key, TP-Link or ESPHome
+// password, Home Assistant token) left blank: the dashboard never gets a saved
+// secret back, so blank means "keep it", for the same plug only. A Tuya plug is
+// the same by device ID, any other by kind, address and username.
+func keepPlugSecrets(g, prev *config.Plug) {
+	if g == nil || prev == nil || g.Kind != prev.Kind {
+		return
+	}
+	if g.Kind == config.PlugTuya {
+		if g.DeviceID == "" || g.DeviceID != prev.DeviceID {
+			return
+		}
+	} else if g.Address != prev.Address || g.Username != prev.Username {
+		return
+	}
+	for _, f := range [][2]*string{{&g.LocalKey, &prev.LocalKey}, {&g.Password, &prev.Password}, {&g.Token, &prev.Token}} {
+		if *f[0] == "" {
+			*f[0] = *f[1]
+		}
+	}
+}
+
+// plugHasSecret reports whether a saved plug holds a secret the dashboard
+// does not get back.
+func plugHasSecret(g *config.Plug) bool {
+	return g != nil && (g.LocalKey != "" || g.Password != "" || g.Token != "")
 }
 
 // handlePlugTest answers POST /api/plug/test {kind, address}: one read of
@@ -126,6 +180,17 @@ func handlePlugTest(w http.ResponseWriter, r *http.Request) {
 	if normalizePlug(&g) == nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "message": "Choose the plug type and enter its address."})
 		return
+	}
+	if g.LocalKey == "" || g.Password == "" || g.Token == "" {
+		// Checking a saved plug: use its saved secrets, only for the same
+		// plug at its saved address.
+		configMutex.RLock()
+		for _, p := range configStore.Printers {
+			if p.Plug != nil && p.Plug.Address == g.Address {
+				keepPlugSecrets(&g, p.Plug)
+			}
+		}
+		configMutex.RUnlock()
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()

@@ -456,7 +456,7 @@
                 <div id="fieldPlug" class="hidden border-t border-border pt-3 space-y-3">
                     <div class="flex items-center justify-between gap-3">
                         <span class="flex items-center gap-1"><span class="field-label mb-0">Smart plug <span class="font-normal">(optional)</span></span>
-                            <button type="button" class="info-tip" aria-label="About smart plugs" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Shelly, Tasmota or Kasa (older firmware). The Bridge talks to the plug over your network, not the maker's cloud. The card shows its watts and a power button, and history records the energy each print used.</span></span>
+                            <button type="button" class="info-tip" aria-label="About smart plugs" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Shelly, Tasmota, TP-Link Kasa and Tapo, Tuya / Smart Life, Meross, Sonoff (DIY mode), ESPHome, myStrom and WiZ, or any plug Home Assistant can switch. Pick the type for setup help. The Bridge talks to the plug over your network, not the maker's cloud. The card shows its watts and a power button, and history records the energy each print used.</span></span>
                         <button type="button" id="plugTestBtn" onclick="testPlug()" class="btn-ghost btn-xs">Check plug</button>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-[10rem_minmax(0,1fr)] gap-3">
@@ -467,7 +467,15 @@
                                     <option value="">None</option>
                                     <option value="shelly">Shelly</option>
                                     <option value="tasmota">Tasmota</option>
-                                    <option value="kasa">Kasa (older firmware)</option>
+                                    <option value="kasa">TP-Link Kasa</option>
+                                    <option value="tapo">TP-Link Tapo</option>
+                                    <option value="tuya">Tuya / Smart Life</option>
+                                    <option value="meross">Meross</option>
+                                    <option value="sonoff">Sonoff (DIY mode)</option>
+                                    <option value="esphome">ESPHome (e.g. Athom)</option>
+                                    <option value="mystrom">myStrom</option>
+                                    <option value="wiz">WiZ</option>
+                                    <option value="home_assistant">Home Assistant</option>
                                 </select>
                                 <i class="fas fa-chevron-down"></i>
                             </div>
@@ -477,6 +485,69 @@
                             <input type="text" id="pPlugAddress" autocomplete="off" class="field" placeholder="192.168.1.80">
                         </div>
                     </div>
+                    <!-- Tuya only: the plug's ID and local key, fetched once with the tinytuya wizard. -->
+                    <div id="plugTuyaRow" class="hidden space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem] gap-3">
+                            <div>
+                                <label for="pPlugDeviceId" class="field-label">Device ID</label>
+                                <input type="text" id="pPlugDeviceId" autocomplete="off" spellcheck="false" class="field" placeholder="bf1234abcd5678efgh">
+                            </div>
+                            <div>
+                                <label for="pPlugLocalKey" class="field-label">Local key</label>
+                                <input type="password" id="pPlugLocalKey" autocomplete="off" spellcheck="false" class="field" placeholder="16 characters">
+                            </div>
+                            <div>
+                                <label for="pPlugVersion" class="field-label">Protocol</label>
+                                <div class="select-wrap">
+                                    <select id="pPlugVersion" class="field">
+                                        <option value="">Auto</option>
+                                        <option value="3.3">3.3</option>
+                                        <option value="3.4">3.4</option>
+                                        <option value="3.5">3.5</option>
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- TP-Link account (Kasa, Tapo) or ESPHome web server login. -->
+                    <div id="plugLoginRow" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label for="pPlugUsername" id="pPlugUsernameLabel" class="field-label">TP-Link account email</label>
+                            <input type="text" id="pPlugUsername" autocomplete="off" spellcheck="false" class="field">
+                        </div>
+                        <div>
+                            <label for="pPlugPassword" class="field-label">Password</label>
+                            <input type="password" id="pPlugPassword" autocomplete="off" class="field">
+                        </div>
+                    </div>
+                    <!-- Home Assistant token; switch and power entities for Home Assistant and ESPHome. -->
+                    <!-- Meross: optional key, and the MAC for models that encrypt. -->
+                    <div id="plugMerossRow" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label for="pPlugMerossKey" class="field-label">Meross key <span class="font-normal">(optional)</span></label>
+                            <input type="password" id="pPlugMerossKey" autocomplete="off" spellcheck="false" class="field">
+                        </div>
+                        <div>
+                            <label for="pPlugMac" class="field-label">MAC address <span class="font-normal">(encrypted models)</span></label>
+                            <input type="text" id="pPlugMac" autocomplete="off" spellcheck="false" class="field" placeholder="48:e1:e9:12:34:56">
+                        </div>
+                    </div>
+                    <div id="plugTokenRow" class="hidden">
+                        <label for="pPlugToken" id="pPlugTokenLabel" class="field-label">Long-lived access token</label>
+                        <input type="password" id="pPlugToken" autocomplete="off" spellcheck="false" class="field">
+                    </div>
+                    <div id="plugEntityRow" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label for="pPlugEntity" id="pPlugEntityLabel" class="field-label">Switch entity</label>
+                            <input type="text" id="pPlugEntity" autocomplete="off" spellcheck="false" class="field">
+                        </div>
+                        <div>
+                            <label for="pPlugPowerEntity" id="pPlugPowerEntityLabel" class="field-label">Power sensor <span class="font-normal">(optional)</span></label>
+                            <input type="text" id="pPlugPowerEntity" autocomplete="off" spellcheck="false" class="field">
+                        </div>
+                    </div>
+                    <p id="plugHelp" class="hidden text-xs leading-relaxed text-text-2"></p>
                     <div id="plugAutoOffRow" class="hidden flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
                         <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" id="pPlugAutoOff" class="w-4 h-4 rounded"> Turn off after a print</label>
                         <span class="inline-flex items-center gap-1.5 text-text-2 whitespace-nowrap">Wait <input type="number" id="pPlugDelay" min="1" max="240" value="10" class="field py-1 text-sm" style="width:4.5rem" aria-label="Minutes to wait"> min, once cool</span>
@@ -2290,21 +2361,58 @@ function dismissFirstPrinterCard() { flagSet(FLAG_FIRST_DISMISSED); renderFirstP
 
 // ── Smart plug fields on the printer form ──
 
+// What each plug type asks for beyond its address, and its setup help.
+// Help is static HTML written here, never user data.
+const PLUG_KINDS = {
+    shelly: { help: 'Enter the plug\'s IP address (Shelly app: device, Settings, Device information). Gen1 to Gen4 plugs work, with watts and energy.' },
+    tasmota: { help: 'Enter the plug\'s IP address. Any plug running Tasmota works, including Sonoff, Athom and Nous plugs flashed with it. Watts show when it has a power meter.' },
+    kasa: { login: 'TP-Link account email', help: 'Enter the plug\'s IP address (Kasa app: device, Settings, Device info). Older Kasa plugs need nothing else. Newer firmware also asks for the email and password of the TP-Link account you use in the Kasa app; the plug checks them itself and the Bridge never contacts TP-Link.' },
+    tapo: { login: 'TP-Link account email', help: 'Enter the plug\'s IP address (Tapo app: device, Settings, Device info) and the email and password of the TP-Link account you use in the Tapo app. Both are case-sensitive. The plug checks them itself; the Bridge never contacts TP-Link. If the login is refused, turn on Third-Party Compatibility in the Tapo app (Me, Tapo Lab).' },
+    tuya: { addr: '192.168.1.80 (port 6668)', tuya: true, help: 'Smart Life and Tuya plugs need their device ID and local key. Get them once: link the Smart Life app to a free Tuya IoT account, then run <code class="code-inline whitespace-nowrap">python -m tinytuya wizard</code>. The README has the steps. Re-pairing the plug in Smart Life changes its key. Leave Protocol on Auto.' },
+    meross: { meross: true, help: 'Enter the plug\'s IP address and leave the key blank: most Meross plugs answer without it. Newer models that encrypt their local traffic need the Meross key and the plug\'s MAC address; the README shows how to get the key.' },
+    sonoff: { addr: '192.168.1.80 (port 8081)', help: 'Works in Sonoff DIY mode (firmware 3.5 or later), which takes the plug off the eWeLink cloud. Itead\'s DIY instructions for your model show how to turn it on. DIY mode has no power reading; for watts, flash Tasmota or ESPHome, or use Home Assistant.' },
+    esphome: { login: 'Web server username (optional)', entity: ['Switch name (optional)', 'Power sensor name (optional)'], help: 'Needs <code class="code-inline">web_server:</code> in the device YAML (Athom plugs ship with it). The Bridge finds the relay and power sensor itself; name them only if it picks the wrong ones. Fill in the login only if the web server has one.' },
+    mystrom: { token: 'API token (optional)', help: 'Enter the plug\'s IP address. If you secured the plug with an API token in the myStrom app, paste it here.' },
+    wiz: { help: 'Enter the plug\'s IP address and turn on "Allow local communication" in the WiZ app settings. Watts show on WiZ plugs with a power meter.' },
+    home_assistant: { addr: 'http://homeassistant.local:8123', addrLabel: 'Home Assistant URL', token: 'Long-lived access token', entity: ['Switch entity', 'Power sensor (optional)'], entityPh: ['switch.printer_plug', 'sensor.printer_plug_power'], help: 'Any plug Home Assistant can switch: Zigbee, Matter, Hue, Meross, Sonoff and more. Make the token in Home Assistant: your profile, Security, Long-lived access tokens, Create token. The entity is the switch\'s entity ID.' },
+};
+
 function plugFromForm() {
-    const kind = (document.getElementById('pPlugKind') || {}).value || '';
-    const address = ((document.getElementById('pPlugAddress') || {}).value || '').trim();
+    const val = id => ((document.getElementById(id) || {}).value || '').trim();
+    const kind = val('pPlugKind');
     const autoOff = !!(document.getElementById('pPlugAutoOff') || {}).checked;
-    const delay = parseInt((document.getElementById('pPlugDelay') || {}).value, 10);
-    return { kind, address, auto_off: autoOff, auto_off_delay_minutes: delay > 0 ? delay : 10 };
+    const delay = parseInt(val('pPlugDelay'), 10);
+    const plug = { kind, address: val('pPlugAddress'), auto_off: autoOff, auto_off_delay_minutes: delay > 0 ? delay : 10 };
+    const k = PLUG_KINDS[kind] || {};
+    // A blank secret (local key, password, token) keeps the saved one.
+    if (k.tuya) Object.assign(plug, { device_id: val('pPlugDeviceId'), local_key: val('pPlugLocalKey'), version: val('pPlugVersion') });
+    if (k.login) Object.assign(plug, { username: val('pPlugUsername'), password: (document.getElementById('pPlugPassword') || {}).value || '' });
+    if (k.token) plug.token = val('pPlugToken');
+    if (k.meross) Object.assign(plug, { local_key: val('pPlugMerossKey'), mac: val('pPlugMac') });
+    if (k.entity) Object.assign(plug, { entity: val('pPlugEntity'), power_entity: val('pPlugPowerEntity') });
+    return plug;
 }
 
-function fillPlugFields(plug) {
-    const set = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v; el.classList.remove(FIELD_ERROR_CLASS); } };
-    set('pPlugKind', plug && plug.kind ? plug.kind : '');
-    set('pPlugAddress', plug && plug.address ? plug.address : '');
-    set('pPlugDelay', plug && plug.auto_off_delay_minutes > 0 ? plug.auto_off_delay_minutes : 10);
+function fillPlugFields(plug, secretSet) {
+    const p = plug || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v || ''; el.classList.remove(FIELD_ERROR_CLASS); } };
+    set('pPlugKind', p.kind);
+    set('pPlugAddress', p.address);
+    set('pPlugDeviceId', p.device_id);
+    set('pPlugVersion', p.version);
+    set('pPlugUsername', p.username);
+    set('pPlugEntity', p.entity);
+    set('pPlugPowerEntity', p.power_entity);
+    set('pPlugMac', p.mac);
+    const saved = '••••••••  saved, leave blank to keep';
+    ['pPlugLocalKey', 'pPlugPassword', 'pPlugToken', 'pPlugMerossKey'].forEach(id => set(id, ''));
+    updateSecretPlaceholder('pPlugLocalKey', !!secretSet && p.kind === 'tuya', saved, '16 characters');
+    updateSecretPlaceholder('pPlugPassword', !!secretSet && !!(PLUG_KINDS[p.kind] || {}).login, saved, '');
+    updateSecretPlaceholder('pPlugToken', !!secretSet && !!(PLUG_KINDS[p.kind] || {}).token, saved, '');
+    updateSecretPlaceholder('pPlugMerossKey', !!secretSet && p.kind === 'meross', saved, 'Leave blank for most plugs');
+    set('pPlugDelay', p.auto_off_delay_minutes > 0 ? p.auto_off_delay_minutes : 10);
     const cb = document.getElementById('pPlugAutoOff');
-    if (cb) cb.checked = !!(plug && plug.auto_off);
+    if (cb) cb.checked = !!p.auto_off;
     const res = document.getElementById('plugTestResult');
     if (res) { res.textContent = ''; res.classList.add('hidden'); }
     onPlugKindChange();
@@ -2312,12 +2420,31 @@ function fillPlugFields(plug) {
 
 function onPlugKindChange() {
     const kind = (document.getElementById('pPlugKind') || {}).value || '';
-    const row = document.getElementById('plugAutoOffRow');
-    if (row) row.classList.toggle('hidden', !kind);
-    const btn = document.getElementById('plugTestBtn');
-    if (btn) btn.classList.toggle('hidden', !kind);
+    const k = PLUG_KINDS[kind] || {};
+    const show = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !on); };
+    const text = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
+    show('plugAutoOffRow', !!kind);
+    show('plugTestBtn', !!kind);
+    show('plugTuyaRow', !!k.tuya);
+    show('plugLoginRow', !!k.login);
+    show('plugTokenRow', !!k.token);
+    show('plugMerossRow', !!k.meross);
+    if (k.token) text('pPlugTokenLabel', k.token);
+    show('plugEntityRow', !!k.entity);
     const addr = document.getElementById('pPlugAddress');
-    if (addr) addr.placeholder = kind === 'kasa' ? '192.168.1.80 (port 9999)' : '192.168.1.80';
+    if (addr) addr.placeholder = k.addr || '192.168.1.80';
+    const addrLabel = document.querySelector('label[for="pPlugAddress"]');
+    if (addrLabel) addrLabel.textContent = k.addrLabel || 'Plug address';
+    if (k.login) text('pPlugUsernameLabel', k.login);
+    if (k.entity) {
+        text('pPlugEntityLabel', k.entity[0]);
+        text('pPlugPowerEntityLabel', k.entity[1]);
+        const ph = k.entityPh || ['', ''];
+        document.getElementById('pPlugEntity').placeholder = ph[0];
+        document.getElementById('pPlugPowerEntity').placeholder = ph[1];
+    }
+    const help = document.getElementById('plugHelp');
+    if (help) { help.innerHTML = k.help || ''; help.classList.toggle('hidden', !k.help); }
 }
 
 async function testPlug() {
@@ -2330,7 +2457,7 @@ async function testPlug() {
     res.textContent = 'Checking the plug…';
     if (btn) btn.disabled = true;
     try {
-        const r = await apiFetch('/api/plug/test', { method: 'POST', body: JSON.stringify({ kind: plug.kind, address: plug.address }) });
+        const r = await apiFetch('/api/plug/test', { method: 'POST', body: JSON.stringify(plug) });
         res.className = 'text-xs leading-relaxed ' + (r.ok ? 'text-text' : 'text-danger');
         res.textContent = r.message || (r.ok ? 'Plug found.' : 'The plug did not answer.');
     } catch (e) {
@@ -2484,7 +2611,7 @@ function openEditPrinterModal(id) {
     document.getElementById('pWebcamUrl').value = printer.webcam_url || '';
     document.getElementById('pPrusaLinkUrl').value = printer.prusalink_url || '';
     document.getElementById('pOctoPrintUrl').value = printer.octoprint_url || '';
-    fillPlugFields(printer.plug);
+    fillPlugFields(printer.plug, printer.plug_secret_set);
     document.getElementById('pHaUrl').value = printer.home_assistant_url || '';
     Object.entries(HA_FIELDS).forEach(([id, key]) => { document.getElementById(id).value = printer[key] || ''; });
     if (printer.lan_code_set) document.getElementById('pLanCode').placeholder = 'Saved. Leave blank to keep it';

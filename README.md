@@ -81,7 +81,7 @@ It also does:
 - Pause, resume and stop. Set nozzle and bed temperatures, home, change fans, print speed and the light, or start a file that is already on the printer.
 - Skip a failed part on the plate while the rest keeps printing.
 - Printer alarms in plain words: Bambu HMS codes with their description and a wiki link, Klipper shutdowns, PrusaLink and OctoPrint errors. A wrong access code or a printer that refuses control is explained on its card.
-- Shelly, Tasmota and Kasa smart plugs: see the watts, switch the printer off, or have the Bridge turn it off once a finished print has cooled.
+- Smart plugs (Shelly, Tasmota, TP-Link Kasa and Tapo, Tuya / Smart Life, Meross, Sonoff, ESPHome, myStrom, WiZ, or any plug in Home Assistant): see the watts, switch the printer off, or have the Bridge turn it off once a finished print has cooled.
 - Spoolman support, so the filament each print used comes off the right spool.
 - Home Assistant over MQTT, with each printer as its own device, and Prometheus metrics for Grafana.
 - An optional dashboard password and API tokens.
@@ -195,7 +195,41 @@ You get status and progress, but no print controls.
 <details>
 <summary><b>Smart plugs</b></summary>
 
-Supported: Shelly Gen1, Gen2 and Plus; Tasmota; Kasa on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) isn't supported yet. The Bridge talks to the plug over your network and never uses the maker's cloud.
+The Bridge talks to the plug over your network and never uses the maker's cloud.
+
+| Type | What it needs |
+| --- | --- |
+| Shelly (Gen1 to Gen4), Tasmota | The plug's address. Any plug flashed with Tasmota works. |
+| TP-Link Kasa | The address. Newer firmware also needs the TP-Link account from the Kasa app. |
+| TP-Link Tapo (P100, P110, P115...) | The address and the TP-Link account from the Tapo app (case-sensitive). The plug checks the login itself; current and older Tapo firmware both work. If the login is refused, turn on Third-Party Compatibility in the Tapo app (Me, Tapo Lab). |
+| Tuya / Smart Life | The address, device ID and local key ([how to get them](#getting-a-tuya-local-key)). Leave Protocol on Auto. Re-pairing the plug changes its key. |
+| Meross | The address. Leave the key blank: most plugs answer without it. Models that encrypt their local traffic need the Meross key ([how to get it](#getting-a-meross-key)) and the plug's MAC address (found automatically on Linux). |
+| Sonoff | The address, with the plug in DIY mode (firmware 3.5+; see Itead's DIY instructions for your model). DIY mode reports no watts: for those, flash Tasmota or ESPHome, or use Home Assistant. |
+| ESPHome (e.g. Athom) | The address, with `web_server:` in the device YAML. The relay and power sensor are found automatically. |
+| myStrom | The address, plus the API token if you secured the plug with one. |
+| WiZ | The address, with "Allow local communication" on in the WiZ app. With Docker, use host networking (WiZ uses UDP). |
+| Home Assistant | Your Home Assistant URL, a long-lived access token (profile, Security, Long-lived access tokens) and the switch entity, plus a power sensor entity for watts. Covers Zigbee, Matter, Hue and anything else Home Assistant can switch. |
+
+Plugs without a lifetime energy counter (Tapo, Tuya, Meross, ESPHome, myStrom, WiZ, Home Assistant) still get each print's energy, from the watts over time.
+
+#### Getting a Tuya local key
+
+The key only comes from Tuya's cloud, so you fetch it once on any computer with Python:
+
+1. Sign up at [iot.tuya.com](https://iot.tuya.com), create a Cloud project (Smart Home) in the data center of your Smart Life account, and link the Smart Life app to it (Devices, Link App Account, scan the QR code with the app).
+2. Run `pip install tinytuya`, then `python -m tinytuya wizard`, and give it the project's Access ID and Access Secret.
+3. Copy the plug's `id` (Device ID) and `key` (Local key) from the list it prints.
+
+A Tuya plug answers one local connection at a time, so close Home Assistant's Local Tuya or tinytuya if **Check plug** cannot reach it.
+
+#### Getting a Meross key
+
+Only encrypted Meross models need it. Home Assistant's meross_lan shows it, or run once:
+
+```bash
+pip install meross_iot
+python -c "import asyncio; from meross_iot.http_api import MerossHttpClient as C; print(asyncio.run(C.async_from_user_password(api_base_url='https://iotx-eu.meross.com', email='YOUR EMAIL', password='YOUR PASSWORD')).cloud_credentials.key)"
+```
 
 Click the pencil on a printer's card, scroll to **Smart plug**, choose the type, enter the plug's address and click **Check plug**. With **Turn off after a print** ticked, the plug switches off a set number of minutes after a print ends, once the nozzle is below 50 °C. A new print in that time cancels it. The off button is disabled while the printer is printing or hot.
 
