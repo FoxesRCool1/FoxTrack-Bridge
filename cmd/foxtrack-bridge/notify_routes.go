@@ -32,6 +32,9 @@ type notifyResult struct {
 var (
 	notifyMu   sync.Mutex
 	notifyLast = map[string]notifyResult{} // by channel ID, in memory only
+	// notifySeen: when each channel last got a message with this exact text,
+	// so the same words never go out twice in notifyRepeatAfter.
+	notifySeen = map[string]time.Time{}
 
 	// Swapped by tests.
 	notifySnapshot = printerSnapshot
@@ -64,6 +67,30 @@ func recordNotify(id string, err error) {
 	notifyMu.Lock()
 	notifyLast[id] = r
 	notifyMu.Unlock()
+}
+
+// notifyRepeatAfter is how soon the same text may go to the same channel again.
+const notifyRepeatAfter = 2 * time.Minute
+
+// firstSend reports whether this channel has not had this text in the last
+// notifyRepeatAfter, and notes it as sent. The test button always goes.
+func firstSend(ch config.NotifyChannel, m notify.Message, now time.Time) bool {
+	if m.Event.Kind == events.Test {
+		return true
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	for k, t := range notifySeen {
+		if now.Sub(t) >= notifyRepeatAfter {
+			delete(notifySeen, k)
+		}
+	}
+	key := ch.ID + "\x00" + m.Plain()
+	if _, ok := notifySeen[key]; ok {
+		return false
+	}
+	notifySeen[key] = now
+	return true
 }
 
 // dispatchNotification sends one event to every channel that wants it. The
@@ -106,6 +133,9 @@ func dispatchNotification(e events.Event) {
 	}
 	var wg sync.WaitGroup
 	for _, ch := range chans {
+		if !firstSend(ch, msg, time.Now()) {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

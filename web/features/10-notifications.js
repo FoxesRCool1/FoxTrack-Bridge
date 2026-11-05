@@ -209,6 +209,9 @@ function nfRender() {
     const shown = NF.chs.filter(c => !c._deleted);
     let h = '<h2 class="font-heading text-xl font-medium leading-tight">Notifications</h2>'
         + '<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Get a message when a print finishes or goes wrong, without any app. ' + tip(escHtml(NF_PRIVACY), 'About privacy') + '</p>';
+    // A linked shop may also have FoxTrack's own alerts on: both mean two copies.
+    if (typeof foxtrackLinked === 'function' && foxtrackLinked())
+        h += '<p class="mt-2 text-sm text-text-2">FoxTrack can send the same print alerts (in FoxTrack: Settings, Account, Alerts). Turn each alert on in one place only, or it arrives twice.</p>';
     h += '<div class="mt-5" id="nfList">';
     if (!shown.length) {
         h += '<div class="nf-empty">No channels yet. Add one below.</div>';
@@ -222,7 +225,7 @@ function nfRender() {
         + d.services.map(s => '<button type="button" class="btn-outline btn-lg" data-act="add" data-kind="' + escHtml(s.kind) + '"><i class="fas fa-plus" aria-hidden="true"></i> ' + escHtml(s.name) + '</button>').join('')
         + '</div></div>';
     h += '<div class="mt-8 border-t border-border pt-5"><div class="label-row"><span class="field-label" id="nfQuietLabel">Quiet hours</span>'
-        + tip('Between these times only failed prints and printer alarms are sent. Other messages are dropped. Uses this machine\'s clock.', 'About quiet hours') + '</div>'
+        + tip('Between these times only failed prints, printer alarms and their all-clear are sent. Other messages are dropped. Uses this machine\'s clock.', 'About quiet hours') + '</div>'
         + '<div class="nf-quiet" role="group" aria-labelledby="nfQuietLabel">'
         + '<input id="nfQs" type="time" class="field" aria-label="Quiet hours start" value="' + escHtml(d.quiet_start || '') + '">'
         + '<span class="text-sm text-text-2">to</span>'

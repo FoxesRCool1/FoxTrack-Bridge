@@ -3,6 +3,10 @@
 ## Unreleased
 
 **New**
+- Notifications: an "Alarm cleared" message once a printer's alarms have been
+  gone for 2 minutes. It goes to every channel that gets alarms, without a
+  sound where the service allows it (Telegram, ntfy, Pushover, Gotify), and
+  gets through quiet hours like the alarm did.
 - More smart plugs, all over the LAN: TP-Link Tapo (current and older
   firmware) and newer Kasa firmware, Tuya / Smart Life (protocol 3.3 to 3.5),
   Meross (with or without the key, encrypted models too), Sonoff in DIY mode,
@@ -10,6 +14,21 @@
   The plug form shows setup help for each type, and the in-app help has a
   setup article per brand. Plug passwords, keys and tokens are never sent
   to the dashboard.
+
+**Improved**
+- Notifications send less: all the alarms a printer raises at once arrive as
+  one message (worst first, five listed); a flickering alarm sends at most one
+  "cleared" in 30 minutes; a printer that drops off again within 30 minutes of
+  coming back is reported offline only after 15 minutes; the same text never
+  goes to one channel twice within 2 minutes.
+- Telegram messages have no link preview card, and print started, resumed,
+  back online and alarm cleared arrive without a sound. ntfy, Pushover and
+  Gotify send those at low priority.
+- The webhook payload lists every alarm of the event in `alarms`.
+- Dashboard browser notifications: a second open tab no longer shows a
+  second copy.
+- The Notifications tab of a Bridge linked to FoxTrack says that FoxTrack can
+  send the same alerts, so each is best turned on in one place only.
 
 ## v2.6.0
 

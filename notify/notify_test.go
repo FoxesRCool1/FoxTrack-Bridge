@@ -44,8 +44,24 @@ func TestComposeWording(t *testing.T) {
 	}
 	code := "0700_2000_0002_0001"
 	m = Compose(events.Event{Kind: events.PrinterError, Printer: "Fox", Message: "Filament ran out", Code: code})
-	if len(m.Lines) != 2 || m.Lines[1] != "Code "+code || m.Link != "https://wiki.bambulab.com/en/hms/error-code?code="+code {
+	if len(m.Lines) != 1 || m.Lines[0] != "Filament ran out (code "+code+")" || m.Link != "https://wiki.bambulab.com/en/hms/error-code?code="+code {
 		t.Fatalf("alarm: %q link %q", m.Lines, m.Link)
+	}
+	var many []events.Alarm
+	for i := 0; i < 7; i++ {
+		many = append(many, events.Alarm{Code: code, Message: "m"})
+	}
+	many[1] = events.Alarm{Code: code}
+	m = Compose(events.Event{Kind: events.PrinterError, Printer: "Fox", Alarms: many})
+	if m.Title != "7 printer alarms: Fox" || len(m.Lines) != 6 || m.Lines[1] != "Alarm code "+code+". Check the printer." || m.Lines[5] != "And 2 more. The Bridge dashboard lists them all." {
+		t.Fatalf("many alarms: %q %q", m.Title, m.Lines)
+	}
+	m = Compose(events.Event{Kind: events.PrinterAlarmCleared, Printer: "Fox", Alarms: []events.Alarm{{Code: code, Message: "Jam", Lasted: 4 * time.Minute}}})
+	if m.Title != "Alarm cleared: Fox" || len(m.Lines) != 2 || m.Lines[1] != "It lasted 4m." || m.Link != "" {
+		t.Fatalf("cleared: %q %q %q", m.Title, m.Lines, m.Link)
+	}
+	if m = Compose(events.Event{Kind: events.PrinterAlarmCleared, Alarms: many[:2]}); m.Title != "2 alarms cleared" {
+		t.Fatalf("cleared title: %q", m.Title)
 	}
 	if m = Compose(events.Event{Kind: events.PrinterError, Message: "Klipper shut down", Code: "shutdown"}); m.Link != "" {
 		t.Fatalf("a non-HMS code must not get a wiki link: %q", m.Link)
@@ -268,8 +284,16 @@ func TestTelegram(t *testing.T) {
 	if err := send(ch, m); err != nil {
 		t.Fatal(err)
 	}
-	if c := got(); c.path != "/bot123:abc/sendMessage" || !strings.Contains(string(c.body), "parse_mode=HTML") || !strings.Contains(string(c.body), "Fox+%26lt%3B1%26gt%3B") {
+	if c := got(); c.path != "/bot123:abc/sendMessage" || !strings.Contains(string(c.body), "parse_mode=HTML") || !strings.Contains(string(c.body), "Fox+%26lt%3B1%26gt%3B") ||
+		!strings.Contains(string(c.body), "disable_notification=false") || !strings.Contains(string(c.body), "link_preview_options=%7B%22is_disabled%22%3Atrue%7D") {
 		t.Fatalf("sendMessage: %s %s", c.path, c.body)
+	}
+	// Good news arrives without a sound.
+	if err := send(ch, Compose(events.Event{Kind: events.PrinterAlarmCleared, Message: "Jam"})); err != nil {
+		t.Fatal(err)
+	}
+	if c := got(); !strings.Contains(string(c.body), "disable_notification=true") {
+		t.Fatalf("silent: %s", c.body)
 	}
 	m.Snapshot = jpeg
 	if err := send(ch, m); err != nil {
@@ -806,5 +830,26 @@ func TestSMTPErrWording(t *testing.T) {
 		if got == refused || !strings.Contains(got, strconv.Itoa(code)+" 5.7.0 Must issue a STARTTLS command first") {
 			t.Errorf("%d: %q", code, got)
 		}
+	}
+}
+
+func TestWantsClearedFollowsAlarm(t *testing.T) {
+	cleared := events.Event{Kind: events.PrinterAlarmCleared, PrinterID: "p1"}
+	for _, c := range []struct {
+		ch   config.NotifyChannel
+		want bool
+	}{
+		{config.NotifyChannel{Enabled: true}, true}, // default set has printer_error
+		{config.NotifyChannel{Enabled: true, Events: []string{"printer_error"}}, true},
+		{config.NotifyChannel{Enabled: true, Events: []string{"print_finished"}}, false},
+		{config.NotifyChannel{Enabled: true, Printers: []string{"p2"}}, false},
+		{config.NotifyChannel{Enabled: false}, false},
+	} {
+		if got := Wants(c.ch, cleared); got != c.want {
+			t.Fatalf("%+v: got %v", c.ch, got)
+		}
+	}
+	if !events.PrinterAlarmCleared.Urgent() || events.PrinterAlarmCleared.Loud() || !events.PrinterAlarmCleared.Silent() {
+		t.Fatal("cleared: passes quiet hours, quietly")
 	}
 }

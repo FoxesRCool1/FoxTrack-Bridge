@@ -1088,9 +1088,11 @@ function formatElapsed(startTs) {
     return Math.floor(m / 60) + 'h ' + (m % 60) + 'm elapsed';
 }
 
-function sendNotification(title, body) {
+// tag: a second dashboard tab shows the same news; the browser then replaces
+// the first copy instead of showing two.
+function sendNotification(title, body, tag) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    try { new Notification(title, { body, icon: '/logo.png' }); } catch(_) {}
+    try { new Notification(title, { body, icon: '/logo.png', tag }); } catch(_) {}
 }
 
 function detectStatusTransitions() {
@@ -1111,12 +1113,13 @@ function detectStatusTransitions() {
         if (!isPrinting) {
             if (wasPrinting) {
                 const fname = cur.file_name || (prev && prev.file_name) || '';
+                const tag = id + ':' + cur.status;
                 if (cur.status === 'finished')
-                    sendNotification(i18n(fill('{0}: print finished', name)), fname || i18n('Print finished'));
+                    sendNotification(i18n(fill('{0}: print finished', name)), fname || i18n('Print finished'), tag);
                 else if (cur.status === 'error')
-                    sendNotification(i18n(fill('{0}: print failed', name)), fname || cur.error || i18n('Check printer'));
+                    sendNotification(i18n(fill('{0}: print failed', name)), fname || cur.error || i18n('Check printer'), tag);
                 else if (cur.status === 'paused')
-                    sendNotification(i18n(fill('{0}: print paused', name)), fname || '');
+                    sendNotification(i18n(fill('{0}: print paused', name)), fname || '', tag);
             }
             delete printStartTimes[id];
         }

@@ -21,11 +21,15 @@ const (
 	PrintFinished  Kind = "print_finished"
 	PrintFailed    Kind = "print_failed"
 	PrintCancelled Kind = "print_cancelled"
-	PrinterError   Kind = "printer_error"   // a new alarm (HMS, print error, Klipper shutdown)
-	PrinterOffline Kind = "printer_offline" // stopped reporting
-	PrinterOnline  Kind = "printer_online"  // back after PrinterOffline
-	MaintenanceDue Kind = "maintenance_due"
-	Test           Kind = "test" // the dashboard's "Send test" button
+	PrinterError   Kind = "printer_error" // new alarms (HMS, print error, Klipper shutdown), one event per poll
+	// PrinterAlarmCleared follows a PrinterError: the alarms it told about are
+	// gone. A channel gets it when it gets PrinterError, so it has no switch
+	// of its own and is not in All.
+	PrinterAlarmCleared Kind = "printer_alarm_cleared"
+	PrinterOffline      Kind = "printer_offline" // stopped reporting
+	PrinterOnline       Kind = "printer_online"  // back after PrinterOffline
+	MaintenanceDue      Kind = "maintenance_due"
+	Test                Kind = "test" // the dashboard's "Send test" button
 )
 
 // All lists every kind in the order the dashboard shows them.
@@ -34,9 +38,27 @@ var All = []Kind{PrintStarted, PrintPaused, PrintResumed, PrintFinished, PrintFa
 // Default is what a new notification channel sends.
 var Default = []Kind{PrintFinished, PrintFailed, PrintPaused, PrinterError, MaintenanceDue}
 
-// Urgent kinds get through quiet hours.
+// Urgent kinds get through quiet hours. A cleared alarm goes too (quietly,
+// see Silent): whoever was woken by the alarm wants to know it is over.
 func (k Kind) Urgent() bool {
-	return k == PrintFailed || k == PrinterError || k == Test
+	return k == PrintFailed || k == PrinterError || k == PrinterAlarmCleared || k == Test
+}
+
+// Loud kinds go out at high priority where a service has one.
+func (k Kind) Loud() bool { return k == PrintFailed || k == PrinterError }
+
+// Silent kinds are good news nobody needs to be buzzed for: they arrive
+// without a sound where a service allows it.
+func (k Kind) Silent() bool {
+	return k == PrintStarted || k == PrintResumed || k == PrinterOnline || k == PrinterAlarmCleared
+}
+
+// Alarm is one printer alarm in a PrinterError or PrinterAlarmCleared event.
+type Alarm struct {
+	Code     string
+	Message  string
+	Severity string        // fatal, serious, common
+	Lasted   time.Duration // PrinterAlarmCleared only: how long it was there
 }
 
 type Event struct {
@@ -52,6 +74,9 @@ type Event struct {
 	Message  string
 	Code     string // alarm code, e.g. "0700_2000_0002_0001"
 	Severity string // alarm severity: fatal, serious, common, info
+	// Alarms are every alarm of a PrinterError or PrinterAlarmCleared event,
+	// worst first. Code, Message and Severity repeat the first one.
+	Alarms []Alarm
 	// Record is the finished print, for the three end kinds.
 	Record *history.Record
 }

@@ -27,6 +27,7 @@ func seedNotifications(t *testing.T, n *config.Notifications) {
 	configMutex.Unlock()
 	notifyMu.Lock()
 	notifyLast = map[string]notifyResult{}
+	notifySeen = map[string]time.Time{}
 	notifyMu.Unlock()
 }
 
@@ -364,5 +365,29 @@ func TestDispatchFiltersQuietHoursAndSharesOneSnapshot(t *testing.T) {
 	dispatchNotification(events.Event{Kind: events.PrinterError, PrinterID: "p1"})
 	if len(sent) != 1 {
 		t.Fatal("an alarm passes quiet hours")
+	}
+}
+
+func TestDispatchSameTextOnceAndClearedFollowsAlarm(t *testing.T) {
+	stubSnapshot(t, func(config.Printer) ([]byte, error) { return nil, errNoCamera })
+	var mu sync.Mutex
+	var got []string
+	stubSend(t, func(ch config.NotifyChannel, m notify.Message) error {
+		mu.Lock()
+		got = append(got, ch.ID+":"+m.Title)
+		mu.Unlock()
+		return nil
+	})
+	alarmsOnly := config.NotifyChannel{ID: "a", Kind: "webhook", URL: "http://x", Enabled: true, Events: []string{"printer_error"}}
+	finishedOnly := config.NotifyChannel{ID: "f", Kind: "webhook", URL: "http://x", Enabled: true, Events: []string{"print_finished"}}
+	seedNotifications(t, &config.Notifications{Channels: []config.NotifyChannel{alarmsOnly, finishedOnly}})
+
+	alarm := events.Event{Kind: events.PrinterError, PrinterID: "p1", Printer: "Fox", Code: "0700_2000_0002_0001", Message: "Jam"}
+	dispatchNotification(alarm)
+	dispatchNotification(alarm) // the same words again at once: dropped
+	dispatchNotification(events.Event{Kind: events.PrinterAlarmCleared, PrinterID: "p1", Printer: "Fox", Code: "0700_2000_0002_0001", Message: "Jam"})
+	want := []string{"a:Printer alarm: Fox", "a:Alarm cleared: Fox"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

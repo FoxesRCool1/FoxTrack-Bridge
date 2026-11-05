@@ -345,13 +345,17 @@ The virtual printer listens on port 8090 by default; the Bridge log says if the 
 		Keywords: []string{"alarm", "hms", "error code", "warning", "fault", "shutdown", "attention", "bell", "alert"},
 		Body: `The Bridge reports what a printer says is wrong, and shows it on the printer's card and in FoxTrack's Printers page, Alarms view.
 
-Bambu Lab: HMS codes (the printer's health messages) with their severity (fatal, serious, common, info) and the print error code when a print fails. The card shows the code as Bambu does, for example 0300_1200_0002_0001, with a "What it means" link to the Bambu wiki page for that code. The Bridge does not fetch Bambu's own text for a code.
+Bambu Lab: HMS codes (the printer's health messages) with their severity (fatal, serious, common, info) and the print error code when a print fails. The card shows the code as Bambu does, for example 0300_1200_0002_0001, with a "What it means" link to the Bambu wiki page for that code, and Bambu's own words for the code when the Bridge knows them.
 
 Klipper: a firmware shutdown or error (the state message Klipper shows, for example "MCU 'mcu' shutdown: Timer too close") as a fatal alarm, and a print that ended in error as a serious one.
 
 PrusaLink: the error or attention text the printer shows. OctoPrint: the printer error OctoPrint reports.
 
-An alarm clears when the printer stops reporting it. In FoxTrack, a fatal or serious alarm rings the bell and sends the printer error alert (Telegram, WhatsApp, Discord, Slack or email, whichever is set up). Home Assistant printers report no alarms.`,
+An alarm clears when the printer stops reporting it. Alarms come from the printer itself: one can clear before you reach the printer, so its screen may show nothing.
+
+Bridge notifications (Telegram, Discord, ntfy and the rest): all the alarms a printer raises at once arrive as one message. Once they have been gone for 2 minutes, a quiet "Alarm cleared" message follows, to every channel that gets alarms. An alarm that flickers on and off sends no more than one "cleared" in 30 minutes. A printer that drops off the network again within 30 minutes of coming back is reported offline only after 15 minutes. The same text never goes to the same channel twice within 2 minutes.
+
+In FoxTrack, a fatal or serious alarm rings the bell and sends the printer error alert (Telegram, WhatsApp, Discord, Slack or email, whichever is set up). Home Assistant printers report no alarms.`,
 	},
 	{
 		ID:       "foxtrack-link",
