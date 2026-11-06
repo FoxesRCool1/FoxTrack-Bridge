@@ -97,6 +97,25 @@ func TestResolveConfigImport_KeepsAccountSecretsAndRefusesClear(t *testing.T) {
 	}
 }
 
+func TestResolveConfigImport_KeepsFoxTrackKeysTheFileLacks(t *testing.T) {
+	old := transferConfig()
+	old.APIKey, old.FoxTrack2APIKey = "ft1-current", "ft2-current"
+	got, err := resolveConfigImport(old, []byte(`{"printers":[{"name":"Solo","ip":"10.0.0.2"}]}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.APIKey != "ft1-current" || got.FoxTrack2APIKey != "ft2-current" {
+		t.Fatalf("keys = %q %q, want the current ones kept", got.APIKey, got.FoxTrack2APIKey)
+	}
+	got, err = resolveConfigImport(old, []byte(`{"printers":[{"name":"Solo","ip":"10.0.0.2"}],"foxtrack2_api_key":"ft2-file"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FoxTrack2APIKey != "ft2-file" {
+		t.Fatalf("FoxTrack2APIKey = %q, want the file's key", got.FoxTrack2APIKey)
+	}
+}
+
 func TestMergeImportedAI_KeyOnlyForSameProvider(t *testing.T) {
 	old := &config.AI{Preset: "custom", BaseURL: "https://a.example/v1", APIKey: "k"}
 	if got := mergeImportedAI(&config.AI{Preset: "custom", BaseURL: "https://evil.example/v1"}, old); got.APIKey != "" {

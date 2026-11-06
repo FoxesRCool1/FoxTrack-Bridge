@@ -148,6 +148,14 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 		cfg.Printers[i].Plug = normalizePlug(cfg.Printers[i].Plug)
 	}
 	if old != nil {
+		// An older config.json may predate a FoxTrack key; restoring it must
+		// not unlink FoxTrack (same rule as POST /api/config).
+		if cfg.APIKey == "" {
+			cfg.APIKey = old.APIKey
+		}
+		if cfg.FoxTrack2APIKey == "" {
+			cfg.FoxTrack2APIKey = old.FoxTrack2APIKey
+		}
 		cfg.Security = old.Security
 		cfg.BambuCloud = old.BambuCloud
 		cfg.AI = mergeImportedAI(cfg.AI, old.AI)

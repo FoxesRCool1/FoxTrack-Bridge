@@ -256,7 +256,7 @@
 "Done",
 "Download",
 "Download backup",
-"Download your printers and settings as one file, or restore them from a backup. The file holds your printers' access codes, so keep it private. Your dashboard password, API tokens, share links, Bambu account and assistant key are not in it and are never changed by a restore. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.",
+"Download your printers and settings as one file, or restore them from a backup. The file holds your printers' access codes, so keep it private. Your dashboard password, API tokens, share links, Bambu account and assistant key are not in it. A restore never changes the first four, and keeps the assistant key unless the backup uses a different AI provider. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.",
 "Downloading update…",
 "Due",
 "Due soon",

@@ -473,7 +473,7 @@ The link is shown once, when it is made: copy it then. Only a hash of it is stor
 		Keywords: []string{"backup", "back up", "restore", "export", "import", "move", "migrate", "new computer", "transfer", "copy settings", "reinstall"},
 		Body: `Settings > General > Back up and restore downloads the printers and settings as one file (foxtrack-bridge-backup-<date>.json), and Restore from file loads one back. The file holds the printers' access codes and API keys, so keep it private.
 
-The dashboard password, API tokens, share links, the linked Bambu account and the assistant's API key are not in the file, and a restore never changes them. Before a restore the current settings are saved next to config.json as config.json.before-import-<date>, so a restore can be undone by hand.
+The dashboard password, API tokens, share links, the linked Bambu account and the assistant's API key are not in the file. A restore never changes the first four, and keeps the assistant's key unless the backup uses a different AI provider. Before a restore the current settings are saved next to config.json as config.json.before-import-<date>, so a restore can be undone by hand.
 
 Restore also accepts a plain config.json, such as one of the daily copies in the backups folder next to config.json. A file with no printers is refused unless you confirm that every saved printer should be removed.
 

@@ -51,28 +51,42 @@ func init() {
 func queuePath() string { return filepath.Join(config.ConfigDir(), "queue.json") }
 
 // queueLoadLocked reads queue.json once. A missing file is an empty queue; a
-// file that does not parse is moved aside, never deleted.
+// file that does not parse is moved aside, never deleted. When the file cannot
+// be read or moved aside, the queue shows empty, saves are refused (so the file
+// is never overwritten) and the next call tries again.
 func queueLoadLocked() {
 	if printQueue.loaded {
 		return
 	}
-	printQueue.loaded = true
 	printQueue.byPrinter = map[string][]queueItem{}
-	printQueue.starting = map[string]bool{}
+	if printQueue.starting == nil {
+		printQueue.starting = map[string]bool{}
+	}
 	data, err := os.ReadFile(queuePath())
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("[queue] could not read queue.json: %v", err)
 		return
 	}
-	if err := json.Unmarshal(data, &printQueue.byPrinter); err != nil {
-		bak := queuePath() + ".corrupt-" + time.Now().Format("20060102-150405")
-		if rerr := os.Rename(queuePath(), bak); rerr == nil {
+	if err == nil {
+		if err := json.Unmarshal(data, &printQueue.byPrinter); err != nil {
+			printQueue.byPrinter = map[string][]queueItem{}
+			bak := queuePath() + ".corrupt-" + time.Now().Format("20060102-150405")
+			if rerr := os.Rename(queuePath(), bak); rerr != nil {
+				log.Printf("[queue] queue.json did not parse (%v) and could not be moved aside: %v", err, rerr)
+				return
+			}
 			log.Printf("[queue] queue.json did not parse (%v); moved it to %s", err, filepath.Base(bak))
 		}
-		printQueue.byPrinter = map[string][]queueItem{}
 	}
+	printQueue.loaded = true
 }
 
+var errQueueUnreadable = errors.New("queue.json could not be read, so the queue was not saved. Check the Bridge log.")
+
 func queueSaveLocked() error {
+	if !printQueue.loaded {
+		return errQueueUnreadable
+	}
 	data, err := json.MarshalIndent(printQueue.byPrinter, "", "  ")
 	if err != nil {
 		return err

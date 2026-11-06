@@ -190,6 +190,9 @@
         @media (max-width: 480px) { .type-badge { display: none; } }
         /* The external spool sits apart from the AMS slots. */
         .ams-ext { border-left: 1px solid var(--border); padding-left: .5rem; margin-left: .25rem; }
+        /* The loaded spool: an outline, so the gap shows the card behind it
+           rather than a ring offset painted in the page colour. */
+        .spool-active { outline: 2px solid var(--accent); outline-offset: 2px; }
 
         /* (i) help tip: help someone needs once, out of everyone else's way.
            A mouse hover opens it, a click or tap pins it, Escape or a click
@@ -984,7 +987,7 @@
                     </section>
                     <section class="rounded-lg border border-border bg-panel p-6">
                         <h2 class="font-heading text-xl font-medium leading-tight">Back up and restore</h2>
-                        <p class="mt-1.5 text-sm text-text-2">Download your printers and settings as one file, or restore them from a backup. The file holds your printers' access codes, so keep it private. Your dashboard password, API tokens, share links, Bambu account and assistant key are not in it and are never changed by a restore. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.</p>
+                        <p class="mt-1.5 text-sm text-text-2">Download your printers and settings as one file, or restore them from a backup. The file holds your printers' access codes, so keep it private. Your dashboard password, API tokens, share links, Bambu account and assistant key are not in it. A restore never changes the first four, and keeps the assistant key unless the backup uses a different AI provider. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.</p>
                         <div class="mt-5 flex items-center gap-3">
                             <a href="/api/config/export" download class="btn-outline">Download backup</a>
                             <button type="button" onclick="pickBackupFile()" class="btn-outline">Restore from file…</button>
@@ -3825,7 +3828,7 @@ function amsSlotsInnerHTML(amsSlots, ext, ext2, canEdit, enc, printerName) {
         // Filament colour is data, so it is the one inline colour on a card.
         const color = s.color ? '#' + s.color : 'var(--panel-2)';
         const label = s._ext || (s.material || 'S' + (s.slot + 1));
-        const ring = s.active ? ' ring-2 ring-brand ring-offset-2 ring-offset-bg' : '';
+        const ring = s.active ? ' spool-active' : '';
         const slotName = s._ext ? filamentSlotName(s.slot) : 'Slot ' + (s.slot + 1);
         const title = escHtml(slotName + (s.active ? ' (loaded)' : '') + (s.material ? ' · ' + s.material : ''));
         const inner = '<div class="w-6 h-6 rounded-full border border-border' + ring + '" style="background:' + escHtml(color) + '"></div>'

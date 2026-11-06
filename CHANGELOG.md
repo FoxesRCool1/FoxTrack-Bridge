@@ -26,8 +26,10 @@
 - Back up and restore (Settings, General): download printers and settings as
   one file, or restore them from it or from a `config.json`. The current
   settings are saved next to `config.json` first. The dashboard password, API
-  tokens, share links, Bambu account and assistant key are never in the file
-  and never changed by a restore.
+  tokens, share links, Bambu account and assistant key are never in the file.
+  A restore never changes the first four, and keeps the assistant key unless
+  the backup uses a different AI provider. A FoxTrack key the file does not
+  have is kept too.
 - Daily copies of `config.json` and `history.json` in a `backups` folder next
   to them; the last 7 of each are kept.
 - An "Almost done" notification, sent once per print when the time left drops

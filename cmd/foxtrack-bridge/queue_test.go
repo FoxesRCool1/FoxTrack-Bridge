@@ -104,6 +104,21 @@ func TestQueue_AddMoveRemovePersist(t *testing.T) {
 	}
 }
 
+func TestQueue_UnreadableFileIsNeverOverwritten(t *testing.T) {
+	withQueue(t)
+	// A directory where queue.json should be: reading fails, but not as "missing".
+	if err := os.Mkdir(queuePath(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(queuePath()) })
+	if code, _ := queueCall(t, "POST", "/api/queue/p1", `{"file_name":"a.3mf"}`); code == 200 {
+		t.Fatal("add saved over an unreadable queue.json")
+	}
+	if fi, err := os.Stat(queuePath()); err != nil || !fi.IsDir() {
+		t.Fatalf("queue.json was replaced: %v", err)
+	}
+}
+
 func TestQueue_StartNext(t *testing.T) {
 	withQueue(t)
 	queueCall(t, "POST", "/api/queue/p1", `{"file_name":"a.3mf"}`)
