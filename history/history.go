@@ -2,11 +2,13 @@ package history
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +38,7 @@ type Record struct {
 	FilamentMM   float64       `json:"filament_mm,omitempty"` // Klipper and OctoPrint report length
 	Filaments    []FilamentUse `json:"filaments,omitempty"`   // Bambu AMS and external spool
 	EnergyWh     *float64      `json:"energy_wh,omitempty"`   // from the printer's smart plug
+	Note         string        `json:"note,omitempty"`        // free-form user note
 }
 
 // FilamentUse is one spool's share of a print. Grams is estimated from the
@@ -80,6 +83,10 @@ func notifyAppend(r Record) {
 }
 
 var mu sync.Mutex
+
+// ErrNotFound is returned by SetNote when no record matches the printer and
+// start time.
+var ErrNotFound = errors.New("no history record found")
 
 func historyPath() string {
 	return filepath.Join(config.ConfigDir(), "history.json")
@@ -145,6 +152,35 @@ func Append(r Record) error {
 	}
 	notifyAppend(r)
 	return nil
+}
+
+// maxNoteRunes caps the length of a stored note.
+const maxNoteRunes = 500
+
+// SetNote sets the free-form note on the record for printerName that started
+// at startTime (Unix seconds). The note is trimmed and cut to maxNoteRunes
+// runes. It returns the stored note, or ErrNotFound when no record matches.
+func SetNote(printerName string, startTime int64, note string) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	records, err := Load()
+	if err != nil {
+		return "", err
+	}
+	note = strings.TrimSpace(note)
+	if runes := []rune(note); len(runes) > maxNoteRunes {
+		note = string(runes[:maxNoteRunes])
+	}
+	for i := range records {
+		if records[i].PrinterName == printerName && records[i].StartTime == startTime {
+			records[i].Note = note
+			if err := save(records); err != nil {
+				return "", err
+			}
+			return note, nil
+		}
+	}
+	return "", ErrNotFound
 }
 
 // ForPrinter returns all records for the named printer.

@@ -26,38 +26,54 @@ import (
 // FoxTrack uses in print_file's ams_mapping and in the printer's tray_now.
 const ExternalSlot = 254
 
-// parseVtTray reads the external spool's keys from a report. It is parsed on
+// ExternalSlot2 is the dashboard's slot number for the left (deputy) external
+// spool of a dual-nozzle printer. It is never sent to the printer as a tray id.
+const ExternalSlot2 = 253
+
+// parseVtTray reads the external spools' keys from a report. It is parsed on
 // its own, apart from BambuReport, so an odd vt_tray never costs the rest of
-// the report. nil when the report has no vt_tray.
-func parseVtTray(payload []byte) (map[string]any, bool) {
+// the report. main is the right (or only) external spool, deputy the left one
+// of a dual-nozzle printer; each is nil when the report does not carry it.
+func parseVtTray(payload []byte) (main, deputy map[string]any, ok bool) {
 	if !bytes.Contains(payload, []byte(`"vt_tray"`)) && !bytes.Contains(payload, []byte(`"vir_slot"`)) {
-		return nil, false
+		return nil, nil, false
 	}
 	var probe struct {
 		Print struct {
 			VtTray  map[string]any   `json:"vt_tray"`
-			VirSlot []map[string]any `json:"vir_slot"` // newer firmware; H2D has two (not shown yet)
+			VirSlot []map[string]any `json:"vir_slot"` // newer firmware: one entry, or two on dual-nozzle printers
 		} `json:"print"`
 	}
 	if json.Unmarshal(payload, &probe) != nil {
-		return nil, false
+		return nil, nil, false
 	}
-	v := probe.Print.VtTray
-	if v == nil && len(probe.Print.VirSlot) == 1 {
-		v = probe.Print.VirSlot[0]
+	main = probe.Print.VtTray
+	for _, e := range probe.Print.VirSlot {
+		switch fmt.Sprint(e["id"]) {
+		case "255": // VIRTUAL_TRAY_MAIN_ID
+			if main == nil {
+				main = e
+			}
+		case "254": // VIRTUAL_TRAY_DEPUTY_ID
+			deputy = e
+		default:
+			if len(probe.Print.VirSlot) == 1 && main == nil {
+				main = e
+			}
+		}
 	}
-	return v, v != nil
+	return main, deputy, main != nil || deputy != nil
 }
 
 // mergeExternalSpool lays the reported vt_tray keys over the last known
-// external spool, so a partial report changes only what it carries (FoxTrack
-// replaces its stored status with every relay post). The loaded flag follows
-// tray_now when a report has it.
-func mergeExternalSpool(prev *AmsSlot, reported map[string]any, trayNow string) *AmsSlot {
+// external spool (slot ExternalSlot or ExternalSlot2), so a partial report
+// changes only what it carries (FoxTrack replaces its stored status with every
+// relay post). The loaded flag follows tray_now when a report has it.
+func mergeExternalSpool(slot int, prev *AmsSlot, reported map[string]any, trayNow string) *AmsSlot {
 	if prev == nil && reported == nil {
 		return nil
 	}
-	s := &AmsSlot{Slot: ExternalSlot}
+	s := &AmsSlot{Slot: slot}
 	if prev != nil {
 		*s = *prev
 	}
@@ -85,7 +101,10 @@ func mergeExternalSpool(prev *AmsSlot, reported map[string]any, trayNow string) 
 		}
 	}
 	s.TagUID, s.TrayUUID = tagID(s.TagUID), tagID(s.TrayUUID)
-	if trayNow != "" {
+	// tray_now names the main external spool as 254. How a dual-nozzle printer
+	// names the left spool there is not known, so that one never shows as
+	// loaded rather than mirroring the right one.
+	if trayNow != "" && slot == ExternalSlot {
 		s.Active = trayNow == strconv.Itoa(ExternalSlot)
 	}
 	return s
@@ -270,18 +289,19 @@ func SetFilament(name, serial string, slot int, material, color string) error {
 
 	var amsID, trayID, slotID int
 	switch {
-	case slot == ExternalSlot && dualNozzle(serialPrefix(serial)):
-		return errors.New("Setting the external spool is not supported on this printer model yet.")
+	case slot == ExternalSlot2 && !dualNozzle(serialPrefix(serial)):
+		return errors.New("This printer has one external spool.")
+	case slot == ExternalSlot2:
+		// Bambu Studio's ids for the left (deputy) external spool.
+		amsID, trayID, slotID = 254, 254, 0
 	case slot == ExternalSlot:
-		// Bambu Studio's ids for the one external spool (a P1S refuses tray_id 0).
+		// Bambu Studio's ids for the right (main) external spool (a P1S refuses tray_id 0).
 		amsID, trayID, slotID = 255, 254, 0
 	default:
+		// An AMS or AMS HT slot: the unit id, and the tray in it (an AMS HT has one, 0).
 		t, ok := findTray(getTrayRefs(name), slot)
-		switch {
-		case !ok:
+		if !ok {
 			return fmt.Errorf("AMS slot %d is not on the printer right now. Refresh and try again.", slot+1)
-		case t.Unit >= 128:
-			return errors.New("Setting an AMS HT slot is not supported yet.")
 		}
 		amsID, trayID, slotID = t.Unit, t.Tray, t.Tray
 	}
@@ -337,9 +357,13 @@ func buildFilamentSetting(seq string, amsID, trayID, slotID int, material, color
 }
 
 func filamentShows(st *TelemetryData, slot int, material, color string) bool {
-	s := st.ExternalSpool
-	if slot != ExternalSlot {
-		s = nil
+	var s *AmsSlot
+	switch slot {
+	case ExternalSlot:
+		s = st.ExternalSpool
+	case ExternalSlot2:
+		s = st.ExternalSpool2
+	default:
 		for i := range st.AMS {
 			if st.AMS[i].Slot == slot {
 				s = &st.AMS[i]

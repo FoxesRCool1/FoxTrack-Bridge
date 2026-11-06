@@ -14,6 +14,34 @@
   The plug form shows setup help for each type, and the in-app help has a
   setup article per brand. Plug passwords, keys and tokens are never sent
   to the dashboard.
+- Print queue: line up files that are already on a printer from the Start a
+  print dialog, reorder or remove them on the printer's card, and start the
+  next one with **Start next** once you have cleared the bed. The Bridge
+  never starts a queued print by itself. The queue lives in `queue.json` next
+  to `config.json`.
+- Share links (Settings, Security): a read-only page with one printer's
+  progress, temperatures and, if you allow it, a camera picture, for anyone
+  with the link who can reach the Bridge. No controls and no other printers.
+  Only a hash of each link is stored, and a link can be revoked at any time.
+- Back up and restore (Settings, General): download printers and settings as
+  one file, or restore them from it or from a `config.json`. The current
+  settings are saved next to `config.json` first. The dashboard password, API
+  tokens, share links, Bambu account and assistant key are never in the file
+  and never changed by a restore.
+- Daily copies of `config.json` and `history.json` in a `backups` folder next
+  to them; the last 7 of each are kept.
+- An "Almost done" notification, sent once per print when the time left drops
+  to a set number of minutes (10 by default). Off until you tick it on a
+  channel.
+- Camera failure watch (Settings, Assistant, experimental): while a printer
+  prints, the assistant looks at its camera every few minutes and sends a
+  notification if the print looks failed twice in a row. It never pauses a
+  print. Needs an AI provider that reads images and camera access turned on.
+- Notes on prints in History, kept in `history.json` and exported in the CSV.
+- Bulk actions in the command menu (Ctrl+K): pause every printing printer,
+  resume every paused one, and turn off the plugs of idle printers whose
+  nozzle has cooled. Each asks first and lists the printers.
+- The dashboard can be added to a phone's home screen and opens like an app.
 
 **Improved**
 - Notifications send less: all the alarms a printer raises at once arrive as
@@ -29,6 +57,24 @@
   second copy.
 - The Notifications tab of a Bridge linked to FoxTrack says that FoxTrack can
   send the same alerts, so each is best turned on in one place only.
+- The sign-in page and share pages follow the dashboard's language.
+- The in-app help (what the assistant reads) covers the print queue, share
+  links, backups, notes and the camera watch.
+
+**Fixed**
+- A Bambu print sent from FoxTrack is reported as started only once the
+  printer leaves the preparing stage. An AMS mapping error or any other stop
+  during heat-up now comes back to FoxTrack as a failure with the printer's
+  reason, instead of the print counting as started.
+- The file the Bridge sends to a printer for a FoxTrack print is deleted once
+  that print ends: `foxtrack-print.gcode.3mf` from a Bambu printer's storage
+  (30 seconds after the end, unless the printer is printing again) and the
+  uploaded file from a Klipper printer's gcodes folder. Files you started
+  yourself are left alone.
+- Setting the filament of an AMS HT slot, and of both external spools of an
+  H2D, H2D Pro, H2C or X2D, works. Both external spools show on the card.
+- Event names in the notification settings and the sign-in page were not
+  translated.
 
 ## v2.6.0
 

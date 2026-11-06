@@ -438,6 +438,7 @@ var ntfyTags = map[events.Kind]string{
 	events.PrintFinished: "white_check_mark", events.PrintFailed: "x", events.PrintCancelled: "stop_button",
 	events.PrinterError: "rotating_light", events.PrinterAlarmCleared: "white_check_mark",
 	events.PrinterOffline: "electric_plug", events.PrinterOnline: "electric_plug", events.MaintenanceDue: "wrench",
+	events.PrintAlmostDone: "hourglass_half", events.PrintFailureSuspected: "warning",
 }
 
 func sendNtfy(ctx context.Context, ch config.NotifyChannel, m Message) error {

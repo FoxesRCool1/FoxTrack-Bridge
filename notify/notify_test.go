@@ -148,6 +148,16 @@ func TestWants(t *testing.T) {
 	}
 }
 
+func TestWantsAlmostDone(t *testing.T) {
+	ad := events.Event{Kind: events.PrintAlmostDone, PrinterID: "p1", Printer: "Fox", File: "cube.3mf", Remaining: 9}
+	if Wants(config.NotifyChannel{Enabled: true}, ad) {
+		t.Error("print_almost_done is opt-in: an empty events list does not get it")
+	}
+	if !Wants(config.NotifyChannel{Enabled: true, Events: []string{"print_almost_done"}}, ad) {
+		t.Error("a channel that lists print_almost_done gets it")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	bad := []config.NotifyChannel{
 		{Kind: "fax"},

@@ -87,9 +87,9 @@ func newESPHomeFake(t *testing.T, f *esphomeFake) string {
 	return strings.TrimPrefix(srv.URL, "http://")
 }
 
-func esphomeCachedPaths(t *testing.T, host string) esphomePath {
+func esphomeCachedPaths(t *testing.T, host string, g config.Plug) esphomePath {
 	t.Helper()
-	v, ok := esphomePaths.Load(host)
+	v, ok := esphomePaths.Load(esphomeKey(host, g))
 	if !ok {
 		t.Fatal("no cached ESPHome paths")
 	}
@@ -118,7 +118,7 @@ func TestESPHomeNewFormReadsSwitchAndPower(t *testing.T) {
 	if !r.On || r.Watts == nil || *r.Watts != 152.4 || r.EnergyWh != nil {
 		t.Fatalf("Read = %+v", r)
 	}
-	p := esphomeCachedPaths(t, host)
+	p := esphomeCachedPaths(t, host, g)
 	if p.switchPath != "/switch/Power" || p.powerPath != "/sensor/Power" {
 		t.Fatalf("paths = %+v", p)
 	}
@@ -146,7 +146,7 @@ func TestESPHomeEntityWithSpaceIsEscaped(t *testing.T) {
 	if r.On || r.Watts == nil || *r.Watts != 152.4 {
 		t.Fatalf("Read = %+v", r)
 	}
-	if p := esphomeCachedPaths(t, host); p.switchPath != "/switch/Child%20Lock" {
+	if p := esphomeCachedPaths(t, host, g); p.switchPath != "/switch/Child%20Lock" {
 		t.Fatalf("switch path = %q", p.switchPath)
 	}
 	if err := Switch(context.Background(), g, true); err != nil {

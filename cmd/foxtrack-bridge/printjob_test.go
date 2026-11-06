@@ -141,6 +141,9 @@ func newPrintEnv(t *testing.T) *printEnv {
 		if ack.ErrorMessage != "" {
 			ev += ":" + ack.ErrorMessage
 		}
+		if len(ack.Data) > 0 { // list_files: the listing
+			ev += ":" + string(ack.Data)
+		}
 		e.events = append(e.events, ev)
 		e.mu.Unlock()
 		_, _ = w.Write([]byte(`{"ok":true}`))

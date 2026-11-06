@@ -72,6 +72,8 @@ var (
 // Test seams and timings.
 var (
 	ftpsUpload             = ftps.Upload
+	ftpsDelete             = ftps.Delete
+	bridgeFileWait         = 30 * time.Second
 	publishRequestFn       = publishRequest
 	printerClientConnected = clientConnected
 	startWait              = 60 * time.Second
@@ -83,6 +85,9 @@ var (
 	// After a long upload MQTT may have blipped: wait this long for it.
 	reconnectWait = 15 * time.Second
 	reconnectPoll = 500 * time.Millisecond
+	// A print that reports PREPARE or SLICING is watched this long for a
+	// stop; a long heat-up or calibration can keep it preparing.
+	prepareWatch = 10 * time.Minute
 )
 
 // PrintProjectFile uploads localPath to printer p and starts it. The error
@@ -127,6 +132,7 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 	logf("AMS mapping %v use_ams=%v", flat, useAMS)
 
 	remote := printerStoredName
+	noteBridgeUpload(p.Name) // a pending removal of the last print's file must not hit this one
 	logf("uploading as %s to %s", remote, p.IP)
 
 	cfg := ftps.Config{
@@ -187,8 +193,14 @@ func PrintProjectFile(ctx context.Context, p Printer, localPath string, opts Pro
 		logf("start not confirmed after %s: %v", time.Since(published).Round(time.Second), err)
 		return err
 	}
+	if st := GetPrinterState(p.Name).Status; st == "PREPARE" || st == "SLICING" {
+		if err := watchPreparing(ctx, p.Name, baseline); err != nil {
+			logf("print did not start after %s: %v", time.Since(published).Round(time.Second), err)
+			return err
+		}
+	}
 	logf("print started after %s", time.Since(published).Round(time.Second))
-	noteBridgeJob(p.Name, firstNonEmpty(opts.TaskName, "FoxTrack print")) // skip objects finds the stored file by it
+	noteBridgeJob(p, firstNonEmpty(opts.TaskName, "FoxTrack print")) // skip objects finds the stored file by it
 	return nil
 }
 
@@ -275,6 +287,67 @@ func waitForStart(ctx context.Context, name, baselineErr string) error {
 		case <-tick.C:
 		}
 	}
+}
+
+// watchPreparing follows a print the printer reports as PREPARE or SLICING. It
+// returns nil once the printer is printing, or after prepareWatch while it is
+// still preparing. A new print_error, or a paused/idle/finished/error state
+// with one, is a stop: the error says why. Idle, finished or error without a
+// new error for startErrGrace is a stop too.
+func watchPreparing(ctx context.Context, name, baselineErr string) error {
+	deadline := time.NewTimer(prepareWatch)
+	defer deadline.Stop()
+	tick := time.NewTicker(startPoll)
+	defer tick.Stop()
+	var stoppedAt time.Time
+	for {
+		st := GetPrinterState(name).Status
+		code := lastReportedError(name)
+		newErr := code != "" && code != baselineErr
+		switch st {
+		case "printing":
+			return nil
+		case "paused", "idle", "finished", "error":
+			if newErr {
+				return stoppedWhilePreparing(code, st == "paused")
+			}
+		}
+		if st == "idle" || st == "finished" || st == "error" {
+			if stoppedAt.IsZero() {
+				stoppedAt = time.Now()
+			} else if time.Since(stoppedAt) >= startErrGrace {
+				return errors.New("The printer stopped while preparing the print.")
+			}
+		} else {
+			stoppedAt = time.Time{}
+		}
+		select {
+		case <-ctx.Done():
+			// The job's own time limit (printJobTimeoutFor) ran out while the
+			// printer was still preparing. The printer accepted the print, so it
+			// counts as started rather than failed.
+			return nil
+		case <-deadline.C:
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+// stoppedWhilePreparing names the print_error code in plain words: the HMS
+// text when the table has one, the code itself otherwise.
+func stoppedWhilePreparing(code string, paused bool) error {
+	text := code
+	if v, err := strconv.ParseInt(code, 10, 64); err == nil {
+		if t := printErrorText(v); t != "" {
+			text = t
+		}
+	}
+	msg := fmt.Sprintf("The printer stopped while preparing: %s.", text)
+	if paused {
+		msg += " The print is paused on the printer."
+	}
+	return errors.New(msg)
 }
 
 // ---- printer file names, ids, models ----

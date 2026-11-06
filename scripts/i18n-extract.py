@@ -2,7 +2,7 @@
 
 Usage, from the repo root: python3 scripts/i18n-extract.py . web/i18n/_source.json
 then translate the new keys into each web/i18n/<lang>.json and check them with
-python3 web/i18n/_check.py. Reads web/ui.html, web/login.html and
+python3 web/i18n/_check.py. Reads web/ui.html, web/login.html, web/share.html and
 web/features/*.js: HTML text, placeholder/title/aria-label, and JS strings.
 """
 import glob, html.parser, json, os, re, sys
@@ -37,7 +37,7 @@ def add(s):
         return
     if re.fullmatch(r'[\w.\-/:#?=&%{}$]+', s) and ' ' not in s and not re.fullmatch(r'[A-Z][a-z]+', s):
         return  # identifiers, URLs, class names
-    if re.search(r'[{}]|=>|\bfunction\b|\(\)|\.\w+\(', PH.sub('', s)):
+    if re.search(r'[{}]|=>|\bfunction\b|\(\)|\.\w+\(', PH.sub('X', s)):  # X, not '': "({0})" is text, not a call
         return  # code
     found.add(s)
 
@@ -89,23 +89,37 @@ def js_strings(src):
         add(s)
 
 
-ui = open(os.path.join(ROOT, 'web/ui.html')).read()
-parts = re.split(r'(<script[^>]*>|</script>)', ui)
-markup, scripts, in_script = [], [], False
-for p in parts:
-    if p.startswith('<script'):
-        in_script = True
-    elif p == '</script>':
-        in_script = False
-    elif in_script:
-        scripts.append(p)
-    else:
-        markup.append(p)
-html_text(''.join(markup))
-html_text(open(os.path.join(ROOT, 'web/login.html')).read().split('<script>')[0])
-for s in scripts:
-    js_strings(s)
-js_strings(open(os.path.join(ROOT, 'web/login.html')).read().split('<script>')[-1])
+def split_page(path):
+    """Markup and script bodies of one HTML page, split at every <script>."""
+    parts = re.split(r'(<script[^>]*>|</script>)', open(os.path.join(ROOT, path)).read())
+    markup, scripts, in_script = [], [], False
+    for p in parts:
+        if p.startswith('<script'):
+            in_script = True
+        elif p == '</script>':
+            in_script = False
+        elif in_script:
+            scripts.append(p)
+        else:
+            markup.append(p)
+    return ''.join(markup), scripts
+
+
+# The dashboard, the sign-in page and the share page. Each is split at every
+# <script>: the sign-in page has one in <head>, so cutting at the first one
+# used to drop its whole body.
+for page in ('web/ui.html', 'web/login.html', 'web/share.html'):
+    markup, scripts = split_page(page)
+    html_text(markup)
+    for s in scripts:
+        js_strings(s)
+# Event names in the notification settings come from the server
+# (notify.Labels) and are translated in the page like any other text.
+labels = open(os.path.join(ROOT, 'notify/message.go')).read()
+labels = labels[labels.index('var Labels = map'):]
+for m in re.finditer(r':\s*"([^"]+)"', labels[:labels.index('\n}')]):
+    add(m.group(1))
+
 for f in sorted(glob.glob(os.path.join(ROOT, 'web/features/*.js'))):
     src = html_sentences(open(f).read())
     js_strings(src)

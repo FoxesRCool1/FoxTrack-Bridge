@@ -232,6 +232,9 @@ function nfRender() {
         + '<input id="nfQe" type="time" class="field" aria-label="Quiet hours end" value="' + escHtml(d.quiet_end || '') + '">'
         + '<button type="button" class="btn-ghost btn-lg" data-act="quiet-clear">Clear</button>'
         + '<span id="nfQuietMsg" class="text-xs text-text-2" role="status"></span></div></div>';
+    h += '<div class="mt-5"><div class="label-row"><label for="nfAdm" class="field-label">Almost-done alert (minutes before the end)</label>'
+        + tip('A channel that listens to “Almost done” gets a message once per print, when the printer’s own estimate says this many minutes are left. Leave it empty for the default of 10.', 'About the almost-done alert') + '</div>'
+        + '<input id="nfAdm" type="number" inputmode="numeric" min="1" max="120" step="1" placeholder="10" class="field" style="width:6rem" aria-label="Almost-done alert (minutes before the end)" value="' + (d.almost_done_minutes || '') + '"></div>';
     NF.sec.innerHTML = h;
     if (NF.open) {
         const f = NF.sec.querySelector('.nf-edit input.field, .nf-edit select.field');
@@ -398,6 +401,7 @@ function nfClick(ev) {
 
 function nfChange(ev) {
     if (ev.target.id === 'nfQs' || ev.target.id === 'nfQe') nfSaveQuiet();
+    if (ev.target.id === 'nfAdm') nfSaveAlmostDone();
     if (ev.target.dataset && ev.target.dataset.f === 'smtp.security') {
         // The server picks 465 for TLS and 25 for None only when the port is 0,
         // so a port left at the previous security's default would be ignored.
@@ -564,5 +568,19 @@ async function nfSaveQuiet() {
     } catch (err) {
         msg.className = 'text-xs text-danger';
         msg.textContent = friendlyError(err.message);
+    }
+}
+
+// nfSaveAlmostDone saves the almost-done threshold the same way quiet hours
+// are saved: one POST of just the setting, the reply updates the view.
+async function nfSaveAlmostDone() {
+    const inp = document.getElementById('nfAdm');
+    if (!inp) return;
+    try {
+        const v = await apiFetch('/api/notifications', { method: 'POST', body: JSON.stringify({ almost_done_minutes: inp.value === '' ? 0 : parseInt(inp.value, 10) }) });
+        NF.data.almost_done_minutes = v.almost_done_minutes;
+        inp.value = v.almost_done_minutes || '';
+    } catch (err) {
+        toast(friendlyError(err.message), 'error');
     }
 }

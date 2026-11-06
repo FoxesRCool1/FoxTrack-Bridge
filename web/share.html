@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="paper">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Printer status · FoxTrack Bridge</title>
+    <link rel="icon" type="image/png" href="/logo.png">
+    <link rel="stylesheet" href="/fonts.css">
+    <style>
+        :root, [data-theme="paper"] {
+            color-scheme: light;
+            --bg: #f3ede0; --panel: rgb(60 45 30 / 5%); --surface: rgb(251 248 241);
+            --border: rgb(60 45 30 / 14%); --text: #2b2118; --text-2: rgb(43 33 24 / 70%);
+            --accent: #596640; --danger: #94432f; --warning: #765426;
+        }
+        [data-theme="ink"] {
+            color-scheme: dark;
+            --bg: #1a1a1c; --panel: rgb(255 255 255 / 5%); --surface: rgb(38 38 40);
+            --border: rgb(255 255 255 / 10%); --text: #f2f2f0; --text-2: rgb(242 242 240 / 60%);
+            --accent: #8698ad; --danger: #e08a7b; --warning: #d1a25a;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+               font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+               display: flex; justify-content: center; padding: 24px 16px; }
+        main { width: 100%; max-width: 560px; }
+        .eyebrow { font-family: 'Cormorant Garamond', Georgia, serif; font-size: .875rem; text-transform: uppercase;
+                   letter-spacing: .35em; color: var(--text-2); margin: 0 0 6px; }
+        h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 16px; overflow-wrap: anywhere; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+        .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+        .status { font-weight: 600; }
+        .status[data-tone="ok"] { color: var(--accent); }
+        .status[data-tone="warn"] { color: var(--warning); }
+        .status[data-tone="bad"] { color: var(--danger); }
+        .muted { color: var(--text-2); font-size: .875rem; }
+        .file { margin: 12px 0 0; overflow-wrap: anywhere; }
+        .bar { height: 8px; border-radius: 99px; background: var(--panel); margin: 14px 0 8px; overflow: hidden; }
+        .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
+        .temps { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+        .temp { background: var(--panel); border-radius: 10px; padding: 12px; }
+        .temp b { display: block; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+        .cam { margin-top: 16px; border-radius: 10px; overflow: hidden; background: var(--panel); aspect-ratio: 16 / 9; }
+        .cam img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .cam p { margin: 0; height: 100%; display: flex; align-items: center; justify-content: center; }
+        footer { margin-top: 16px; text-align: center; }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+<main>
+    <p class="eyebrow">FoxTrack Bridge</p>
+    <h1 id="name">Printer</h1>
+    <div class="card">
+        <div class="row">
+            <span class="status" id="status">Connecting…</span>
+            <span class="muted" id="remaining"></span>
+        </div>
+        <p class="file" id="file" hidden></p>
+        <div id="progressWrap" hidden>
+            <div class="bar" role="progressbar" aria-label="Print progress" aria-valuemin="0" aria-valuemax="100" id="bar"><div id="barFill"></div></div>
+            <span class="muted" id="percent"></span>
+        </div>
+        <div class="temps">
+            <div class="temp"><span class="muted">Nozzle</span><b id="nozzle">–</b></div>
+            <div class="temp"><span class="muted">Bed</span><b id="bed">–</b></div>
+        </div>
+        <div class="cam" id="cam" hidden>
+            <img id="camImg" alt="Printer camera">
+            <p class="muted" id="camMsg" hidden>Camera not available right now.</p>
+        </div>
+    </div>
+    <footer class="muted" id="updated">Read-only view. Updates every few seconds.</footer>
+</main>
+<script>
+// Translations for the pages that open without signing in. The dashboard's own
+// translator lives in /features.js, which needs a session; this one makes the
+// same choice of language (the one picked in the dashboard, else the browser's)
+// and reads the same web/i18n files. T(english, ...values) fills {0}, {1}.
+(function () {
+    var langs = ['de', 'es', 'fr', 'it', 'nl', 'pt'], lang = null, map = null;
+    try { lang = localStorage.getItem('foxtrack.bridge.lang'); } catch (e) {}
+    if (!lang) {
+        var nav = navigator.languages || [navigator.language || 'en'];
+        for (var i = 0; i < nav.length && !lang; i++) {
+            var c = String(nav[i]).slice(0, 2).toLowerCase();
+            if (c === 'en' || langs.indexOf(c) >= 0) lang = c;
+        }
+    }
+    window.T = function (s) {
+        var args = arguments, t = (map && map[s]) || s;
+        return t.replace(/\{(\d)\}/g, function (_, n) { return args[+n + 1]; });
+    };
+    if (langs.indexOf(lang) < 0) return;
+    fetch('/i18n/' + lang + '.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (m) {
+        if (!m) return;
+        map = m;
+        document.documentElement.lang = lang;
+        var walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT), n;
+        while ((n = walk.nextNode())) {
+            if (n.parentNode.closest('code, script, style')) continue;
+            var key = n.nodeValue.replace(/\s+/g, ' ').trim();
+            if (key && m[key]) n.nodeValue = n.nodeValue.match(/^\s*/)[0] + m[key] + n.nodeValue.match(/\s*$/)[0];
+        }
+        document.querySelectorAll('[placeholder], [aria-label], [alt], [title]').forEach(function (e) {
+            ['placeholder', 'aria-label', 'alt', 'title'].forEach(function (a) {
+                var v = e.getAttribute(a);
+                if (v && m[v]) e.setAttribute(a, m[v]);
+            });
+        });
+    }).catch(function () {});
+})();
+</script>
+<script>
+(function () {
+    // Same theme as the dashboard on this browser (Paper unless Ink was chosen).
+    try {
+        var m = { light: 'paper', dark: 'ink', system: 'paper', paper: 'paper', ink: 'ink', forest: 'ink', dusk: 'ink' };
+        document.documentElement.setAttribute('data-theme', m[localStorage.getItem('foxtrack.theme')] || 'paper');
+    } catch (e) {}
+
+    var base = location.pathname.replace(/\/+$/, '');
+    var $ = function (id) { return document.getElementById(id); };
+    var labels = {
+        printing: ['Printing', 'ok'], paused: ['Paused', 'warn'], idle: ['Idle', ''],
+        finished: ['Finished', 'ok'], error: ['Needs attention', 'bad'],
+        disconnected: ['Offline', 'bad'], connecting: ['Connecting…', '']
+    };
+    var camTimer = null;
+
+    function temp(now, target) {
+        if (typeof now !== 'number') return '–';
+        var s = Math.round(now) + '°';
+        return target > 0 ? s + ' / ' + Math.round(target) + '°' : s;
+    }
+    function remaining(min) {
+        if (!(min > 0)) return '';
+        var h = Math.floor(min / 60), m = min % 60;
+        return h ? T('{0} h {1} min left', h, m) : T('{0} min left', m);
+    }
+    function refreshCam() {
+        var img = $('camImg');
+        img.onload = function () { $('camMsg').hidden = true; img.hidden = false; };
+        img.onerror = function () { img.hidden = true; $('camMsg').hidden = false; };
+        img.src = base + '/camera.jpg?t=' + Date.now();
+    }
+    function render(s) {
+        $('name').textContent = s.name || T('Printer');
+        document.title = (s.name || 'Printer') + ' · FoxTrack Bridge';
+        var l = labels[s.status] || [s.status || 'Unknown', ''];
+        $('status').textContent = T(l[0]);
+        $('status').setAttribute('data-tone', l[1]);
+        var active = s.status === 'printing' || s.status === 'paused';
+        $('file').hidden = !(active && s.file_name);
+        $('file').textContent = s.file_name || '';
+        $('progressWrap').hidden = !active;
+        var pct = Math.max(0, Math.min(100, s.progress || 0));
+        $('barFill').style.width = pct + '%';
+        $('bar').setAttribute('aria-valuenow', String(pct));
+        $('percent').textContent = pct + '%';
+        $('remaining').textContent = active ? remaining(s.time_remaining) : '';
+        $('nozzle').textContent = temp(s.nozzle_temp, s.nozzle_target);
+        $('bed').textContent = temp(s.bed_temp, s.bed_target);
+        $('cam').hidden = !s.camera;
+        if (s.camera && !camTimer) { refreshCam(); camTimer = setInterval(refreshCam, 10000); }
+        if (!s.camera && camTimer) { clearInterval(camTimer); camTimer = null; }
+        $('updated').textContent = T('Read-only view. Last update {0}.', new Date().toLocaleTimeString(document.documentElement.lang));
+    }
+    function poll() {
+        fetch(base + '/status', { cache: 'no-store' })
+            .then(function (r) {
+                if (r.status === 404) { throw new Error('gone'); }
+                return r.json();
+            })
+            .then(render)
+            .catch(function (e) {
+                if (e.message === 'gone') {
+                    $('status').textContent = T('This share link was revoked.');
+                    $('status').setAttribute('data-tone', 'bad');
+                    clearInterval(timer);
+                    if (camTimer) clearInterval(camTimer);
+                    $('cam').hidden = true;
+                } else {
+                    $('updated').textContent = T('Cannot reach the Bridge. Retrying…');
+                }
+            });
+    }
+    var timer = setInterval(poll, 5000);
+    poll();
+})();
+</script>
+</body>
+</html>

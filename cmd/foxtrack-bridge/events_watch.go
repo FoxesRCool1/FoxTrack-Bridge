@@ -47,6 +47,10 @@ type watchState struct {
 	lostSince time.Time
 	offline   bool      // PrinterOffline was sent
 	backAt    time.Time // when the last PrinterOnline was sent
+	// almostDoneSent: the print_almost_done for this print went out. Reset
+	// when a new print starts and when the print ends, so each print gets
+	// at most one.
+	almostDoneSent bool
 }
 
 // alarmNote is an alarm the user was told about. open: no "cleared" sent yet.
@@ -70,6 +74,29 @@ func startEventWatcher() {
 			watchOnce(time.Now())
 		}
 	}()
+}
+
+// almostDoneMinutes reads the almost-done threshold from the notifications
+// settings: 0 (or no settings) is the default of 10, and the value is clamped
+// to 1..120.
+func almostDoneMinutes() int {
+	configMutex.RLock()
+	var n *config.Notifications
+	if configStore != nil {
+		n = configStore.Notifications
+	}
+	configMutex.RUnlock()
+	m := 10
+	if n != nil {
+		m = n.AlmostDoneMinutes
+	}
+	if m <= 0 {
+		m = 10
+	}
+	if m > 120 {
+		m = 120
+	}
+	return m
 }
 
 func watchOnce(now time.Time) {
@@ -169,6 +196,7 @@ func diffState(p config.Printer, s *mqttpkg.TelemetryData, now time.Time) []even
 	switch {
 	case s.Status == "printing" && !w.inPrint:
 		w.inPrint = true
+		w.almostDoneSent = false
 		emit(events.PrintStarted, nil)
 	case s.Status == "paused" && prev == "printing":
 		emit(events.PrintPaused, func(e *events.Event) { e.Message = firstAlarmText(s.Alarms) })
@@ -176,6 +204,16 @@ func diffState(p config.Printer, s *mqttpkg.TelemetryData, now time.Time) []even
 		emit(events.PrintResumed, nil)
 	case mqttpkg.Settled(s.Status):
 		w.inPrint = false // the end itself is sent from the history record
+		w.almostDoneSent = false
+	}
+
+	// Almost done: once per print, while it is running (not paused), when the
+	// estimate says the end is near. The progress guard stops a Klipper
+	// estimate from firing it early in a print.
+	if w.inPrint && !w.almostDoneSent && s.Status == "printing" &&
+		s.TimeRemaining > 0 && s.TimeRemaining <= almostDoneMinutes() && s.Progress >= 50 {
+		w.almostDoneSent = true
+		emit(events.PrintAlmostDone, nil)
 	}
 
 	// Alarms: everything new in this report goes out as one message, and so

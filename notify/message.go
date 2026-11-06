@@ -29,16 +29,18 @@ var hmsCode = regexp.MustCompile(`^[0-9A-Fa-f]{4}(_[0-9A-Fa-f]{4}){3}$`)
 
 // Labels are the dashboard's names for the event kinds.
 var Labels = map[events.Kind]string{
-	events.PrintStarted:   "Print started",
-	events.PrintPaused:    "Print paused",
-	events.PrintResumed:   "Print resumed",
-	events.PrintFinished:  "Print finished",
-	events.PrintFailed:    "Print failed",
-	events.PrintCancelled: "Print cancelled",
-	events.PrinterError:   "Printer alarm",
-	events.PrinterOffline: "Printer offline",
-	events.PrinterOnline:  "Printer back online",
-	events.MaintenanceDue: "Maintenance due",
+	events.PrintStarted:          "Print started",
+	events.PrintPaused:           "Print paused",
+	events.PrintResumed:          "Print resumed",
+	events.PrintFinished:         "Print finished",
+	events.PrintFailed:           "Print failed",
+	events.PrintCancelled:        "Print cancelled",
+	events.PrinterError:          "Printer alarm",
+	events.PrinterOffline:        "Printer offline",
+	events.PrinterOnline:         "Printer back online",
+	events.MaintenanceDue:        "Maintenance due",
+	events.PrintAlmostDone:       "Almost done",
+	events.PrintFailureSuspected: "Failure spotted by camera watch",
 }
 
 // Duration writes seconds the way the messages do: "2h 14m", "14m", "40s".
@@ -176,6 +178,25 @@ func Compose(e events.Event) Message {
 	case events.MaintenanceDue:
 		m.Title = "Maintenance due"
 		add(e.Printer)
+		add(e.Message)
+	case events.PrintAlmostDone:
+		m.Title = "Almost done"
+		what := e.File
+		if what == "" {
+			what = "the print"
+		}
+		if e.Remaining > 0 {
+			add(fmt.Sprintf("%s: about %d min left on %s.", e.Printer, e.Remaining, what))
+		} else {
+			add(e.Printer + ": the end is near.")
+		}
+	case events.PrintFailureSuspected:
+		m.Title = "Print may have failed"
+		what := e.File
+		if what == "" {
+			what = "the print"
+		}
+		add(fmt.Sprintf("The camera watch thinks %s on %s has failed. Check the printer: the Bridge has not paused it.", what, e.Printer))
 		add(e.Message)
 	case events.Test:
 		m.Title = "Test from FoxTrack Bridge"

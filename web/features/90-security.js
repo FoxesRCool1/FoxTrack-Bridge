@@ -13,6 +13,7 @@
     document.head.appendChild(style);
 
     let view = null;
+    let shares = null;
 
     function fmtDate(sec) {
         try { return new Date(sec * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
@@ -27,6 +28,8 @@
         }
         const on = view.password_set;
         const tokens = view.tokens || [];
+        const shareList = shares || [];
+        const printers = (typeof configuredPrinters !== 'undefined' && Array.isArray(configuredPrinters)) ? configuredPrinters : [];
         el.innerHTML = `
             <h2 class="font-heading text-xl font-medium leading-tight">Security</h2>
             <p class="mt-1.5 text-sm text-text-2">${on
@@ -75,6 +78,38 @@
                     <label for="secTokenName" class="sr-only">Token name</label>
                     <input id="secTokenName" class="field" placeholder="Name, e.g. Home Assistant" maxlength="60">
                     <button type="submit" class="btn-outline btn-lg shrink-0">Create token</button>
+                </form>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-border">
+                <div class="flex items-center gap-2">
+                    <h3 class="text-sm font-medium">Share links</h3>
+                    ${tip('<span data-i18n-html>A read-only page with one printer\'s progress, temperatures and, if you allow it, a camera picture. Anyone with the link who can reach this Bridge can open it. No controls, no other printers.</span>', 'About share links')}
+                </div>
+                <div id="secShareList" class="mt-3">
+                    ${shareList.length ? shareList.map(s => `
+                        <div class="sec-row">
+                            <div class="min-w-0">
+                                <p class="text-sm font-medium truncate" data-no-i18n>${escHtml(s.name)}</p>
+                                <p class="text-xs text-text-2 sec-num"><span data-no-i18n>${s.printer_name ? escHtml(s.printer_name) : 'Printer removed'}</span> · ${s.camera ? 'Camera' : 'No camera'} · created ${escHtml(fmtDate(s.created_at))} · …${escHtml(s.hint)}</p>
+                            </div>
+                            <button type="button" class="btn-danger btn-xs" data-share-revoke="${escHtml(s.id)}" aria-label="Revoke ${escHtml(s.name)}">Revoke</button>
+                        </div>`).join('') : '<p class="text-xs text-text-2">No share links yet.</p>'}
+                </div>
+                <div id="secNewShare" class="hidden mt-3"></div>
+                <form id="secShareForm" class="mt-4 space-y-4" novalidate>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="select-wrap">
+                            <label for="secSharePrinter" class="sr-only">Printer</label>
+                            <select id="secSharePrinter" class="field" data-no-i18n>
+                                ${printers.length ? printers.map(p => `<option value="${escHtml(p.id)}" data-no-i18n>${escHtml(p.name)}</option>`).join('') : '<option value="" data-no-i18n>No printers</option>'}
+                            </select><i class="fas fa-chevron-down"></i>
+                        </div>
+                        <label for="secShareName" class="sr-only">Name</label>
+                        <input id="secShareName" class="field" placeholder="e.g. Living room" maxlength="60">
+                        <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" id="secShareCamera" class="w-4 h-4 rounded"> Show the camera</label>
+                        <button type="submit" class="btn-outline btn-lg shrink-0">Create link</button>
+                    </div>
                 </form>
             </div>`;
         wire(el);
@@ -144,11 +179,45 @@
                 render(el);
             } catch (err) { toast(err.message, 'error'); }
         }));
+        el.querySelector('#secShareForm').addEventListener('submit', async e => {
+            e.preventDefault();
+            const sel = el.querySelector('#secSharePrinter');
+            const printerId = sel.value;
+            if (!printerId) { sel.classList.add('field-invalid'); sel.focus(); toast('Pick a printer to share.', 'error'); return; }
+            sel.classList.remove('field-invalid');
+            const body = { name: el.querySelector('#secShareName').value.trim(), printer_id: printerId, camera: el.querySelector('#secShareCamera').checked };
+            try {
+                const res = await apiFetch('/api/shares', { method: 'POST', body: JSON.stringify(body) });
+                shares = res.shares;
+                render(el);
+                const box = el.querySelector('#secNewShare');
+                box.classList.remove('hidden');
+                box.innerHTML = `<p class="text-xs text-text-2 mb-1.5">Copy it now. It is not shown again.</p>
+                    <div class="flex items-center gap-2"><input id="secShareVal" class="field field-mono flex-1 min-w-0" type="text" readonly value="${escHtml(location.origin + res.path)}">
+                    <button type="button" class="btn-outline shrink-0" id="secShareCopy" aria-label="Copy link"><i class="fas fa-copy"></i> Copy</button></div>`;
+                box.querySelector('#secShareCopy').addEventListener('click', async () => {
+                    try { await navigator.clipboard.writeText(location.origin + res.path); toast('Link copied.'); }
+                    catch (_) { getSelection().selectAllChildren(box.querySelector('#secShareVal')); toast('Select and copy it by hand.', 'info'); }
+                });
+            } catch (err) { toast(err.message, 'error'); }
+        });
+        el.querySelectorAll('[data-share-revoke]').forEach(b => b.addEventListener('click', async () => {
+            const name = b.closest('.sec-row').querySelector('p').textContent;
+            const ok = await confirmDialog({ title: 'Revoke this share link?', body: fill('Anyone using "{0}" loses access at once. This cannot be undone.', name), confirmLabel: 'Revoke' });
+            if (!ok) return;
+            try {
+                shares = await apiFetch('/api/shares/' + encodeURIComponent(b.dataset.shareRevoke), { method: 'DELETE' });
+                toast('Share link revoked.');
+                render(el);
+            } catch (err) { toast(err.message, 'error'); }
+        }));
     }
 
     async function load(el) {
         try { view = await apiFetch('/api/security'); }
         catch (err) { el.innerHTML = '<h2 class="font-heading text-xl font-medium leading-tight">Security</h2><p class="mt-3 text-sm text-danger">' + escHtml(friendlyError(err.message)) + '</p>'; return; }
+        try { shares = await apiFetch('/api/shares'); }
+        catch (_) { shares = []; }
         render(el);
     }
 

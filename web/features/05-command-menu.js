@@ -46,6 +46,95 @@
         }
         return out;
     }
+
+    // Bulk actions: pause every printing printer, resume every paused one, or
+    // cut the plug of an idle one whose nozzle has cooled. Each opens the shared
+    // confirm modal listing the affected printers, then sends the command one
+    // printer at a time.
+    const IDLE_PLUG_STATUSES = ['idle', 'finished', 'error', 'disconnected'];
+    // plug: a plug is switched by the Bridge itself, so a printer that refuses
+    // print commands (control_blocked) still counts.
+    function bulkPrinters(predicate, plug) {
+        const out = [];
+        for (const p of (configuredPrinters || [])) {
+            const s = (liveStatus || {})[p.id] || {};
+            if ((plug || !s.control_blocked) && predicate(s)) out.push(p);
+        }
+        return out;
+    }
+    // One wording per action, singular and plural, so each is a whole sentence
+    // the translations can carry ({0} is the count).
+    const BULK_TEXT = {
+        pause: { title: ['Pause 1 printer?', 'Pause {0} printers?'], confirm: ['Pause 1 printer', 'Pause {0} printers'], done: ['Paused 1 printer', 'Paused {0} printers'] },
+        resume: { title: ['Resume 1 printer?', 'Resume {0} printers?'], confirm: ['Resume 1 printer', 'Resume {0} printers'], done: ['Resumed 1 printer', 'Resumed {0} printers'] },
+        plug_off: { title: ['Turn off 1 plug?', 'Turn off {0} plugs?'], confirm: ['Turn off 1 plug', 'Turn off {0} plugs'], done: ['Turned off 1 plug', 'Turned off {0} plugs'] },
+    };
+    const countText = (pair, n) => n === 1 ? pair[0] : fill(pair[1], n);
+    function bulkControl(command, predicate, printers) {
+        const text = BULK_TEXT[command];
+        const n = printers.length;
+        confirmDialog({
+            title: countText(text.title, n),
+            body: printers.map(p => p.name).join(', '),
+            confirmLabel: countText(text.confirm, n),
+        }).then(async ok => {
+            if (!ok) return;
+            // Re-read the status at confirm time: a printer that moved on since
+            // the menu opened is skipped, not acted on stale. A printer that
+            // refuses print commands can still have its plug switched.
+            const targets = [];
+            for (const p of printers) {
+                const s = (liveStatus || {})[p.id] || {};
+                if ((command === 'plug_off' || !s.control_blocked) && predicate(s)) targets.push(p);
+            }
+            if (!targets.length) { toast('No printers match anymore', 'info'); return; }
+            const done = [];
+            const failed = [];
+            for (const p of targets) {
+                try {
+                    await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(p.id)) + '/' + encodeURIComponent(command), {
+                        method: 'POST', body: JSON.stringify({}),
+                        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) },
+                    });
+                    done.push(p);
+                } catch (_) { failed.push(p); }
+            }
+            await pollStatus();
+            if (!failed.length) {
+                toast(countText(text.done, done.length), 'info');
+            } else {
+                toast(fill('Failed: {0}', failed.map(p => p.name).join(', ')), 'error');
+            }
+        });
+    }
+    function bulkPauseAll() {
+        const printers = bulkPrinters(s => s.status === 'printing');
+        if (!printers.length) return;
+        bulkControl('pause', s => s.status === 'printing', printers);
+    }
+    function bulkResumeAll() {
+        const printers = bulkPrinters(s => s.status === 'paused');
+        if (!printers.length) return;
+        bulkControl('resume', s => s.status === 'paused', printers);
+    }
+    const idlePlugOn = s => s.plug && s.plug.reachable && s.plug.on
+        && IDLE_PLUG_STATUSES.indexOf(s.status) >= 0
+        && (s.nozzle_temp == null || s.nozzle_temp < 50);
+    function bulkPlugsOff() {
+        const printers = bulkPrinters(idlePlugOn, true);
+        if (!printers.length) return;
+        bulkControl('plug_off', idlePlugOn, printers);
+    }
+    function bulkCommands() {
+        const cmds = [];
+        const printing = bulkPrinters(s => s.status === 'printing');
+        if (printing.length) cmds.push({ group: 'Actions', label: fill('Pause all printing ({0})', printing.length), icon: 'fa-print', run: bulkPauseAll });
+        const paused = bulkPrinters(s => s.status === 'paused');
+        if (paused.length) cmds.push({ group: 'Actions', label: fill('Resume all paused ({0})', paused.length), icon: 'fa-print', run: bulkResumeAll });
+        const plugs = bulkPrinters(idlePlugOn, true);
+        if (plugs.length) cmds.push({ group: 'Actions', label: fill('Turn off idle plugs ({0})', plugs.length), icon: 'fa-plug', run: bulkPlugsOff });
+        return cmds;
+    }
     function statusWord(st) {
         return ({ printing: 'Printing', paused: 'Paused', idle: 'Idle', finished: 'Finished', error: 'Error', disconnected: 'Offline', connected: 'Connecting' })[st] || st;
     }
@@ -62,6 +151,7 @@
         ];
         for (const t of SETTINGS_TABS) cmds.push({ group: 'Settings', label: t.label, sub: t.group, run: () => showView('settings').then(() => showSettingsTab(t.id)) });
         cmds.push(...printerCommands());
+        cmds.push(...bulkCommands());
         cmds.push(
             { group: 'Actions', label: 'Add a printer', keys: ['N'], run: () => openAddPrinterModal() },
             { group: 'Actions', label: 'Scan the network for printers', run: () => { showView('printers'); runDiscovery(true); } },
@@ -142,6 +232,7 @@
             const g = q && q !== '?' ? 'Results' : c.group;
             if (g !== group) { group = g; html += '<li class="cmdk-group" role="presentation">' + escHtml(g) + '</li>'; }
             html += '<li role="option" id="cmdk-o' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '">'
+                + (c.icon ? '<i class="fas ' + c.icon + '" aria-hidden="true"></i>' : '')
                 + '<span class="min-w-0 truncate">' + (c.raw ? '<span data-no-i18n>' + escHtml(c.label) + '</span>' : escHtml(c.label)) + (c.sub ? '<span class="cmdk-sub">' + escHtml(c.sub) + '</span>' : '') + '</span>'
                 + kbd(c.keys) + '</li>';
         });

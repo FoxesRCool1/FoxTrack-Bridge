@@ -13,6 +13,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -179,6 +180,7 @@ func (c *Controller) UploadAndPrint(ctx context.Context, name, localPath, remote
 	}
 	switch {
 	case started:
+		c.rememberUpload(name, remote)
 		return nil
 	case queued: // FoxTrack would say "Printing started" for a file that waits
 		return errQueued
@@ -207,6 +209,61 @@ func keyPreflight(ctx context.Context, p configpkg.Printer, u string) error {
 		return errMoonKey
 	}
 	return nil
+}
+
+// rememberUpload notes the file UploadAndPrint had Moonraker start on printer
+// name, so deleteEndedUpload can remove it once that print ends.
+func (c *Controller) rememberUpload(name, remote string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.uploaded[name] = remote
+}
+
+// deleteEndedUpload runs when the print session of printer name ends. If the
+// file that print ran is the one Bridge uploaded, it deletes that file from the
+// printer in the background and forgets it. Any other file is left alone.
+func (c *Controller) deleteEndedUpload(name, fileName string) {
+	c.mu.Lock()
+	remote, ok := c.uploaded[name]
+	if !ok || remote != fileName {
+		c.mu.Unlock()
+		return
+	}
+	delete(c.uploaded, name)
+	p := c.printers[name]
+	c.mu.Unlock()
+	go func() {
+		if err := deleteMoonrakerFile(p, remote); err != nil {
+			log.Printf("[%s] print_file: delete %s after print: %v", name, remote, err)
+		}
+	}()
+}
+
+// deleteMoonrakerFile removes remote from the gcodes root of the Klipper printer
+// p (Moonraker DELETE /server/files/gcodes/{file}). A 404 counts as deleted.
+// Tests swap it.
+var deleteMoonrakerFile = func(p configpkg.Printer, remote string) error {
+	u := moonrakerURL(p, "/server/files/gcodes/"+url.PathEscape(remote))
+	if u == "" {
+		return errNoAddress
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "DELETE", u, nil)
+	if err != nil {
+		return err
+	}
+	applyMoonrakerAuth(req, p)
+	resp, err := (&http.Client{Transport: insecureTransport()}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode == http.StatusNotFound || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+		return nil
+	}
+	return fmt.Errorf("HTTP %d", resp.StatusCode)
 }
 
 // SanitizeRemoteName keeps [A-Za-z0-9._-], turns spaces into underscores,

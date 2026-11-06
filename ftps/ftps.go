@@ -153,6 +153,34 @@ func Upload(ctx context.Context, cfg Config, localPath, remoteName string) (err 
 	return nil
 }
 
+// Delete removes remoteName from the printer's FTP root, logging in with the
+// printer's access code. A file that is not there (550) is not an error.
+func Delete(host, accessCode, remoteName string) error {
+	return deleteFile(context.Background(), Config{Host: host, User: "bblp", Password: accessCode}, remoteName)
+}
+
+func deleteFile(ctx context.Context, cfg Config, remoteName string) error {
+	cfg.defaults()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	var conns connSet
+	stop := context.AfterFunc(ctx, conns.closeAll)
+	defer stop()
+	defer conns.closeAll()
+
+	c, _, err := openControl(ctx, cfg, &conns)
+	if err != nil {
+		return err
+	}
+	defer c.quit()
+
+	code, msg, err := c.cmd("DELE %s", remoteName)
+	if err != nil || (code != 250 && code != 550) {
+		return replyErr("DELE", code, msg, err)
+	}
+	return nil
+}
+
 // openControl dials the control connection, logs in and sets PBSZ, PROT and
 // TYPE I. Shared by Upload and List.
 func openControl(ctx context.Context, cfg Config, conns *connSet) (*control, *tls.Config, error) {

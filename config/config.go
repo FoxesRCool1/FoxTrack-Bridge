@@ -159,6 +159,12 @@ type AI struct {
 	// printer on someone else's server, which is a decision they have to make
 	// on purpose rather than inherit from turning the assistant on.
 	AllowCamera bool `json:"allow_camera,omitempty"`
+	// WatchFailures has the assistant look at each printing printer's camera
+	// every WatchEveryMin minutes (default 5) and send a notification when
+	// it sees a failed print twice in a row. Needs AllowCamera. Optional and
+	// additive; it never pauses or stops a print.
+	WatchFailures bool `json:"watch_failures,omitempty"`
+	WatchEveryMin int  `json:"watch_every_min,omitempty"`
 }
 
 // Configured reports whether there is enough here to call a provider at all.

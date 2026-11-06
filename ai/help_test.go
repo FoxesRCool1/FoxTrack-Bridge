@@ -135,6 +135,11 @@ func TestSearchHelp_FindsPrusaLinkAndHomeAssistantTopics(t *testing.T) {
 	for query, want := range map[string]string{
 		"prusalink api key":       "add-prusalink",
 		"home assistant entities": "add-home-assistant",
+		// The features added with the print queue.
+		"how do I queue the next print":       "print-queue",
+		"share a link so my family can watch": "share-links",
+		"move settings to a new computer":     "backup-restore",
+		"add a note to a print":               "history-and-notifications",
 	} {
 		hits := SearchHelp(query)
 		if len(hits) == 0 || hits[0].ID != want {

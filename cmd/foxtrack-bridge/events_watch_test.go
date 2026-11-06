@@ -78,6 +78,93 @@ func TestDiffState_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestDiffState_AlmostDone(t *testing.T) {
+	watchMu.Lock()
+	defer watchMu.Unlock()
+	watched = map[string]*watchState{}
+	oldCfg := configStore
+	configStore = &config.Config{} // no notifications block: the default of 10 minutes
+	defer func() { configStore = oldCfg }()
+	p := config.Printer{ID: "p1", Name: "Fox"}
+	t0 := time.Unix(3_000_000, 0)
+	step := func(status string, progress, remaining int, at time.Duration) []events.Event {
+		return diffState(p, &mqttpkg.TelemetryData{Status: status, FileName: "cube.3mf", Progress: progress, TimeRemaining: remaining}, t0.Add(at))
+	}
+	at := func(es []events.Event) []events.Event {
+		var out []events.Event
+		for _, e := range es {
+			if e.Kind == events.PrintAlmostDone {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+
+	if got := step("connected", 0, 0, 0); got != nil {
+		t.Fatalf("a connecting printer seeds nothing, got %v", got)
+	}
+	if got := step("printing", 80, 30, 3*time.Second); len(at(got)) != 0 {
+		t.Fatalf("30 min left: no almost-done yet, got %v", got)
+	}
+	if got := step("printing", 80, 12, 6*time.Second); len(at(got)) != 0 {
+		t.Fatalf("12 min left is still outside the 10-minute window, got %v", got)
+	}
+	es := step("printing", 80, 9, 9*time.Second)
+	if len(at(es)) != 1 || es[0].Printer != "Fox" || es[0].File != "cube.3mf" || es[0].Remaining != 9 {
+		t.Fatalf("9 min left: one almost-done with the print's data, got %v", es)
+	}
+	if got := step("printing", 80, 5, 12*time.Second); len(at(got)) != 0 {
+		t.Fatalf("5 min left: not again in the same print, got %v", got)
+	}
+
+	// A new print gets its own almost-done.
+	if got := step("finished", 0, 0, 15*time.Second); got != nil {
+		t.Fatalf("end is sent from history, got %v", got)
+	}
+	es = step("printing", 80, 9, 18*time.Second)
+	if len(at(es)) != 1 {
+		t.Fatalf("the next print fires again, got %v", es)
+	}
+}
+
+func TestDiffState_AlmostDoneNotEarlyOrPaused(t *testing.T) {
+	watchMu.Lock()
+	defer watchMu.Unlock()
+	watched = map[string]*watchState{}
+	oldCfg := configStore
+	configStore = &config.Config{}
+	defer func() { configStore = oldCfg }()
+	p := config.Printer{ID: "p1", Name: "Fox"}
+	t0 := time.Unix(4_000_000, 0)
+	step := func(status string, progress, remaining int, at time.Duration) []events.Event {
+		return diffState(p, &mqttpkg.TelemetryData{Status: status, FileName: "cube.3mf", Progress: progress, TimeRemaining: remaining}, t0.Add(at))
+	}
+	at := func(es []events.Event) []events.Event {
+		var out []events.Event
+		for _, e := range es {
+			if e.Kind == events.PrintAlmostDone {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+
+	step("connected", 0, 0, 0)
+	step("printing", 30, 5, 3*time.Second)
+	if got := step("printing", 30, 5, 6*time.Second); len(at(got)) != 0 {
+		t.Fatalf("an early estimate (30 percent in) must not fire almost-done, got %v", got)
+	}
+	if got := step("paused", 30, 5, 9*time.Second); len(at(got)) != 0 {
+		t.Fatalf("a paused printer never gets almost-done, got %v", got)
+	}
+	if got := step("printing", 80, 5, 12*time.Second); len(at(got)) != 1 {
+		t.Fatalf("back to 80 percent with 5 min left: it fires, got %v", got)
+	}
+	if got := step("paused", 80, 4, 15*time.Second); len(at(got)) != 0 {
+		t.Fatalf("paused again: not again in the same print, got %v", got)
+	}
+}
+
 func TestDiffState_AlarmsGroupedAndCleared(t *testing.T) {
 	watchMu.Lock()
 	defer watchMu.Unlock()

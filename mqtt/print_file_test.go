@@ -266,9 +266,9 @@ type printHarness struct {
 func setupPrint(t *testing.T, name, serial string, status string) (*printHarness, Printer, string) {
 	t.Helper()
 	h := &printHarness{}
-	prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace := ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace
+	prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace, prevPrep := ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace, prepareWatch
 	t.Cleanup(func() {
-		ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace = prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace
+		ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace, prepareWatch = prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace, prevPrep
 		RemovePrinterState(name)
 	})
 	ftpsUpload = func(_ context.Context, cfg ftps.Config, _, remote string) error {
@@ -290,6 +290,8 @@ func setupPrint(t *testing.T, name, serial string, status string) (*printHarness
 	}
 	printerClientConnected = func(string) bool { return true }
 	startWait, startPoll, startErrGrace = 400*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond
+	// Tests whose printer stays in PREPARE after the start check return at once.
+	prepareWatch = 20 * time.Millisecond
 
 	RemovePrinterState(name)
 	UpdatePrinterState(name, TelemetryData{Status: status, AMS: []AmsSlot{{Slot: 0}, {Slot: 1}, {Slot: 2}, {Slot: 3}}})
@@ -549,6 +551,105 @@ func TestNoteProjectFileReply(t *testing.T) {
 	t.Cleanup(func() { RemovePrinterState(name) })
 	if err := waitForStart(context.Background(), name, ""); err == nil || err.Error() != "The printer refused the print. Check the printer screen." {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A print that reports PREPARE is watched until it is printing (nil), or stops
+// with a new print_error (error), or runs past prepareWatch (nil).
+// 117473298 is print_error 0x07008012.
+const testPrintError = `{"print":{"print_error":117473298}}`
+
+func TestWatchPreparing_RunningAfterPrepareIsStarted(t *testing.T) {
+	const name = "pf-prep-running"
+	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	prevWatch, prevPoll := prepareWatch, startPoll
+	prepareWatch, startPoll = 2*time.Second, 5*time.Millisecond
+	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
+	UpdatePrinterState(name, TelemetryData{Status: "PREPARE"})
+	timer := time.AfterFunc(30*time.Millisecond, func() { UpdatePrinterState(name, TelemetryData{Status: "printing"}) })
+	defer timer.Stop()
+	if err := watchPreparing(context.Background(), name, ""); err != nil {
+		t.Fatalf("err = %v, want started", err)
+	}
+}
+
+// The print job's own time limit running out while the printer still prepares
+// must not turn an accepted print into a failed one.
+func TestWatchPreparing_JobTimeLimitCountsAsStarted(t *testing.T) {
+	const name = "pf-prep-ctx"
+	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	prevWatch, prevPoll := prepareWatch, startPoll
+	prepareWatch, startPoll = time.Minute, 5*time.Millisecond
+	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
+	UpdatePrinterState(name, TelemetryData{Status: "PREPARE"})
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	if err := watchPreparing(ctx, name, ""); err != nil {
+		t.Fatalf("err = %v, want started", err)
+	}
+}
+
+func TestWatchPreparing_PausedWithErrorFails(t *testing.T) {
+	const name = "pf-prep-paused"
+	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	prevWatch, prevPoll := prepareWatch, startPoll
+	prepareWatch, startPoll = 2*time.Second, 5*time.Millisecond
+	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
+	UpdatePrinterState(name, TelemetryData{Status: "PREPARE"})
+	timer := time.AfterFunc(30*time.Millisecond, func() {
+		noteReportedError(name, []byte(testPrintError), "")
+		UpdatePrinterState(name, TelemetryData{Status: "paused"})
+	})
+	defer timer.Stop()
+	err := watchPreparing(context.Background(), name, "")
+	if err == nil || !strings.Contains(err.Error(), "stopped while preparing") || !strings.Contains(err.Error(), "paused on the printer") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestWatchPreparing_FailedWithNewErrorFails(t *testing.T) {
+	const name = "pf-prep-failed"
+	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	prevWatch, prevPoll := prepareWatch, startPoll
+	prepareWatch, startPoll = 2*time.Second, 5*time.Millisecond
+	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
+	UpdatePrinterState(name, TelemetryData{Status: "PREPARE"})
+	timer := time.AfterFunc(30*time.Millisecond, func() {
+		noteReportedError(name, []byte(testPrintError), "")
+		UpdatePrinterState(name, TelemetryData{Status: "error"})
+	})
+	defer timer.Stop()
+	err := watchPreparing(context.Background(), name, "")
+	if err == nil || !strings.Contains(err.Error(), "stopped while preparing") || strings.Contains(err.Error(), "paused") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestWatchPreparing_LongPrepareIsStillStarted(t *testing.T) {
+	const name = "pf-prep-long"
+	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	prevWatch, prevPoll := prepareWatch, startPoll
+	prepareWatch, startPoll = 60*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
+	UpdatePrinterState(name, TelemetryData{Status: "SLICING"})
+	if err := watchPreparing(context.Background(), name, ""); err != nil {
+		t.Fatalf("err = %v, want nil after prepareWatch", err)
+	}
+}
+
+func TestWatchPreparing_ImmediatePrintingReturnsAtOnce(t *testing.T) {
+	const name = "pf-prep-immediate"
+	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	prevWatch := prepareWatch
+	prepareWatch = time.Hour
+	t.Cleanup(func() { prepareWatch = prevWatch })
+	UpdatePrinterState(name, TelemetryData{Status: "printing"})
+	start := time.Now()
+	if err := watchPreparing(context.Background(), name, ""); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("waited although the printer was already printing")
 	}
 }
 

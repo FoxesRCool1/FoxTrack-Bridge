@@ -132,6 +132,71 @@ func TestSetFilament_ExternalSpoolIds(t *testing.T) {
 	}
 }
 
+func TestSetFilament_AMSHTIds(t *testing.T) {
+	const name = "fil-ht"
+	sent := setupFilament(t, name, func(p map[string]any) {
+		go UpdatePrinterState(name, TelemetryData{Status: "idle", AMS: []AmsSlot{{Slot: 8, Material: p["tray_type"].(string), Color: p["tray_color"].(string)[:6]}}})
+	})
+	if err := SetFilament(name, "01P00A123", 8, "PLA", "FF0000"); err != nil {
+		t.Fatalf("SetFilament: %v", err)
+	}
+	if p := (*sent)[0]; p["ams_id"] != 128.0 || p["slot_id"] != 0.0 || p["tray_id"] != 0.0 {
+		t.Fatalf("payload = %v", p)
+	}
+}
+
+// Dual-nozzle printers have two external spools: 254 is the right one (ams_id
+// 255), 253 the left one (ams_id 254). A single-nozzle printer has only the right one.
+func TestSetFilament_DualNozzleExternalSpools(t *testing.T) {
+	const name = "fil-dual"
+	sent := setupFilament(t, name, func(p map[string]any) {
+		go UpdatePrinterState(name, TelemetryData{Status: "idle",
+			ExternalSpool:  &AmsSlot{Slot: ExternalSlot, Material: "TPU", Color: "000000"},
+			ExternalSpool2: &AmsSlot{Slot: ExternalSlot2, Material: "PLA", Color: "FF0000"}})
+	})
+	if err := SetFilament(name, "09400A123", ExternalSlot, "TPU", "000000"); err != nil {
+		t.Fatalf("SetFilament right: %v", err)
+	}
+	if p := (*sent)[0]; p["ams_id"] != 255.0 || p["slot_id"] != 0.0 || p["tray_id"] != 254.0 {
+		t.Fatalf("right payload = %v", p)
+	}
+	if err := SetFilament(name, "09400A123", ExternalSlot2, "PLA", "FF0000"); err != nil {
+		t.Fatalf("SetFilament left: %v", err)
+	}
+	if p := (*sent)[1]; p["ams_id"] != 254.0 || p["slot_id"] != 0.0 || p["tray_id"] != 254.0 {
+		t.Fatalf("left payload = %v", p)
+	}
+}
+
+// Dual-nozzle vir_slot entries are told apart by id: 255 is the right spool,
+// 254 the left one. A vt_tray or a single entry carries the right spool only.
+func TestHandler_DualNozzleExternalSpools(t *testing.T) {
+	const name = "ext-dual-test"
+	RemovePrinterState(name)
+	t.Cleanup(func() { RemovePrinterState(name) })
+	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
+
+	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","vir_slot":[{"id":"254","tray_type":"PLA","tray_color":"FF0000FF","remain":60},{"id":"255","tray_type":"TPU","tray_color":"112233FF","remain":40}]}}`})
+	st := GetPrinterState(name)
+	if st.ExternalSpool == nil || *st.ExternalSpool != (AmsSlot{Slot: 254, Color: "112233", Material: "TPU", Remaining: 40}) {
+		t.Fatalf("right spool = %+v", st.ExternalSpool)
+	}
+	if st.ExternalSpool2 == nil || *st.ExternalSpool2 != (AmsSlot{Slot: 253, Color: "FF0000", Material: "PLA", Remaining: 60}) {
+		t.Fatalf("left spool = %+v", st.ExternalSpool2)
+	}
+
+	for _, payload := range []string{
+		`{"print":{"gcode_state":"IDLE","vt_tray":{"id":"254","tray_type":"PETG","tray_color":"FF8800FF","remain":-1}}}`,
+		`{"print":{"gcode_state":"IDLE","vir_slot":[{"id":"255","tray_type":"PETG","tray_color":"FF8800FF","remain":-1}]}}`,
+	} {
+		RemovePrinterState(name)
+		handle(nil, fakeMessage{payload})
+		if st := GetPrinterState(name); st.ExternalSpool == nil || st.ExternalSpool2 != nil {
+			t.Fatalf("%s: right %+v, left %+v", payload, st.ExternalSpool, st.ExternalSpool2)
+		}
+	}
+}
+
 func TestSetFilament_PrinterRefusesOrIgnores(t *testing.T) {
 	const name = "fil-refuse"
 	setupFilament(t, name, func(map[string]any) {
@@ -167,8 +232,7 @@ func TestSetFilament_RefusedBeforeSending(t *testing.T) {
 		{"01P00A123", "PLA", "FF00", 0, "6 hex digits"},
 		{"01P00A123", "PLA", "GG0000", 0, "6 hex digits"},
 		{"01P00A123", "PLA", "FF0000", 12, "AMS slot 13 is not on the printer"},
-		{"01P00A123", "PLA", "FF0000", 8, "AMS HT"},
-		{"09400A123", "PLA", "FF0000", ExternalSlot, "not supported on this printer model"},
+		{"01P00A123", "PLA", "FF0000", ExternalSlot2, "This printer has one external spool."},
 	}
 	for _, c := range cases {
 		if err := SetFilament(name, c.serial, c.slot, c.material, c.color); err == nil || !strings.Contains(err.Error(), c.want) {

@@ -230,7 +230,7 @@ func TestNoteSkipFields(t *testing.T) {
 	}
 
 	// noteBridgeJob sets the task name.
-	noteBridgeJob(name, "Cube")
+	noteBridgeJob(Printer{Name: name}, "Cube")
 	if _, _, _, task, _ := st(); task != "Cube" {
 		t.Fatalf("bridgeTask = %q", task)
 	}

@@ -186,11 +186,12 @@ type notifyEventInfo struct {
 }
 
 type notifyView struct {
-	Channels   []notifyChannelView `json:"channels"`
-	QuietStart string              `json:"quiet_start"`
-	QuietEnd   string              `json:"quiet_end"`
-	Services   []notify.Service    `json:"services"`
-	Events     []notifyEventInfo   `json:"events"`
+	Channels          []notifyChannelView `json:"channels"`
+	QuietStart        string              `json:"quiet_start"`
+	QuietEnd          string              `json:"quiet_end"`
+	AlmostDoneMinutes int                 `json:"almost_done_minutes"`
+	Services          []notify.Service    `json:"services"`
+	Events            []notifyEventInfo   `json:"events"`
 }
 
 func redactNotifications(n *config.Notifications) notifyView {
@@ -206,6 +207,7 @@ func redactNotifications(n *config.Notifications) notifyView {
 		return v
 	}
 	v.QuietStart, v.QuietEnd = n.QuietStart, n.QuietEnd
+	v.AlmostDoneMinutes = n.AlmostDoneMinutes
 	notifyMu.Lock()
 	defer notifyMu.Unlock()
 	for _, ch := range n.Channels {
@@ -251,10 +253,11 @@ type notifyChannelReq struct {
 }
 
 type notifyReq struct {
-	Channels     *[]notifyChannelReq `json:"channels"` // absent keeps the stored list
-	QuietStart   *string             `json:"quiet_start"`
-	QuietEnd     *string             `json:"quiet_end"`
-	ConfirmClear bool                `json:"confirm_clear_channels"`
+	Channels          *[]notifyChannelReq `json:"channels"` // absent keeps the stored list
+	QuietStart        *string             `json:"quiet_start"`
+	QuietEnd          *string             `json:"quiet_end"`
+	AlmostDoneMinutes *int                `json:"almost_done_minutes"`
+	ConfirmClear      bool                `json:"confirm_clear_channels"`
 }
 
 // badNotify is a mistake in the request, shown to the user as it is.
@@ -348,6 +351,16 @@ func applyNotifications(c *config.Config, req notifyReq) error {
 	}
 	if req.QuietEnd != nil {
 		next.QuietEnd = strings.TrimSpace(*req.QuietEnd)
+	}
+	if req.AlmostDoneMinutes != nil {
+		m := *req.AlmostDoneMinutes
+		if m < 1 {
+			m = 0 // a cleared field: back to the default of 10
+		}
+		if m > 120 {
+			m = 120
+		}
+		next.AlmostDoneMinutes = m
 	}
 	if !notify.ValidClock(next.QuietStart) || !notify.ValidClock(next.QuietEnd) {
 		return badNotify("Quiet hours need times like 22:00 and 07:00.")

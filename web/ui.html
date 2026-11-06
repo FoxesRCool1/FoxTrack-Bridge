@@ -3,6 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#f3ede0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/png" href="/logo.png">
+    <link rel="apple-touch-icon" href="/logo.png">
     <title>FoxTrack Bridge</title>
     <!-- Apply the stored theme before first paint so there is no flash. The map
          mirrors the FoxTrack web app: its legacy "light"/"dark" values (and its
@@ -576,6 +581,7 @@
         <input type="text" id="startPrintFile" autocomplete="off" class="field" placeholder="benchy.gcode" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStartPrint()}">
         <div class="mt-5 flex gap-2 justify-end">
             <button type="button" onclick="closeStartPrint()" class="btn-outline btn-lg">Cancel</button>
+            <button type="button" id="queuePrintBtn" onclick="submitQueuePrint()" class="btn-outline btn-lg">Add to queue</button>
             <button type="button" id="startPrintBtn" onclick="submitStartPrint()" class="btn-primary btn-lg">Start</button>
         </div>
     </div>
@@ -923,6 +929,20 @@
                         </button>
                     </div>
 
+                    <div class="mt-4 flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <p class="text-sm font-medium flex items-center gap-1">Watch prints for failures <button type="button" class="info-tip" aria-label="About the failure watch" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">While a printer prints, the assistant looks at its camera every few minutes and sends a notification if the print looks failed twice in a row. It never pauses a print. Each check sends a camera picture to your AI provider, which may cost money with a paid provider.</span></p>
+                            <p id="aiWatchNeedsCamera" class="hidden mt-1 text-xs text-text-2">Turn on camera access first.</p>
+                            <div id="aiWatchEveryRow" class="hidden mt-3">
+                                <label for="aiWatchEveryMin" class="field-label">Check every (minutes)</label>
+                                <input id="aiWatchEveryMin" type="number" min="2" max="60" placeholder="5" class="field py-1 text-sm" style="width:6rem" aria-label="Check every, minutes">
+                            </div>
+                        </div>
+                        <button id="aiWatchToggle" onclick="toggleAIWatch()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Watch prints for failures">
+                            <span class="switch-thumb"></span>
+                        </button>
+                    </div>
+
                     <p id="aiSettingsError" class="hidden text-xs text-danger mt-4"></p>
                     <div class="mt-6 flex items-center justify-end gap-3">
                         <span id="aiSettingsStatus" class="text-xs text-text-2"></span>
@@ -961,6 +981,15 @@
                         <p class="mt-1.5 text-sm text-text-2">Type an address into a phone or computer on the same network.</p>
                         <ul id="deviceUrls" class="mt-5 space-y-2"></ul>
                         <p id="deviceDocker" class="hidden mt-3 text-xs text-text-2">Running in Docker: use the host's address and the mapped port.</p>
+                    </section>
+                    <section class="rounded-lg border border-border bg-panel p-6">
+                        <h2 class="font-heading text-xl font-medium leading-tight">Back up and restore</h2>
+                        <p class="mt-1.5 text-sm text-text-2">Download your printers and settings as one file, or restore them from a backup. The file holds your printers' access codes, so keep it private. Your dashboard password, API tokens, share links, Bambu account and assistant key are not in it and are never changed by a restore. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.</p>
+                        <div class="mt-5 flex items-center gap-3">
+                            <a href="/api/config/export" download class="btn-outline">Download backup</a>
+                            <button type="button" onclick="pickBackupFile()" class="btn-outline">Restore from file…</button>
+                            <input id="restoreFileInput" type="file" accept=".json,application/json" class="hidden" onchange="restoreFromFile(this.files[0])">
+                        </div>
                     </section>
                 </div>
             </div>
@@ -1023,6 +1052,8 @@ const cameraTimers = new Map(); // enc -> timer that gives up on a stream that n
 function clearCameraTimer(enc) { clearTimeout(cameraTimers.get(enc)); cameraTimers.delete(enc); }
 const printerCardEls = new Map(); // id -> { el, hooks }: keyed patch rendering state
 let forceFullCardRefresh = false; // set true to force a full content rebuild of every card on the next renderPrinters() pass
+const queueMap = {}; // id -> [{id, file_name, added_at}]: client copy of the print queues, head first
+const queueExpanded = {}; // id -> true while that printer's queue list is expanded
 
 // The line under the printer type: the how-to and the short line behind its (i).
 function brandNote(line, help, label) {
@@ -1415,6 +1446,10 @@ function showView(view, opts = {}) {
         return new Promise(resolve => {
             const t = document.startViewTransition(() => renderView(view));
             t.updateCallbackDone.then(resolve).catch(() => resolve());
+            // A switch made during another one aborts the animation, not the
+            // view change: keep that out of the console as an unhandled error.
+            t.ready.catch(() => {});
+            t.finished.catch(() => {});
         });
     }
     renderView(view);
@@ -3130,12 +3165,136 @@ async function submitStartPrint() {
     else { btn.disabled = false; btn.textContent = 'Start'; }
 }
 
+// ── Print queue ──────────────────────────────────────────────────────────────
+// The queue lives server-side (queue.json); this page keeps a copy in queueMap,
+// refreshed on load, after every queue action, and every 30 s. The Bridge never
+// starts the next print by itself: the user confirms the bed is clear first.
+
+// One list row: file name, up/down (disabled at the ends), and remove.
+function queueRowHtml(enc, item, idx, count) {
+    const upDis = idx === 0 ? 'disabled ' : '';
+    const downDis = idx === count - 1 ? 'disabled ' : '';
+    return '<div class="flex items-center gap-1">'
+        + '<span class="flex-1 min-w-0 truncate text-[11px]" title="' + escHtml(item.file_name) + '">' + escHtml(item.file_name) + '</span>'
+        + '<button type="button" ' + upDis + 'onclick="queueMoveEncoded(\'' + enc + '\',\'' + item.id + '\',' + (idx - 1) + ')" class="btn-ghost btn-xs" aria-label="Move up"><i class="fas fa-chevron-up"></i></button>'
+        + '<button type="button" ' + downDis + 'onclick="queueMoveEncoded(\'' + enc + '\',\'' + item.id + '\',' + (idx + 1) + ')" class="btn-ghost btn-xs" aria-label="Move down"><i class="fas fa-chevron-down"></i></button>'
+        + '<button type="button" onclick="queueRemoveEncoded(\'' + enc + '\',\'' + item.id + '\')" class="btn-ghost btn-xs" aria-label="Remove from queue"><i class="fas fa-times"></i></button>'
+        + '</div>';
+}
+
+// The "Up next" block: the head file, "+N more", a toggle that expands the full
+// list, and a "Start next" button when the printer is idle or finished.
+function queueBlockHtml(printer, live) {
+    const id = printer.id;
+    const items = queueMap[id] || [];
+    if (!items.length) return '';
+    const enc = encodeURIComponent(id);
+    const status = live && live.status ? live.status : 'connecting';
+    const canStart = (status === 'idle' || status === 'finished') && !removeMode;
+    const expanded = !!queueExpanded[id];
+    const head = items[0];
+    const more = items.length - 1;
+    return '<div class="queue-block mt-2 border border-border rounded-md px-3 py-2">'
+        + '<div class="flex items-center gap-1.5">'
+        + '<i class="fas fa-clock shrink-0 text-text-2"></i>'
+        + '<span class="text-[11px] text-text-2 shrink-0">Up next</span>'
+        + '<span class="flex-1 min-w-0 truncate text-[11px]" title="' + escHtml(head.file_name) + '">' + escHtml(head.file_name) + '</span>'
+        + (more > 0 ? '<span class="text-[11px] text-text-2 shrink-0">' + fill('+{0} more', more) + '</span>' : '')
+        + '<button type="button" onclick="queueToggleExpanded(\'' + enc + '\')" class="btn-ghost btn-xs" aria-label="' + (expanded ? 'Hide queue' : 'Show queue') + '" aria-expanded="' + (expanded ? 'true' : 'false') + '"><i class="fas ' + (expanded ? 'fa-chevron-up' : 'fa-chevron-down') + '"></i></button>'
+        + '</div>'
+        + (expanded
+            ? '<div class="queue-list mt-2 space-y-1">' + items.map((it, i) => queueRowHtml(enc, it, i, items.length)).join('') + '</div>'
+            : '')
+        + (canStart
+            ? '<div class="mt-2"><button type="button" onclick="queueStartNextEncoded(\'' + enc + '\')" class="btn-primary btn-xs"><i class="fas fa-print mr-1"></i>Start next</button></div>'
+            : '')
+        + '</div>';
+}
+
+function queueToggleExpanded(enc) {
+    const id = decodePrinterId(enc);
+    queueExpanded[id] = !queueExpanded[id];
+    renderPrinters();
+}
+
+// The queue map is shared by every card, so a rebuild rewrites each block. A
+// rebuild is fine here: the expanded state is remembered per printer, and the
+// ordinary 5 s poll never rebuilds the block (patchCard skips it), so focus is
+// only lost by the user's own click, which is expected.
+async function refreshQueue() {
+    try {
+        const data = await apiFetch('/api/queue');
+        const next = {};
+        for (const id of Object.keys(data || {})) next[id] = data[id] || [];
+        for (const id of Object.keys(queueMap)) if (!(id in next)) delete queueMap[id];
+        for (const id of Object.keys(next)) queueMap[id] = next[id];
+    } catch (_) { /* keep the last copy; the next refresh retries */ }
+    renderPrinters();
+}
+
+async function submitQueuePrint() {
+    const id = _startPrintId;
+    const file = document.getElementById('startPrintFile').value.trim();
+    if (!id || !file) return;
+    const btn = document.getElementById('queuePrintBtn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Add to queue';
+    try {
+        await apiFetch('/api/queue/' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ file_name: file }) });
+        toast(fill('Added to the queue for {0}', printerNameForId(id)));
+        closeStartPrint();
+        refreshQueue();
+    } catch (e) {
+        toast(friendlyError(e.message), 'error');
+        btn.disabled = false;
+        btn.textContent = 'Add to queue';
+    }
+}
+
+async function queueMoveEncoded(enc, itemId, to) {
+    const id = decodePrinterId(enc);
+    try {
+        await apiFetch('/api/queue/' + encodeURIComponent(id) + '/move', { method: 'POST', body: JSON.stringify({ item_id: itemId, to }) });
+    } catch (e) { toast(friendlyError(e.message), 'error'); }
+    refreshQueue();
+}
+
+async function queueRemoveEncoded(enc, itemId) {
+    const id = decodePrinterId(enc);
+    try {
+        await apiFetch('/api/queue/' + encodeURIComponent(id) + '/' + encodeURIComponent(itemId), { method: 'DELETE' });
+    } catch (e) { toast(friendlyError(e.message), 'error'); }
+    refreshQueue();
+}
+
+async function queueStartNextEncoded(enc) {
+    const id = decodePrinterId(enc);
+    const items = queueMap[id] || [];
+    const head = items[0];
+    if (!head) return;
+    const ok = await confirmDialog({
+        title: 'Start next print',
+        body: fill('Is the bed clear? This starts {0} on {1}.', head.file_name, printerNameForId(id)),
+        confirmLabel: 'Start',
+    });
+    if (!ok) return;
+    try {
+        await apiFetch('/api/queue/' + encodeURIComponent(id) + '/start', { method: 'POST' });
+        toast(fill('Started {0}', head.file_name));
+    } catch (e) { toast(friendlyError(e.message), 'error'); }
+    refreshQueue();
+    pollStatus();
+}
+
 // ── Filament editor (Bambu LAN: AMS slots and the external spool) ─────────────
 
 const EXTERNAL_SPOOL_SLOT = 254;
+const EXTERNAL_SPOOL_LEFT_SLOT = 253; // left (deputy) spool of a dual-nozzle printer
 let _filamentTarget = null; // { id, slot }
 
 function filamentSlotName(slot) {
+    if (slot === EXTERNAL_SPOOL_LEFT_SLOT) return i18n('Left external spool');
     return i18n(slot === EXTERNAL_SPOOL_SLOT ? 'External spool' : fill('AMS slot {0}', slot + 1));
 }
 
@@ -3160,13 +3319,15 @@ function showFilamentError(msg) {
 function openFilamentEditorEncoded(enc, slot) {
     const id = decodePrinterId(enc);
     const live = liveStatus[id] || {};
-    const cur = slot === EXTERNAL_SPOOL_SLOT ? live.external_spool : (live.ams || []).find(s => s.slot === slot);
+    const cur = slot === EXTERNAL_SPOOL_SLOT ? live.external_spool : slot === EXTERNAL_SPOOL_LEFT_SLOT ? live.external_spool_2 : (live.ams || []).find(s => s.slot === slot);
     const material = document.getElementById('filamentMaterial');
     material.value = pickMaterial(cur && cur.material);
     document.getElementById('filamentColor').value = (cur && /^[0-9a-f]{6}$/i.test(cur.color)) ? '#' + cur.color : '#ffffff';
     document.getElementById('filamentSubtitle').textContent = slot === EXTERNAL_SPOOL_SLOT
         ? fill('External spool on {0}', printerNameForId(id))
-        : fill('AMS slot {0} on {1}', slot + 1, printerNameForId(id));
+        : slot === EXTERNAL_SPOOL_LEFT_SLOT
+            ? fill('Left external spool on {0}', printerNameForId(id))
+            : fill('AMS slot {0} on {1}', slot + 1, printerNameForId(id));
     showFilamentError('');
     document.getElementById('filamentSaveBtn').disabled = false;
     document.getElementById('filamentSaveBtn').textContent = 'Save';
@@ -3194,7 +3355,9 @@ async function saveFilament() {
         // Bridge waits for the printer to confirm, so this can take several seconds.
         await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(t.id)) + '/set_filament', { method:'POST', body:JSON.stringify({ slot: t.slot, material, color }) });
         if (_filamentTarget === t) closeFilamentEditor();
-        toast(t.slot === EXTERNAL_SPOOL_SLOT ? fill('External spool set to {0}', material) : fill('AMS slot {0} set to {1}', t.slot + 1, material));
+        toast(t.slot === EXTERNAL_SPOOL_SLOT ? fill('External spool set to {0}', material)
+            : t.slot === EXTERNAL_SPOOL_LEFT_SLOT ? fill('Left external spool set to {0}', material)
+            : fill('AMS slot {0} set to {1}', t.slot + 1, material));
         pollStatus();
     } catch (e) {
         // The error stays in the dialog so the user can fix it and save again.
@@ -3371,6 +3534,7 @@ function collectHooks(el) {
         controlNotice: el.querySelector('.control-notice'), // Bambu LAN cards only
         plugText: el.querySelector('.plug-text'),   // only on a card whose printer has a plug
         plugBtn: el.querySelector('.plug-btn'),
+        queueBlock: el.querySelector('.queue-block'), // "Up next" print queue, when non-empty
     };
 }
 
@@ -3533,10 +3697,42 @@ function patchCard(entry, printer) {
     if (hooks.amsContainer) {
         const amsSlots = live && live.ams ? live.ams : [];
         const ext = live && live.external_spool ? live.external_spool : null;
-        hooks.amsContainer.classList.toggle('hidden', amsSlots.length === 0 && !ext);
-        const html = amsSlotsInnerHTML(amsSlots, ext, isBambu && !isCloud && !dis, encodeURIComponent(printer.id), printer.name);
+        const ext2 = live && live.external_spool_2 ? live.external_spool_2 : null;
+        hooks.amsContainer.classList.toggle('hidden', amsSlots.length === 0 && !ext && !ext2);
+        const html = amsSlotsInnerHTML(amsSlots, ext, ext2, isBambu && !isCloud && !dis, encodeURIComponent(printer.id), printer.name);
         // Skip identical rewrites so a focused slot button keeps focus across polls.
         if (hooks.amsContainer._html !== html) { hooks.amsContainer._html = html; hooks.amsContainer.innerHTML = html; }
+    }
+
+    // The queue block is rebuilt in place, not by a full card rebuild: an
+    // expanded list must stay open and a focused button must keep focus across
+    // the 5 s polls. The block's own content (the "Start next" button appears
+    // and disappears with the status) is part of the string, so an identical
+    // rewrite is skipped like the AMS panel above.
+    const qhtml = queueBlockHtml(printer, live);
+    if (qhtml) {
+        if (!hooks.queueBlock) {
+            const wrap = document.createElement('div');
+            wrap.innerHTML = qhtml;
+            const node = wrap.firstChild;
+            node._html = qhtml;
+            // The queue block sits above the controls row in the card; insert it
+            // there, or at the end of the content when the card has no controls.
+            const controls = entry.el.querySelector('.flex.flex-wrap.items-end.justify-between');
+            const anchor = controls || entry.el.lastElementChild;
+            if (anchor) anchor.before(node); else entry.el.appendChild(node);
+            hooks.queueBlock = node;
+        } else if (hooks.queueBlock._html !== qhtml) {
+            const wrap = document.createElement('div');
+            wrap.innerHTML = qhtml;
+            const node = wrap.firstChild;
+            node._html = qhtml;
+            hooks.queueBlock.replaceWith(node); // it may sit deeper than the card's top level
+            hooks.queueBlock = node;
+        }
+    } else if (hooks.queueBlock) {
+        hooks.queueBlock.remove();
+        hooks.queueBlock = null;
     }
 }
 
@@ -3620,15 +3816,17 @@ function tempValueP(cls, now, tgt) {
         : '<p class="' + cls + ' text-[13px] sm:text-sm mt-0.5 tabular-nums whitespace-nowrap text-text">' + Math.round(now) + '° <span class="text-text-2">/ ' + (tgt !== null ? Math.round(tgt) : '-') + '°</span></p>';
 }
 
-// ext is live.external_spool (or null). canEdit makes each dot a button that
-// opens the filament editor; enc is the encoded printer id for its onclick.
-function amsSlotsInnerHTML(amsSlots, ext, canEdit, enc, printerName) {
+// ext is live.external_spool and ext2 is live.external_spool_2 (or null; ext2 is
+// set on dual-nozzle printers, where ext is the right spool and ext2 the left).
+// canEdit makes each dot a button that opens the filament editor; enc is the
+// encoded printer id for its onclick.
+function amsSlotsInnerHTML(amsSlots, ext, ext2, canEdit, enc, printerName) {
     const dot = (s, extra) => {
         // Filament colour is data, so it is the one inline colour on a card.
         const color = s.color ? '#' + s.color : 'var(--panel-2)';
-        const label = s._ext ? 'Ext' : (s.material || 'S' + (s.slot + 1));
+        const label = s._ext || (s.material || 'S' + (s.slot + 1));
         const ring = s.active ? ' ring-2 ring-brand ring-offset-2 ring-offset-bg' : '';
-        const slotName = s._ext ? 'External spool' : 'Slot ' + (s.slot + 1);
+        const slotName = s._ext ? filamentSlotName(s.slot) : 'Slot ' + (s.slot + 1);
         const title = escHtml(slotName + (s.active ? ' (loaded)' : '') + (s.material ? ' · ' + s.material : ''));
         const inner = '<div class="w-6 h-6 rounded-full border border-border' + ring + '" style="background:' + escHtml(color) + '"></div>'
             + '<span class="text-[9px] text-text-2 font-mono">' + escHtml(label.slice(0, 7)) + '</span>';
@@ -3641,7 +3839,9 @@ function amsSlotsInnerHTML(amsSlots, ext, canEdit, enc, printerName) {
     return (amsSlots.length ? '<span class="text-[11px] text-text-2 self-center">AMS</span>' : '')
         + '<div class="flex flex-wrap items-center gap-2">'
         + amsSlots.map(s => dot(s)).join('')
-        + (ext ? dot(Object.assign({}, ext, { _ext: true }), amsSlots.length ? ' ams-ext' : '') : '')
+        // Left before right, as the spools sit on a dual-nozzle printer.
+        + (ext2 ? dot(Object.assign({}, ext2, { _ext: 'Ext L' }), amsSlots.length ? ' ams-ext' : '') : '')
+        + (ext ? dot(Object.assign({}, ext, { _ext: ext2 ? 'Ext R' : 'Ext' }), ext2 ? '' : (amsSlots.length ? ' ams-ext' : '')) : '')
         + '</div>';
 }
 
@@ -3687,6 +3887,7 @@ function cardInnerHTML(printer, live) {
     const speedLevel = live && live.speed_level ? live.speed_level : 0;
     const amsSlots = live && live.ams ? live.ams : [];
     const extSpool = live && live.external_spool ? live.external_spool : null;
+    const extSpool2 = live && live.external_spool_2 ? live.external_spool_2 : null;
 
     // Camera visibility is a stored per-printer preference (camera_hidden), not a
     // live state: it only hides the camera on this dashboard and never affects the
@@ -3714,7 +3915,7 @@ function cardInnerHTML(printer, live) {
     // count) so its hook is stable; Klipper cards never render it at all.
     const amsPanel = isBambu ?
         '<div class="ams-container flex flex-wrap items-end gap-2' + (amsSlots.length > 0 || extSpool ? '' : ' hidden') + '">'
-        + amsSlotsInnerHTML(amsSlots, extSpool, isBambu && !isCloud && !dis, enc, printer.name)
+        + amsSlotsInnerHTML(amsSlots, extSpool, extSpool2, isBambu && !isCloud && !dis, enc, printer.name)
         + '</div>'
         : '';
 
@@ -3855,6 +4056,7 @@ function cardInnerHTML(printer, live) {
         + '<div class="filament-wrap flex items-center gap-3 mt-2' + ((status==='printing' && filamentUsedMM !== null) ? '' : ' hidden') + '">'
         + '<span class="text-[11px] text-text-2"><i class="fas fa-ruler-horizontal mr-1"></i><span class="filament-value">' + (filamentUsedMM !== null ? (filamentUsedMM >= 1000 ? (filamentUsedMM/1000).toFixed(1)+'m' : Math.round(filamentUsedMM)+'mm') : '') + '</span></span>'
         + '</div>'
+        + queueBlockHtml(printer, live)
         + controls
         + ((isBambu && !isCloud && !removeMode)
             ? '<p class="control-notice wrap-any mt-2 text-[11px] text-warning' + (live && live.control_blocked ? '' : ' hidden') + '"><i class="fas fa-triangle-exclamation mr-1"></i>' + CONTROL_BLOCKED_TEXT
@@ -4119,251 +4321,12 @@ async function sendGcodeEncoded(enc) {
 }
 
 // ── Global History view ───────────────────────────────────────────────────────
+// The view itself (refreshGlobalHistory, exportHistoryCsv, the per-print note
+// editor, the temperature chart) lives in features/15-history.js; only the
+// shared state stays here.
 
 let _historyRecords = [];
-
-// statusMeta() would label an unknown result "Connecting", so map the known ones.
-function resultLabel(result) {
-    const known = { finished:'Finished', cancelled:'Canceled', error:'Failed', failed:'Failed' };
-    return known[result] || (result ? result.charAt(0).toUpperCase() + result.slice(1) : '-');
-}
-
-function toggleTempChart(uid) {
-    const row = document.getElementById('hc-' + uid);
-    if (row) row.classList.toggle('hidden');
-}
-
-function toggleHistoryExpand(encName, btn) {
-    const dataRows = document.querySelectorAll('.hist-data-extra[data-extra-for="' + encName + '"]');
-    if (!dataRows.length) return;
-    const isHidden = dataRows[0].classList.contains('hidden');
-    dataRows.forEach(r => r.classList.toggle('hidden', !isHidden));
-    if (!isHidden) {
-        // Collapsing: also re-hide any open chart rows for the extra entries
-        document.querySelectorAll('.hist-chart-extra[data-extra-for="' + encName + '"]').forEach(r => r.classList.add('hidden'));
-    }
-    if (btn) {
-        const count = dataRows.length;
-        btn.innerHTML = isHidden
-            ? '<i class="fas fa-chevron-up mr-1 text-[10px]"></i>Show less'
-            : '<i class="fas fa-chevron-down mr-1 text-[10px]"></i>Show ' + count + ' more';
-    }
-}
-
-function buildTempChartSVG(samples, totalSec) {
-    const W = 420, H = 72, padL = 36, padR = 8, padT = 6, padB = 18;
-    const innerW = W - padL - padR, innerH = H - padT - padB;
-
-    const nozzleVals = samples.map(s => s.nozzle_temp);
-    const bedVals    = samples.map(s => s.bed_temp);
-    const allVals    = [...nozzleVals, ...bedVals].filter(v => v > 0);
-    if (!allVals.length) return '<p class="text-xs text-text-2">No data</p>';
-
-    const yMin = Math.floor(Math.min(...allVals) / 10) * 10;
-    const yMax = Math.ceil(Math.max(...allVals) / 10) * 10 + 5;
-    const xMax = totalSec > 0 ? totalSec : samples[samples.length - 1].t || 1;
-
-    const px = t  => padL + (t / xMax) * innerW;
-    const py = v  => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
-
-    const toPoints = vals => samples
-        .map((s, i) => px(s.t).toFixed(1) + ',' + py(vals[i]).toFixed(1))
-        .join(' ');
-
-    // Axis labels
-    const yLabels = [yMin, Math.round((yMin + yMax) / 2), yMax].map(v =>
-        '<text x="' + (padL - 4) + '" y="' + py(v).toFixed(1) + '" text-anchor="end" dominant-baseline="middle" style="fill:var(--text-2)" font-size="8">' + v + '</text>'
-    ).join('');
-
-    const durFmt = s => s >= 3600 ? Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m' : Math.floor(s/60)+'m';
-    const xLabels = '<text x="' + padL + '" y="' + (H - 4) + '" style="fill:var(--text-2)" font-size="8">0</text>'
-        + '<text x="' + (padL + innerW) + '" y="' + (H - 4) + '" text-anchor="end" style="fill:var(--text-2)" font-size="8">' + durFmt(xMax) + '</text>';
-
-    // Legend
-    const legend = '<text x="' + (padL + 4) + '" y="' + (padT + 9) + '" style="fill:var(--accent)" font-size="8">Nozzle</text>'
-        + '<text x="' + (padL + 44) + '" y="' + (padT + 9) + '" style="fill:var(--link)" font-size="8">Bed</text>';
-
-    return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:80px" xmlns="http://www.w3.org/2000/svg">'
-        + '<polyline points="' + toPoints(nozzleVals) + '" fill="none" style="stroke:var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
-        + '<polyline points="' + toPoints(bedVals) + '" fill="none" style="stroke:var(--link)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
-        + yLabels + xLabels + legend
-        + '</svg>';
-}
-
-function exportHistoryCsv() {
-    if (!_historyRecords.length) return;
-    const cur = _historyCurrency ? ' (' + _historyCurrency + ')' : '';
-    const header = 'Printer,File,Result,Duration (s),Start,End,Filament (g),Energy (kWh),Filament cost' + cur + ',Energy cost' + cur + ',Total cost' + cur + '\n';
-    const num = (v, d) => v ? Number(v).toFixed(d) : '';
-    const rows = _historyRecords.map(r => {
-        const c = r._cost || {};
-        const grams = c.filament_grams || historyGrams(r);
-        return [r.printer_name, r.file_name, r.result, r.duration,
-         new Date((r.start_time||0)*1000).toISOString(),
-         new Date((r.end_time||0)*1000).toISOString(),
-         num(grams, 1), num(c.energy_kwh || (r.energy_wh ? r.energy_wh / 1000 : 0), 3),
-         c.filament_known ? num(c.filament_cost, 2) : '', c.energy_known ? num(c.energy_cost, 2) : '',
-         (c.filament_known || c.energy_known) ? num(c.total, 2) : '',
-        ].map(v => '"' + String(v ?? '').replace(/"/g,'""').replace(/^([=+\-@])/, "'$1") + '"').join(',');
-    }).join('\n');
-    const blob = new Blob([header + rows], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'print-history.csv';
-    a.click();
-}
-
-// The Used column: grams (and the cost when prices are set), else energy.
-function usedText(r) {
-    const c = r._cost;
-    const g = (c && c.filament_grams) || historyGrams(r);
-    const parts = [];
-    if (g) parts.push(Math.round(g) + ' g');
-    if (c && (c.filament_known || c.energy_known)) parts.push(fmtMoney(c.total));
-    else if (!g && r.energy_wh) parts.push((r.energy_wh / 1000).toFixed(2) + ' kWh');
-    return parts.join(' · ') || '-';
-}
-function usedTitle(r) {
-    const c = r._cost || {};
-    const t = [];
-    const g = c.filament_grams || historyGrams(r);
-    if (g) t.push('Filament: ' + g.toFixed(1) + ' g' + (c.filament_known ? ', ' + fmtMoney(c.filament_cost) : ''));
-    if (r.energy_wh) t.push('Electricity: ' + (r.energy_wh / 1000).toFixed(3) + ' kWh' + (c.energy_known ? ', ' + fmtMoney(c.energy_cost) : ''));
-    return t.join('\n');
-}
-
-// Grams the record itself carries (Bambu spools), for when no prices are set.
-function historyGrams(r) {
-    return (r.filaments || []).reduce((s, f) => s + (f.grams || 0), 0);
-}
 let _historyCurrency = '';
-function fmtMoney(v) {
-    const cur = _historyCurrency || '';
-    const n = (Math.round(v * 100) / 100).toFixed(2);
-    return cur.length === 1 ? cur + n : (cur ? n + ' ' + cur : n);
-}
-
-async function refreshGlobalHistory() {
-    const content = document.getElementById('globalHistoryContent');
-    if (!content) return;
-    // Keep what is on screen while it refreshes; placeholders only the first time.
-    if (!content.dataset.loaded) {
-        content.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3" aria-hidden="true">'
-            + [0, 1].map(() => '<div class="rounded-lg border border-border bg-panel p-4"><div class="skel h-4" style="width:50%"></div>'
-                + '<div class="skel mt-4 h-7 w-full"></div><div class="skel mt-3 w-full" style="height:.75rem"></div><div class="skel mt-2 w-full" style="height:.75rem"></div><div class="skel mt-2" style="height:.75rem;width:70%"></div></div>').join('')
-            + '</div><p class="sr-only" role="status">Loading the history…</p>';
-    }
-    try {
-        const data = await apiFetch('/api/history');
-        const records = (data && data.records) ? data.records : [];
-        const costs = (data && data.costs) || [];
-        _historyCurrency = (data && data.currency) || '';
-        records.forEach((r, i) => { if (costs[i]) r._cost = costs[i]; });
-        _historyRecords = records;
-        content.dataset.loaded = '1';
-        const csvBtn = document.getElementById('exportCsvBtn');
-        if (records.length === 0) {
-            if (csvBtn) csvBtn.style.display = 'none';
-            content.innerHTML = '<p class="text-text-2 text-sm py-8 text-center">No print history yet.</p>';
-            return;
-        }
-        if (csvBtn) csvBtn.style.display = '';
-        const byPrinter = {};
-        records.forEach(r => {
-            const n = r.printer_name || 'Unknown';
-            if (!byPrinter[n]) byPrinter[n] = [];
-            byPrinter[n].push(r);
-        });
-        Object.keys(byPrinter).forEach(n => byPrinter[n].sort((a,b) => (b.start_time||0)-(a.start_time||0)));
-
-        // History stays keyed by printer name (out of scope for the id migration); to
-        // read this printer's live status (id-keyed) we need name -> id for currently
-        // configured printers. Deleted/renamed printers simply have no live entry,
-        // matching today's behavior.
-        const nameToId = {};
-        for (const p of configuredPrinters) nameToId[p.name] = p.id;
-
-        const cards = Object.keys(byPrinter).map(name => {
-            const enc = encodeURIComponent(name);
-            const recs = byPrinter[name];
-            // Per-printer mini stats
-            const pFinished = recs.filter(r => r.result === 'finished').length;
-            const pSecs = recs.reduce((s, r) => s + (r.duration || 0), 0);
-            const pRate = recs.length ? Math.round(pFinished / recs.length * 100) + '%' : '-';
-            // Hours: use Moonraker's own lifetime total when available (Klipper), otherwise Bridge-tracked
-            const live = liveStatus[nameToId[name]];
-            const printerTotalHours = live && live.total_print_hours > 0 ? live.total_print_hours : null;
-            const pHours = printerTotalHours !== null
-                ? printerTotalHours.toFixed(1) + 'h'
-                : (pSecs / 3600).toFixed(1) + 'h';
-            const hoursTitle = printerTotalHours !== null ? 'Lifetime total from printer' : 'Tracked by the Bridge';
-            const priced = recs.filter(r => r._cost && (r._cost.filament_known || r._cost.energy_known));
-            const pCost = priced.reduce((s, r) => s + r._cost.total, 0);
-            const stat = (label, value, title) => '<div class="px-3 py-2 text-center"><p class="text-[10px] text-text-2">' + label + '</p><p class="font-heading text-lg leading-tight tabular-nums mt-0.5"' + (title ? ' title="' + escHtml(title) + '"' : '') + '>' + value + '</p></div>';
-            const statsStrip = '<div class="grid divide-x divide-border border-b border-border" style="grid-template-columns:repeat(' + (priced.length ? 4 : 3) + ',minmax(0,1fr))">'
-                + stat('Prints', recs.length)
-                + stat('Success', pRate)
-                + stat('Hours', pHours + (printerTotalHours !== null ? ' <span class="text-text-2 text-[10px]">(lifetime)</span>' : ''), hoursTitle)
-                + (priced.length ? stat('Cost', escHtml(fmtMoney(pCost)), 'Filament and electricity, from the prices in Settings, Costs') : '')
-                + '</div>';
-
-            const rows = recs.map((r, i) => {
-                const uid = enc + '_' + i;
-                const date = new Date((r.start_time||0)*1000).toLocaleDateString();
-                const sec = r.duration||0;
-                const dur = sec>=3600 ? Math.floor(sec/3600)+'h '+Math.floor((sec%3600)/60)+'m' : Math.floor(sec/60)+'m';
-                const rc = r.result==='finished' ? 'text-brand' : r.result==='error' ? 'text-danger' : 'text-warning';
-                const hasSamples = r.temp_samples && r.temp_samples.length > 1;
-                const isExtra = i >= 5;
-                const TEMP_CHART_LABEL = 'Temperature chart';
-                const tempsBtn = hasSamples
-                    ? '<button onclick="toggleTempChart(\'' + uid + '\')" class="inline-flex items-center gap-1 rounded-full border border-border text-text-2 hover:text-text hover:bg-panel p-1 text-[11px]" title="' + TEMP_CHART_LABEL + '" aria-label="' + TEMP_CHART_LABEL + '"><i class="fas fa-chart-line"></i></button>'
-                    : '';
-                const dataRowClass = 'border-t border-border hover:bg-panel' + (isExtra ? ' hist-data-extra hidden' : '');
-                const chartRowClass = 'hidden border-t border-border bg-panel' + (isExtra ? ' hist-chart-extra' : '');
-                const extraAttr = isExtra ? ' data-extra-for="' + enc + '"' : '';
-                const dataRow = '<tr id="hr-' + uid + '" class="' + dataRowClass + '"' + extraAttr + '>'
-                    + '<td class="py-2 pl-4 pr-3 text-text max-w-[160px]" data-no-i18n><span class="block truncate" title="' + escHtml(r.file_name) + '">' + escHtml(r.file_name||'-') + '</span></td>'
-                    + '<td class="py-2 pr-3 ' + rc + '">' + escHtml(resultLabel(r.result)) + '</td>'
-                    + '<td class="py-2 pr-3 text-text-2 whitespace-nowrap">' + escHtml(dur) + '</td>'
-                    + '<td class="py-2 pr-3 text-text-2 whitespace-nowrap" title="' + escHtml(usedTitle(r)) + '">' + escHtml(usedText(r)) + '</td>'
-                    + '<td class="py-2 pr-3 text-text-2 whitespace-nowrap">' + escHtml(date) + '</td>'
-                    + '<td class="py-2 pr-4 text-right">' + tempsBtn + '</td>'
-                    + '</tr>';
-                const chartRow = '<tr id="hc-' + uid + '" class="' + chartRowClass + '"' + extraAttr + '>'
-                    + '<td colspan="6" class="px-4 py-3">' + (hasSamples ? buildTempChartSVG(r.temp_samples, sec) : '') + '</td>'
-                    + '</tr>';
-                return dataRow + chartRow;
-            }).join('');
-
-            const moreRow = recs.length > 5
-                ? '<tr><td colspan="6" class="px-4 py-2.5 border-t border-border text-center">'
-                  + '<button onclick="toggleHistoryExpand(\'' + enc + '\', this)" class="text-[11px] text-text-2 hover:text-text transition-colors py-0.5">'
-                  + '<i class="fas fa-chevron-down mr-1 text-[10px]"></i>Show ' + (recs.length - 5) + ' more'
-                  + '</button></td></tr>'
-                : '';
-
-            return '<div class="rounded-lg border border-border bg-panel overflow-hidden">'
-                + '<div class="px-4 py-3 border-b border-border flex items-center justify-between">'
-                + '<p class="font-heading text-lg font-medium leading-tight" data-no-i18n>' + escHtml(name) + '</p>'
-                + '<span class="text-[10px] text-text-2 rounded-full border border-border px-2 py-0.5">' + recs.length + ' print' + (recs.length!==1?'s':'') + '</span>'
-                + '</div>'
-                + statsStrip
-                + '<div class="max-h-96 overflow-y-auto"><table class="w-full text-xs">'
-                + '<thead><tr class="text-text-2 text-[10px]">'
-                + '<th class="pl-4 pr-3 py-2 font-medium text-left">File</th>'
-                + '<th class="pr-3 py-2 font-medium text-left">Result</th>'
-                + '<th class="pr-3 py-2 font-medium text-left">Duration</th>'
-                + '<th class="pr-3 py-2 font-medium text-left">Used</th>'
-                + '<th class="pr-3 py-2 font-medium text-left">Date</th>'
-                + '<th class="pr-4 py-2"></th>'
-                + '</tr></thead><tbody>' + rows + moreRow + '</tbody></table></div>'
-                + '</div>';
-        }).join('');
-
-        content.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">' + cards + '</div>';
-    } catch (_) { content.innerHTML = '<p class="text-danger text-sm py-4 text-center">Couldn\'t load history. Is the Bridge still running?</p>'; }
-}
 
 // ── Update system ─────────────────────────────────────────────────────────────
 
@@ -4458,6 +4421,84 @@ async function restartForUpdate() {
     setUpdateProgress('This is taking longer than expected. Refresh the page.');
 }
 
+// ── Back up and restore ───────────────────────────────────────────────────────
+
+const MAX_BACKUP_BYTES = 4 * 1024 * 1024; // matches the server's import limit
+
+function pickBackupFile() {
+    document.getElementById('restoreFileInput').click();
+}
+
+async function restoreFromFile(file) {
+    const input = document.getElementById('restoreFileInput');
+    if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+        toast('That file is over 4 MB and cannot be imported.', 'error');
+        input.value = '';
+        return;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(await file.text());
+    } catch (_) {
+        toast('This file is not a FoxTrack Bridge backup or config.json.', 'error');
+        input.value = '';
+        return;
+    }
+    const printers = (parsed && parsed.config && Array.isArray(parsed.config.printers))
+        ? parsed.config.printers
+        : (parsed && Array.isArray(parsed.printers)) ? parsed.printers : null;
+    if (!printers) {
+        toast('This file is not a FoxTrack Bridge backup or config.json.', 'error');
+        input.value = '';
+        return;
+    }
+    const n = printers.length;
+    const savedCount = configuredPrinters.length;
+    let body;
+    if (n === 0 && savedCount > 0) {
+        body = fill('This backup has no printers. Restoring it removes all {0} of your saved printers.', savedCount);
+    } else {
+        const names = printers.map(p => p && p.name).filter(Boolean);
+        body = n === 1
+            ? fill('Replace your printers and settings with this backup? It has 1 printer: {0}. Your current settings are saved next to config.json first.', names[0] || 'unnamed')
+            : fill('Replace your printers and settings with this backup? It has {0} printers: {1}. Your current settings are saved next to config.json first.', n, names.length ? names.join(', ') : 'unnamed');
+    }
+    const ok = await confirmDialog({
+        title: 'Restore from backup?',
+        body: body,
+        confirmLabel: n === 0 && savedCount > 0 ? 'Remove all printers and restore' : 'Restore',
+    });
+    if (!ok) { input.value = ''; return; }
+    try {
+        const raw = await file.text();
+        const url = '/api/config/import' + (n === 0 && savedCount > 0 ? '?confirm_clear_printers=true' : '');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: raw,
+        });
+        if (!res.ok) {
+            let msg = '';
+            try {
+                const t = (await res.text()).trim();
+                if (t) {
+                    try { msg = JSON.parse(t).error || t; } catch (_) { msg = t; }
+                }
+            } catch (_) {}
+            throw new Error(msg || fill('The Bridge refused the file (HTTP {0}).', res.status));
+        }
+        const out = await res.json();
+        input.value = '';
+        toast(fill('Restored {0} printers', out.printers == null ? n : out.printers));
+        await loadConfig();
+        await pollStatus();
+    } catch (e) {
+        input.value = '';
+        toast(e.message, 'error');
+    }
+}
+
 // ── Log panel ─────────────────────────────────────────────────────────────────
 
 (function initLogPanel() {
@@ -4546,12 +4587,14 @@ async function restartForUpdate() {
     }
     await loadConfig();
     renderPrinters();
+    refreshQueue(); // not awaited: the queue map is filled in, then the cards re-render
     loadNetwork();   // not awaited: the addresses only matter to Settings and one card
     loadVirtualPrinter();
     if (foxtrackLinked()) checkFoxTrack();   // feeds the top-bar FoxTrack chip
     setInterval(() => { if (foxtrackLinked()) checkFoxTrack(); }, 300000);
     await pollStatus();
     setInterval(pollStatus, 5000);
+    setInterval(() => { if (!document.hidden) refreshQueue(); }, 30000);
     checkForUpdate(); // not awaited: a slow release check must not hold up the dashboard
     await pollRelayHealth();
     setInterval(() => { if (!document.hidden) pollRelayHealth(); }, 20000);
@@ -4600,10 +4643,14 @@ async function loadAISettings() {
     if (baseUrl) baseUrl.value = aiSettings.base_url || '';
     setSwitch('aiEnabledToggle', !!aiSettings.enabled);
     setSwitch('aiCameraToggle', !!aiSettings.allow_camera);
+    setSwitch('aiWatchToggle', !!aiSettings.watch_failures);
+    const watchEvery = document.getElementById('aiWatchEveryMin');
+    if (watchEvery) watchEvery.value = aiSettings.watch_every_min || '';
     if (keyHint && aiSettings.api_key_set) {
         keyHint.textContent = 'A key is saved. Leave blank to keep it.';
     }
     onAIPresetChange();
+    updateAIWatchState();
     updateAssistantAvailability();
 }
 
@@ -4617,7 +4664,26 @@ function getSwitch(id) {
     return !!el && el.getAttribute('aria-checked') === 'true';
 }
 function toggleAIEnabled() { setSwitch('aiEnabledToggle', !getSwitch('aiEnabledToggle')); }
-function toggleAICamera() { setSwitch('aiCameraToggle', !getSwitch('aiCameraToggle')); }
+function toggleAICamera() { setSwitch('aiCameraToggle', !getSwitch('aiCameraToggle')); updateAIWatchState(); }
+function toggleAIWatch() { setSwitch('aiWatchToggle', !getSwitch('aiWatchToggle')); updateAIWatchState(); }
+
+// The failure watch needs camera access, so its switch is locked while the
+// camera switch is off, the same way the virtual printer's is locked while the
+// Bridge is not connected.
+function updateAIWatchState() {
+    const cameraOn = getSwitch('aiCameraToggle');
+    const watchToggle = document.getElementById('aiWatchToggle');
+    if (watchToggle) {
+        // The watch cannot run without the camera, so it never shows as on then.
+        if (!cameraOn) setSwitch('aiWatchToggle', false);
+        watchToggle.disabled = !cameraOn;
+        watchToggle.title = cameraOn ? '' : 'Turn on camera access first.';
+    }
+    const needsCamera = document.getElementById('aiWatchNeedsCamera');
+    if (needsCamera) needsCamera.classList.toggle('hidden', cameraOn);
+    const everyRow = document.getElementById('aiWatchEveryRow');
+    if (everyRow) everyRow.classList.toggle('hidden', !getSwitch('aiWatchToggle'));
+}
 
 // A base URL only means anything for the two presets where the user supplies
 // the endpoint. The camera warning changes wording with the provider, because
@@ -4641,13 +4707,18 @@ function onAIPresetChange() {
 }
 
 function aiSettingsFromForm() {
-    return {
+    const body = {
         enabled: getSwitch('aiEnabledToggle'),
         preset: (document.getElementById('aiPreset') || {}).value || '',
         base_url: (document.getElementById('aiBaseUrl') || {}).value.trim(),
         model: (document.getElementById('aiModel') || {}).value.trim(),
-        allow_camera: getSwitch('aiCameraToggle')
+        allow_camera: getSwitch('aiCameraToggle'),
+        watch_failures: getSwitch('aiWatchToggle')
     };
+    // Empty means "use the default of 5"; the server stores 0 for it.
+    const every = (document.getElementById('aiWatchEveryMin') || {}).value.trim();
+    body.watch_every_min = every === '' ? 0 : parseInt(every, 10);
+    return body;
 }
 
 async function loadAIModels() {

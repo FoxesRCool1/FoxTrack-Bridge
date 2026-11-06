@@ -71,9 +71,17 @@ func wakeBridgeCommands() {
 // then waits as long as FoxTrack asked (package pace): about 5 s while someone
 // has a FoxTrack printer page open, 30 s otherwise, and the old 4 s on servers
 // that do not say. A missing or empty API key silently skips each cycle.
-func pollBridgeCommands() {
+func pollBridgeCommands() { pollBridgeCommandsUntil(nil) }
+
+// pollBridgeCommandsUntil is the poll loop. It returns once stop is closed;
+// the Bridge passes nil (never), tests pass a channel they close at cleanup.
+func pollBridgeCommandsUntil(stop <-chan struct{}) {
 	// Brief startup delay: lets the server bind and load its initial config.
-	time.Sleep(3 * time.Second)
+	select {
+	case <-time.After(3 * time.Second):
+	case <-stop:
+		return
+	}
 
 	for {
 		delay := pace.PollLegacy
@@ -148,6 +156,8 @@ func pollBridgeCommands() {
 		select {
 		case <-time.After(delay):
 		case <-bridgeCommandsWake:
+		case <-stop:
+			return
 		}
 	}
 }

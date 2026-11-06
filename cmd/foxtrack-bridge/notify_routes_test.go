@@ -89,6 +89,15 @@ func TestNotificationsGETRedactsSecrets(t *testing.T) {
 	if len(v.Events) != len(events.All) || len(v.Services) != 8 {
 		t.Fatalf("lists: %d events, %d services", len(v.Events), len(v.Services))
 	}
+	found := false
+	for _, e := range v.Events {
+		if e.Kind == "print_almost_done" && e.Label == "Almost done" && !e.Default {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("print_almost_done is opt-in and listed: %+v", v.Events)
+	}
 }
 
 func TestNotificationsEmptyGET(t *testing.T) {

@@ -33,3 +33,6 @@ jobs:
 
       - name: Check dashboard scripts
         run: for f in web/features/*.js; do node --check "$f"; done
+
+      - name: Dashboard tests
+        run: node --test web/tests/

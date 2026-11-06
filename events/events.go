@@ -29,14 +29,24 @@ const (
 	PrinterOffline      Kind = "printer_offline" // stopped reporting
 	PrinterOnline       Kind = "printer_online"  // back after PrinterOffline
 	MaintenanceDue      Kind = "maintenance_due"
-	Test                Kind = "test" // the dashboard's "Send test" button
+	// PrintAlmostDone is opt-in per channel: it is not in Default, and
+	// fires once per print when the remaining time drops to the configured
+	// minutes (default 10).
+	PrintAlmostDone Kind = "print_almost_done"
+	// PrintFailureSuspected comes from the assistant's camera watch (off
+	// unless the user turns it on in Settings, Assistant): the picture looked
+	// like a failed print twice in a row. It never pauses the print.
+	PrintFailureSuspected Kind = "print_failure_suspected"
+	Test                  Kind = "test" // the dashboard's "Send test" button
 )
 
 // All lists every kind in the order the dashboard shows them.
-var All = []Kind{PrintStarted, PrintPaused, PrintResumed, PrintFinished, PrintFailed, PrintCancelled, PrinterError, PrinterOffline, PrinterOnline, MaintenanceDue}
+var All = []Kind{PrintStarted, PrintAlmostDone, PrintPaused, PrintResumed, PrintFinished, PrintFailed, PrintCancelled, PrintFailureSuspected, PrinterError, PrinterOffline, PrinterOnline, MaintenanceDue}
 
 // Default is what a new notification channel sends.
-var Default = []Kind{PrintFinished, PrintFailed, PrintPaused, PrinterError, MaintenanceDue}
+// PrintFailureSuspected is in it because it only ever fires once the user has
+// turned the camera watch on.
+var Default = []Kind{PrintFinished, PrintFailed, PrintPaused, PrintFailureSuspected, PrinterError, MaintenanceDue}
 
 // Urgent kinds get through quiet hours. A cleared alarm goes too (quietly,
 // see Silent): whoever was woken by the alarm wants to know it is over.
@@ -45,7 +55,9 @@ func (k Kind) Urgent() bool {
 }
 
 // Loud kinds go out at high priority where a service has one.
-func (k Kind) Loud() bool { return k == PrintFailed || k == PrinterError }
+func (k Kind) Loud() bool {
+	return k == PrintFailed || k == PrinterError || k == PrintFailureSuspected
+}
 
 // Silent kinds are good news nobody needs to be buzzed for: they arrive
 // without a sound where a service allows it.

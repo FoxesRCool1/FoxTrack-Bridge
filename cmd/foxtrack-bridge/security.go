@@ -48,6 +48,7 @@ var publicPaths = map[string]bool{
 	"/api/auth/logout":      true,
 	"/api/version":          true,
 	"/logo.png":             true,
+	"/logo-192.png":         true,
 	"/logo-light.png":       true,
 	"/logo-dark.png":        true,
 	"/tailwind.css":         true,
@@ -57,8 +58,12 @@ var publicPaths = map[string]bool{
 	"/manifest.webmanifest": true,
 }
 
+// A share link (/share/{token}) carries its own credential, so it answers
+// without signing in; handleSharePage refuses any unknown token. The
+// translations (/i18n/) are public too: the sign-in and share pages need them
+// and they hold nothing but the dashboard's text.
 func isPublicPath(p string) bool {
-	return publicPaths[p] || strings.HasPrefix(p, "/fonts/")
+	return publicPaths[p] || strings.HasPrefix(p, "/fonts/") || strings.HasPrefix(p, "/share/") || strings.HasPrefix(p, "/i18n/")
 }
 
 // securitySnapshot returns a copy of the security block, nil when no

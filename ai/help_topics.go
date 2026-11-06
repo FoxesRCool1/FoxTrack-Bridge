@@ -226,7 +226,7 @@ The Bridge never controls a print on its own. It can pause, stop, set speed and 
 	{
 		ID:       "controls",
 		Title:    "What the control buttons do, and which printers have them",
-		Keywords: []string{"pause", "stop", "resume", "cancel", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "console", "command", "advanced", "temperature", "nozzle", "bed", "heat", "preheat", "home", "temps"},
+		Keywords: []string{"pause", "stop", "resume", "cancel", "pause all", "all printers", "bulk", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "console", "command", "advanced", "temperature", "nozzle", "bed", "heat", "preheat", "home", "temps"},
 		Body: `Available controls depend on how the printer is connected.
 
 Bambu Lab in LAN mode: pause, stop, light toggle, print speed (Silent, Standard, Sport, Ludicrous), fan speed, the Temps panel, and a GCode console for single commands. The GCode console only appears in Advanced mode.
@@ -245,7 +245,9 @@ Home Assistant (read-only): no controls. The Bridge only reads the status.
 
 A printer with a smart plug set in the Bridge also has a "Plug on" / "Plug off" button. "Plug off" is disabled while the printer prints or is paused, and the Bridge refuses it while the nozzle is above 50 C.
 
-AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.`,
+AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.
+
+The command menu (Ctrl+K or Cmd+K) also has bulk actions, shown only when they apply: Pause all printing, Resume all paused, and Turn off idle plugs (printers that are not printing or paused and whose nozzle is below 50 C). Each one asks first and lists the printers it will act on.`,
 	},
 	{
 		ID:       "files-on-printer",
@@ -378,8 +380,8 @@ Pause, resume, stop and light commands sent from FoxTrack reach the Bridge withi
 	{
 		ID:       "config-files",
 		Title:    "Where settings and history are stored",
-		Keywords: []string{"config", "config.json", "history.json", "file", "location", "folder", "directory", "backup", "corrupt", "lost", "missing", "printers gone", "port"},
-		Body: `The Bridge stores config.json and history.json in the standard per-user configuration directory:
+		Keywords: []string{"config", "config.json", "history.json", "queue.json", "file", "location", "folder", "directory", "backup", "backups", "corrupt", "lost", "missing", "printers gone", "port"},
+		Body: `The Bridge stores config.json, history.json and queue.json (the print queue) in the standard per-user configuration directory:
 
 - Linux: ~/.config/FoxTrack-Bridge/ (or $XDG_CONFIG_HOME/FoxTrack-Bridge if set)
 - macOS: ~/Library/Application Support/FoxTrack-Bridge/
@@ -387,7 +389,9 @@ Pause, resume, stop and light commands sent from FoxTrack reach the Bridge withi
 
 If config.json is not found there, the older location (the executable's directory, then config/config.json) is read automatically and migrated on the next save. This fallback is config-only. history.json has no equivalent, so history written by a very old install at the legacy location does not appear after upgrading.
 
-If either file fails to load, for example because it is corrupted, the Bridge renames the broken file next to itself as config.json.corrupt-<timestamp> or history.json.corrupt-<timestamp> and starts fresh. It never deletes or overwrites the original, so a broken file can always be recovered by hand.
+A backups folder next to them holds a daily copy of config.json and history.json (config-YYYY-MM-DD.json, history-YYYY-MM-DD.json); the last 7 of each are kept. Settings > General > Back up and restore can restore from one of them.
+
+If one of these files fails to load, for example because it is corrupted, the Bridge renames the broken file next to itself as <name>.corrupt-<timestamp> (config.json.corrupt-<timestamp>, for example) and starts fresh. It never deletes or overwrites the original, so a broken file can always be recovered by hand.
 
 config.json is written with file mode 0600 because it holds printer access codes and API keys.
 
@@ -409,13 +413,19 @@ On Linux the Bridge repairs its own systemd unit on startup, so the unit file do
 	},
 	{
 		ID:       "history-and-notifications",
-		Title:    "Print history and browser notifications",
-		Keywords: []string{"history", "past prints", "record", "log", "notification", "notify", "push", "alert", "finished", "browser"},
-		Body: `Print history is stored locally in history.json and shown in the History view. Each record holds the printer name, file name, start and end time, duration, result (finished, cancelled or error), and temperature samples taken during the print.
+		Title:    "Print history, notes and notifications",
+		Keywords: []string{"history", "past prints", "record", "log", "note", "notes", "add a note", "note on a print", "comment", "csv", "export", "notification", "notify", "push", "alert", "finished", "browser", "discord", "telegram", "ntfy", "almost done", "minutes left", "quiet hours"},
+		Body: `Print history is stored locally in history.json and shown in the History view. Each record holds the printer name, file name, start and end time, duration, result (finished, cancelled or error), filament and energy when known, and temperature samples taken during the print.
+
+Each print can carry a note: click the pencil on its row in History, type, and click Save (an empty note removes it). Export CSV includes the notes.
 
 History is only recorded while the Bridge is running. A print that finishes while the Bridge is stopped leaves no record.
 
-The dashboard can raise browser push notifications when prints finish, fail or pause. These are browser notifications, so the browser must have granted permission and the dashboard tab's origin must be allowed to send them.`,
+Notification channels are set up in Settings > Notifications: Discord, Slack, Telegram, ntfy, Pushover, Gotify, email or a webhook. Each channel picks its printers and events (print started, almost done, paused, resumed, finished, failed, cancelled, failure spotted by the camera watch, printer alarm, offline, back online, maintenance due) and can attach a camera picture. During quiet hours only failures and errors are sent.
+
+"Almost done" is off until it is ticked on a channel. It is sent once per print when the time left drops to the minutes set under Almost-done alert (10 by default), and only once the print is past halfway.
+
+The dashboard can also raise browser notifications when prints finish, fail or pause. The browser must have granted permission for them.`,
 	},
 	{
 		ID:       "assistant",
@@ -431,7 +441,43 @@ The camera tool is off by default. When it is switched on, the assistant can fet
 
 The assistant can only read. It cannot add, change or delete a printer, cannot start, pause or stop a print, and cannot change any setting. It can only tell you what to press.
 
-The Bridge dashboard has no login. Anyone who can reach it on your network can use the assistant and spend credit on the configured key.`,
+Unless a dashboard password is set in Settings > Security, anyone who can reach the dashboard on your network can use the assistant and spend credit on the configured key.
+
+Watch prints for failures (Settings > Assistant, needs camera access) has the assistant look at each printing printer's camera every few minutes (5 by default, 2 to 60), starting 5 minutes into a print. After two checks in a row that look like a failed print, the channels that have "Failure spotted by camera watch" ticked get one notification for that print. It never pauses or stops a print. Each check sends a picture to the provider, which can cost money with a paid provider.`,
+	},
+	{
+		ID:       "print-queue",
+		Title:    "Print queue: lining up the next prints",
+		Keywords: []string{"queue", "queued", "next", "up next", "start next", "line up", "batch", "farm", "after this print", "add to queue"},
+		Body: `The print queue lines up files that are already on a printer. It works on printers that can start a file: Bambu Lab in LAN mode, Klipper and OctoPrint.
+
+To add a file: open Start a print for the printer, type the name of a file on the printer, and click Add to queue. The printer's card then shows Up next with the first file. Open the list to move a file up or down or remove it. A printer holds up to 50 queued files.
+
+When the printer is idle or finished, a Start next button appears. It asks whether the bed is clear, then starts the first file. The file only leaves the queue once the printer accepted the start; if the printer refuses, it stays first in line. The Bridge never starts a queued print by itself, because a print started on a full bed crashes into the previous one.
+
+The queue is saved in queue.json next to config.json and survives a restart. Removing a printer drops its queue.`,
+	},
+	{
+		ID:       "share-links",
+		Title:    "Share links: a read-only view of one printer",
+		Keywords: []string{"share", "link", "share link", "watch", "family", "friend", "read-only", "public", "view only", "revoke"},
+		Body: `A share link lets someone watch one printer without access to anything else. Make one in Settings > Security > Share links: pick the printer, give it a name, and tick Show the camera if the page may show a camera picture (it refreshes every 10 seconds).
+
+The page shows the printer's status, file, progress, time left and temperatures. It has no controls, shows no other printer, and never shows addresses, access codes or file lists. It works without the dashboard password, for anyone who can reach the Bridge's address, so it is meant for people on your network (or who can reach it some other way you set up).
+
+The link is shown once, when it is made: copy it then. Only a hash of it is stored. Revoke stops it at once, and removing the printer stops it too. Up to 20 links can exist.`,
+	},
+	{
+		ID:       "backup-restore",
+		Title:    "Back up, restore and move the Bridge to another machine",
+		Keywords: []string{"backup", "back up", "restore", "export", "import", "move", "migrate", "new computer", "transfer", "copy settings", "reinstall"},
+		Body: `Settings > General > Back up and restore downloads the printers and settings as one file (foxtrack-bridge-backup-<date>.json), and Restore from file loads one back. The file holds the printers' access codes and API keys, so keep it private.
+
+The dashboard password, API tokens, share links, the linked Bambu account and the assistant's API key are not in the file, and a restore never changes them. Before a restore the current settings are saved next to config.json as config.json.before-import-<date>, so a restore can be undone by hand.
+
+Restore also accepts a plain config.json, such as one of the daily copies in the backups folder next to config.json. A file with no printers is refused unless you confirm that every saved printer should be removed.
+
+To move to another machine: download a backup on the old one, install the Bridge on the new one, and restore the file there.`,
 	},
 	{
 		ID:       "getting-help",

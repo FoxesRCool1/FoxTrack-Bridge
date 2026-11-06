@@ -35,7 +35,8 @@ const (
 // by its context instead.
 var esphomeStream = &http.Client{}
 
-// esphomePaths caches the discovered esphomePath for each host.
+// esphomePaths caches the discovered esphomePath per host and entity, so two
+// printers on two relays of one board never share a path.
 var esphomePaths sync.Map
 
 type esphomePath struct {
@@ -262,14 +263,14 @@ func esphomeRediscover(ctx context.Context, host string, g config.Plug) (esphome
 		return esphomePath{}, err
 	}
 	p := esphomePath{switchPath: sw, powerPath: pw}
-	esphomePaths.Store(host, p)
+	esphomePaths.Store(esphomeKey(host, g), p)
 	return p, nil
 }
 
 // esphomeLocate returns the cached paths for host, or discovers them. The bool
 // reports whether the paths came from the cache.
 func esphomeLocate(ctx context.Context, host string, g config.Plug) (esphomePath, bool, error) {
-	if v, ok := esphomePaths.Load(host); ok {
+	if v, ok := esphomePaths.Load(esphomeKey(host, g)); ok {
 		return v.(esphomePath), true, nil
 	}
 	p, err := esphomeRediscover(ctx, host, g)
@@ -337,7 +338,7 @@ func esphomeRead(ctx context.Context, host string, g config.Plug) (Reading, erro
 	if err == nil || !cached {
 		return r, err
 	}
-	esphomePaths.Delete(host)
+	esphomePaths.Delete(esphomeKey(host, g))
 	if p, err = esphomeRediscover(ctx, host, g); err != nil {
 		return Reading{}, err
 	}
@@ -382,9 +383,13 @@ func esphomeSwitch(ctx context.Context, host string, g config.Plug, on bool) err
 	if err == nil || !cached {
 		return err
 	}
-	esphomePaths.Delete(host)
+	esphomePaths.Delete(esphomeKey(host, g))
 	if p, err = esphomeRediscover(ctx, host, g); err != nil {
 		return err
 	}
 	return esphomePost(ctx, host, g, p.switchPath, on)
+}
+
+func esphomeKey(host string, g config.Plug) string {
+	return host + "\x00" + g.Entity + "\x00" + g.PowerEntity
 }

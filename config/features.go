@@ -15,6 +15,21 @@ type Security struct {
 	// SessionKey signs login cookies. A new key signs everyone out.
 	SessionKey string     `json:"session_key,omitempty"`
 	Tokens     []APIToken `json:"tokens,omitempty"`
+	// Shares are read-only printer pages (/share/{token}). Optional and
+	// additive. Only the SHA-256 of each link's token is stored.
+	Shares []ShareLink `json:"shares,omitempty"`
+}
+
+// ShareLink lets anyone with the link see one printer's progress,
+// temperatures and, when Camera is set, a camera still. No controls.
+type ShareLink struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	PrinterID string `json:"printer_id"`
+	Camera    bool   `json:"camera,omitempty"`
+	Hash      string `json:"hash"`
+	Hint      string `json:"hint,omitempty"` // last 4 characters, for the list
+	CreatedAt int64  `json:"created_at"`
 }
 
 // APIToken lets a script, Home Assistant or Prometheus call the API while a
@@ -34,6 +49,9 @@ type Notifications struct {
 	// errors in between. Empty means no quiet hours.
 	QuietStart string `json:"quiet_start,omitempty"`
 	QuietEnd   string `json:"quiet_end,omitempty"`
+	// AlmostDoneMinutes is how many minutes before the end a channel that
+	// listens to print_almost_done gets told. 0 means the default of 10.
+	AlmostDoneMinutes int `json:"almost_done_minutes,omitempty"`
 }
 
 // NotifyChannel is one destination. Which fields matter depends on Kind:
