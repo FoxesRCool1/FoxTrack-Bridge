@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -600,3 +601,95 @@ func TestSystemPrompt_ForbidsGuessingPrinterErrorCodes(t *testing.T) {
 		}
 	}
 }
+
+// The failure watch settings are saved and read back like the rest of the
+// assistant settings.
+func TestHandleAISettings_WatchFailuresStoredAndReturned(t *testing.T) {
+	isolateConfigDir(t)
+	configMutex.Lock()
+	configStore = &config.Config{Printers: aiPrinters()}
+	configMutex.Unlock()
+
+	rec := httptest.NewRecorder()
+	handleAISettings(rec, jsonPost("/api/ai/settings", `{"enabled":true,"preset":"openai","model":"m","allow_camera":true,"watch_failures":true,"watch_every_min":10}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if !configStore.AI.WatchFailures {
+		t.Errorf("WatchFailures = false, want true")
+	}
+	if configStore.AI.WatchEveryMin != 10 {
+		t.Errorf("WatchEveryMin = %d, want 10", configStore.AI.WatchEveryMin)
+	}
+
+	getRec := httptest.NewRecorder()
+	handleAISettings(getRec, httptest.NewRequest(http.MethodGet, "/api/ai/settings", nil))
+	var view redactedAI
+	if err := json.Unmarshal(getRec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !view.WatchFailures {
+		t.Errorf("GET WatchFailures = false, want true")
+	}
+	if view.WatchEveryMin != 10 {
+		t.Errorf("GET WatchEveryMin = %d, want 10", view.WatchEveryMin)
+	}
+}
+
+// The check interval is clamped by the reader, so the endpoint refuses values
+// outside 2..60 rather than silently storing them.
+func TestHandleAISettings_WatchEveryMinOutOfRangeRefused(t *testing.T) {
+	isolateConfigDir(t)
+	configMutex.Lock()
+	configStore = &config.Config{Printers: aiPrinters(), AI: &config.AI{WatchFailures: true, WatchEveryMin: 10}}
+	configMutex.Unlock()
+
+	for _, every := range []int{1, 61} {
+		rec := httptest.NewRecorder()
+		handleAISettings(rec, jsonPost("/api/ai/settings", `{"enabled":true,"preset":"openai","model":"m","watch_failures":true,"watch_every_min":`+itoa(every)+`}`))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("watch_every_min %d: status = %d, want 400: %s", every, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Check every 2 to 60 minutes.") {
+			t.Errorf("watch_every_min %d: error = %q, want the range message", every, rec.Body.String())
+		}
+	}
+
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if configStore.AI.WatchEveryMin != 10 {
+		t.Errorf("WatchEveryMin = %d, want it unchanged by a refused save", configStore.AI.WatchEveryMin)
+	}
+}
+
+// A POST that omits the watch settings keeps the stored values, the same way
+// an omitted api_key keeps the stored key.
+func TestHandleAISettings_OmittedWatchSettingsKeepStoredValues(t *testing.T) {
+	isolateConfigDir(t)
+	configMutex.Lock()
+	configStore = &config.Config{
+		Printers: aiPrinters(),
+		AI:       &config.AI{Enabled: true, Preset: "openai", Model: "old", APIKey: "sk-keep-me", WatchFailures: true, WatchEveryMin: 15},
+	}
+	configMutex.Unlock()
+
+	req := jsonPost("/api/ai/settings", `{"enabled":true,"preset":"openai","model":"new"}`)
+	handleAISettings(httptest.NewRecorder(), req)
+
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if configStore.AI.APIKey != "sk-keep-me" {
+		t.Errorf("APIKey = %q, want it kept", configStore.AI.APIKey)
+	}
+	if !configStore.AI.WatchFailures {
+		t.Errorf("WatchFailures = false, want it kept")
+	}
+	if configStore.AI.WatchEveryMin != 15 {
+		t.Errorf("WatchEveryMin = %d, want it kept", configStore.AI.WatchEveryMin)
+	}
+}
+
+func itoa(n int) string { return fmt.Sprintf("%d", n) }

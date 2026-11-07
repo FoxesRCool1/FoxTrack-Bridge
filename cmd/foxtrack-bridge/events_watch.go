@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -24,22 +25,46 @@ import (
 const (
 	watchEvery      = 3 * time.Second
 	offlineAfter    = 2 * time.Minute  // a short drop is not worth a message
-	alarmQuietAgain = 30 * time.Minute // the same alarm code is not resent before this
+	alarmQuietAgain = 30 * time.Minute // at most one "cleared" per alarm in this time
+	// alarmClearAfter: an alarm must stay gone this long before "cleared" is
+	// sent, so a sensor that flickers, or a report that briefly lacks the
+	// list (a reconnect), does not read as a fix.
+	alarmClearAfter = 2 * time.Minute
+	// offlineAgainAfter: a printer that drops again soon after coming back
+	// is reported only once it has been gone this long, so a flaky Wi-Fi
+	// link does not send an offline/online pair every few minutes.
+	offlineAgainAfter = 15 * time.Minute
+	offlineFlapWindow = 30 * time.Minute
+	maxAlarmsPerEvent = 20
 )
 
 type watchState struct {
 	status    string
 	inPrint   bool
 	file      string
-	alarms    map[string]bool
+	alarms    map[string]bool // every alarm in the last report
+	told      map[string]*alarmNote
 	lostSince time.Time
-	offline   bool // PrinterOffline was sent
+	offline   bool      // PrinterOffline was sent
+	backAt    time.Time // when the last PrinterOnline was sent
+	// almostDoneSent: the print_almost_done for this print went out. Reset
+	// when a new print starts and when the print ends, so each print gets
+	// at most one.
+	almostDoneSent bool
+}
+
+// alarmNote is an alarm the user was told about. open: no "cleared" sent yet.
+type alarmNote struct {
+	alarm     events.Alarm
+	firstSeen time.Time
+	goneSince time.Time // zero while it is in the report
+	clearedAt time.Time // last "cleared" sent
+	open      bool
 }
 
 var (
-	watchMu     sync.Mutex
-	watched     = map[string]*watchState{} // by printer name
-	alarmSentAt = map[string]time.Time{}   // "<name>|<code>"
+	watchMu sync.Mutex
+	watched = map[string]*watchState{} // by printer name
 )
 
 func startEventWatcher() {
@@ -51,6 +76,29 @@ func startEventWatcher() {
 	}()
 }
 
+// almostDoneMinutes reads the almost-done threshold from the notifications
+// settings: 0 (or no settings) is the default of 10, and the value is clamped
+// to 1..120.
+func almostDoneMinutes() int {
+	configMutex.RLock()
+	var n *config.Notifications
+	if configStore != nil {
+		n = configStore.Notifications
+	}
+	configMutex.RUnlock()
+	m := 10
+	if n != nil {
+		m = n.AlmostDoneMinutes
+	}
+	if m <= 0 {
+		m = 10
+	}
+	if m > 120 {
+		m = 120
+	}
+	return m
+}
+
 func watchOnce(now time.Time) {
 	configMutex.RLock()
 	printers := append([]config.Printer(nil), configStore.Printers...)
@@ -59,11 +107,6 @@ func watchOnce(now time.Time) {
 
 	watchMu.Lock()
 	defer watchMu.Unlock()
-	for k, t := range alarmSentAt {
-		if now.Sub(t) >= alarmQuietAgain {
-			delete(alarmSentAt, k)
-		}
-	}
 	seen := map[string]bool{}
 	for _, p := range printers {
 		seen[p.Name] = true
@@ -95,7 +138,7 @@ func diffState(p config.Printer, s *mqttpkg.TelemetryData, now time.Time) []even
 		if s.Status == "connected" || s.Status == "disconnected" || s.Status == "" {
 			return nil
 		}
-		w = &watchState{status: s.Status, inPrint: mqttpkg.InPrint(s.Status), file: s.FileName, alarms: alarmCodes(s.Alarms)}
+		w = &watchState{status: s.Status, inPrint: mqttpkg.InPrint(s.Status), file: s.FileName, alarms: alarmCodes(s.Alarms), told: map[string]*alarmNote{}}
 		watched[p.Name] = w
 		return nil
 	}
@@ -109,12 +152,22 @@ func diffState(p config.Printer, s *mqttpkg.TelemetryData, now time.Time) []even
 		out = append(out, e)
 	}
 
-	// Link state. "connected" is the moment before the first report.
+	// Link state. "connected" is the moment before the first report. With no
+	// report there is no alarm list either, so an alarm's time away restarts.
+	if s.Status == "disconnected" || s.Status == "connected" {
+		for _, n := range w.told {
+			n.goneSince = time.Time{}
+		}
+	}
 	if s.Status == "disconnected" {
 		if w.lostSince.IsZero() {
 			w.lostSince = now
 		}
-		if !w.offline && now.Sub(w.lostSince) >= offlineAfter {
+		wait := offlineAfter
+		if !w.backAt.IsZero() && now.Sub(w.backAt) < offlineFlapWindow {
+			wait = offlineAgainAfter
+		}
+		if !w.offline && now.Sub(w.lostSince) >= wait {
 			w.offline = true
 			emit(events.PrinterOffline, func(e *events.Event) {
 				e.File, e.Progress = w.file, -1
@@ -131,6 +184,7 @@ func diffState(p config.Printer, s *mqttpkg.TelemetryData, now time.Time) []even
 	w.lostSince = time.Time{}
 	if w.offline {
 		w.offline = false
+		w.backAt = now
 		emit(events.PrinterOnline, nil)
 	}
 
@@ -142,6 +196,7 @@ func diffState(p config.Printer, s *mqttpkg.TelemetryData, now time.Time) []even
 	switch {
 	case s.Status == "printing" && !w.inPrint:
 		w.inPrint = true
+		w.almostDoneSent = false
 		emit(events.PrintStarted, nil)
 	case s.Status == "paused" && prev == "printing":
 		emit(events.PrintPaused, func(e *events.Event) { e.Message = firstAlarmText(s.Alarms) })
@@ -149,32 +204,110 @@ func diffState(p config.Printer, s *mqttpkg.TelemetryData, now time.Time) []even
 		emit(events.PrintResumed, nil)
 	case mqttpkg.Settled(s.Status):
 		w.inPrint = false // the end itself is sent from the history record
+		w.almostDoneSent = false
 	}
 
-	// New alarms. Info-level ones are status chatter, not problems.
-	now2 := alarmCodes(s.Alarms)
-	for _, a := range s.Alarms {
-		key := alarmKey(a)
-		if w.alarms[key] || a.Severity == webhook.AlarmInfo {
-			continue
-		}
-		sentKey := p.Name + "|" + key
-		if t, ok := alarmSentAt[sentKey]; ok && now.Sub(t) < alarmQuietAgain {
-			continue
-		}
-		alarmSentAt[sentKey] = now
-		emit(events.PrinterError, func(e *events.Event) {
-			e.Severity = a.Severity
-			if a.Code != nil {
-				e.Code = *a.Code
-			}
-			if a.Message != nil {
-				e.Message = *a.Message
-			}
-		})
+	// Almost done: once per print, while it is running (not paused), when the
+	// estimate says the end is near. The progress guard stops a Klipper
+	// estimate from firing it early in a print.
+	if w.inPrint && !w.almostDoneSent && s.Status == "printing" &&
+		s.TimeRemaining > 0 && s.TimeRemaining <= almostDoneMinutes() && s.Progress >= 50 {
+		w.almostDoneSent = true
+		emit(events.PrintAlmostDone, nil)
 	}
-	w.alarms = now2
+
+	// Alarms: everything new in this report goes out as one message, and so
+	// does everything that has cleared. Info-level ones are status chatter.
+	if news := w.newAlarms(s.Alarms, now); len(news) > 0 {
+		emit(events.PrinterError, func(e *events.Event) { setAlarms(e, news) })
+	}
+	if gone := w.clearedAlarms(s.Alarms, now); len(gone) > 0 {
+		emit(events.PrinterAlarmCleared, func(e *events.Event) { setAlarms(e, gone) })
+	}
+	w.alarms = alarmCodes(s.Alarms)
 	return out
+}
+
+// newAlarms returns the alarms the user has not been told about: new in this
+// report, not info, and not an open one coming back after a flicker. An alarm
+// that was reported cleared and comes back is news again.
+func (w *watchState) newAlarms(as []webhook.RelayAlarm, now time.Time) []events.Alarm {
+	var out []events.Alarm
+	for _, a := range as {
+		key := alarmKey(a)
+		if n := w.told[key]; n != nil && n.open {
+			n.goneSince = time.Time{}
+			continue
+		}
+		if w.alarms[key] || a.Severity == webhook.AlarmInfo {
+			continue // in the last report too (seeded at start), or info
+		}
+		ea := events.Alarm{Severity: a.Severity}
+		if a.Code != nil {
+			ea.Code = *a.Code
+		}
+		if a.Message != nil {
+			ea.Message = *a.Message
+		}
+		n := w.told[key]
+		if n == nil {
+			n = &alarmNote{}
+			w.told[key] = n
+		}
+		n.alarm, n.firstSeen, n.goneSince, n.open = ea, now, time.Time{}, true
+		out = append(out, ea)
+	}
+	return out
+}
+
+// clearedAlarms returns the told-about alarms that have stayed gone for
+// alarmClearAfter, at most one "cleared" per alarm per alarmQuietAgain (a
+// flapping one then stays open, and quiet, until that time is up).
+func (w *watchState) clearedAlarms(as []webhook.RelayAlarm, now time.Time) []events.Alarm {
+	cur := alarmCodes(as)
+	var out []events.Alarm
+	for key, n := range w.told {
+		if !n.open {
+			if now.Sub(n.clearedAt) >= alarmQuietAgain {
+				delete(w.told, key)
+			}
+			continue
+		}
+		if cur[key] {
+			continue
+		}
+		if n.goneSince.IsZero() {
+			n.goneSince = now
+		}
+		if now.Sub(n.goneSince) < alarmClearAfter || (!n.clearedAt.IsZero() && now.Sub(n.clearedAt) < alarmQuietAgain) {
+			continue
+		}
+		n.open, n.clearedAt = false, now
+		a := n.alarm
+		a.Lasted = n.goneSince.Sub(n.firstSeen)
+		out = append(out, a)
+	}
+	return out
+}
+
+var severityRank = map[string]int{webhook.AlarmFatal: 0, webhook.AlarmSerious: 1, webhook.AlarmCommon: 2}
+
+// setAlarms puts the alarms on the event, worst first (then by code, so the
+// order is stable), at most maxAlarmsPerEvent; the first also fills Code,
+// Message and Severity.
+func setAlarms(e *events.Event, as []events.Alarm) {
+	sort.SliceStable(as, func(i, j int) bool {
+		ri, rj := severityRank[as[i].Severity], severityRank[as[j].Severity]
+		if ri != rj {
+			return ri < rj
+		}
+		return as[i].Code < as[j].Code
+	})
+	if len(as) > maxAlarmsPerEvent {
+		as = as[:maxAlarmsPerEvent]
+	}
+	e.Alarms = as
+	e.Code, e.Message, e.Severity = as[0].Code, as[0].Message, as[0].Severity
 }
 
 func alarmKey(a webhook.RelayAlarm) string {

@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"foxtrack-bridge/config"
 )
@@ -101,5 +104,44 @@ func TestHostOf_Forms(t *testing.T) {
 	}
 	if _, err := hostOf(""); err == nil || !strings.Contains(err.Error(), "address") {
 		t.Fatal("blank address accepted")
+	}
+}
+
+func TestLockPlug_SameHostSerialized(t *testing.T) {
+	var holders, maxHolders int32
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer lockPlug("serial-test.local")()
+			n := atomic.AddInt32(&holders, 1)
+			for {
+				m := atomic.LoadInt32(&maxHolders)
+				if n <= m || atomic.CompareAndSwapInt32(&maxHolders, m, n) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			atomic.AddInt32(&holders, -1)
+		}()
+	}
+	wg.Wait()
+	if maxHolders != 1 {
+		t.Fatalf("max concurrent holders = %d, want 1", maxHolders)
+	}
+}
+
+func TestLockPlug_DifferentHostNotBlocked(t *testing.T) {
+	defer lockPlug("other-a.local")()
+	done := make(chan struct{})
+	go func() {
+		lockPlug("other-b.local")()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a different host was blocked")
 	}
 }

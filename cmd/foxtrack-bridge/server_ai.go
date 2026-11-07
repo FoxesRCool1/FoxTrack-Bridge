@@ -97,12 +97,14 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req struct {
-			Enabled     bool    `json:"enabled"`
-			Preset      string  `json:"preset"`
-			BaseURL     string  `json:"base_url"`
-			Model       string  `json:"model"`
-			APIKey      *string `json:"api_key"`
-			AllowCamera bool    `json:"allow_camera"`
+			Enabled       bool    `json:"enabled"`
+			Preset        string  `json:"preset"`
+			BaseURL       string  `json:"base_url"`
+			Model         string  `json:"model"`
+			APIKey        *string `json:"api_key"`
+			AllowCamera   bool    `json:"allow_camera"`
+			WatchFailures *bool   `json:"watch_failures"`
+			WatchEveryMin *int    `json:"watch_every_min"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -111,6 +113,10 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 		req.Preset = strings.TrimSpace(req.Preset)
 		if req.Preset != "" && !ai.ValidPreset(req.Preset) {
 			http.Error(w, "unknown AI provider "+req.Preset, http.StatusBadRequest)
+			return
+		}
+		if req.WatchEveryMin != nil && *req.WatchEveryMin != 0 && (*req.WatchEveryMin < 2 || *req.WatchEveryMin > 60) {
+			http.Error(w, "Check every 2 to 60 minutes.", http.StatusBadRequest)
 			return
 		}
 
@@ -125,6 +131,15 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 		stored.BaseURL = strings.TrimSpace(req.BaseURL)
 		stored.Model = strings.TrimSpace(req.Model)
 		stored.AllowCamera = req.AllowCamera
+		// watch_failures and watch_every_min are optional: a POST that omits
+		// them keeps the stored values, the same way an omitted api_key keeps
+		// the stored key.
+		if req.WatchFailures != nil {
+			stored.WatchFailures = *req.WatchFailures
+		}
+		if req.WatchEveryMin != nil {
+			stored.WatchEveryMin = *req.WatchEveryMin
+		}
 		// A nil api_key means "keep what is stored"; an empty string means
 		// "clear it". The dashboard only ever sees api_key_set, so it sends nil
 		// unless the user actually typed a new key or cleared the box.

@@ -184,6 +184,23 @@ function nfShow() {
 
 registerSettingsTab({ id: 'notifications', label: 'Notifications', group: 'Printing', order: 10, mount: nfMount, onShow: nfShow });
 
+const NF_FT_KINDS = { telegram: 'Telegram', whatsapp: 'WhatsApp', discord: 'Discord', slack: 'Slack', email: 'email' };
+
+// nfFtEvents returns the Set of Bridge event kinds FoxTrack sends to any channel, or null when FoxTrack's alerts are not known.
+function nfFtEvents() {
+    const fa = NF.data && NF.data.foxtrack_alerts;
+    if (!fa) return null;
+    const s = new Set();
+    Object.keys(fa).forEach(k => (fa[k] || []).forEach(e => s.add(e)));
+    return s;
+}
+
+// nfJoin writes "A, B and C".
+function nfJoin(list) {
+    if (list.length < 2) return list.join('');
+    return list.slice(0, -1).join(', ') + ' ' + i18n('and') + ' ' + list[list.length - 1];
+}
+
 // ---- rendering ----
 
 function nfLastHtml(ch) {
@@ -209,6 +226,22 @@ function nfRender() {
     const shown = NF.chs.filter(c => !c._deleted);
     let h = '<h2 class="font-heading text-xl font-medium leading-tight">Notifications</h2>'
         + '<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Get a message when a print finishes or goes wrong, without any app. ' + tip(escHtml(NF_PRIVACY), 'About privacy') + '</p>';
+    // A linked shop may also have FoxTrack's own alerts on: both mean two copies.
+    if (typeof foxtrackLinked === 'function' && foxtrackLinked()) {
+        const ft = nfFtEvents();
+        if (!ft) {
+            h += '<p class="mt-2 text-sm text-text-2">FoxTrack can send the same print alerts (in FoxTrack: Settings, Account, Alerts). Turn each alert on in one place only, or it arrives twice.</p>';
+        } else {
+            const mine = new Set();
+            shown.forEach(c => { if (c.enabled && !c._draft) (c.events || []).forEach(e => mine.add(e)); });
+            const both = d.events.filter(e => ft.has(e.kind) && mine.has(e.kind));
+            if (both.length) {
+                const kinds = Object.keys(d.foxtrack_alerts).filter(k => both.some(b => (d.foxtrack_alerts[k] || []).includes(b.kind)));
+                h += '<p class="mt-2 text-sm text-text-2">' + escHtml(fill(i18n('FoxTrack already sends {0} to {1} (in FoxTrack: Settings, Account, Alerts). Turn each one on in one place only, or it arrives twice.'),
+                    nfJoin(both.map(e => i18n(e.label))), nfJoin(kinds.map(k => i18n(NF_FT_KINDS[k] || k))))) + '</p>';
+            }
+        }
+    }
     h += '<div class="mt-5" id="nfList">';
     if (!shown.length) {
         h += '<div class="nf-empty">No channels yet. Add one below.</div>';
@@ -222,13 +255,16 @@ function nfRender() {
         + d.services.map(s => '<button type="button" class="btn-outline btn-lg" data-act="add" data-kind="' + escHtml(s.kind) + '"><i class="fas fa-plus" aria-hidden="true"></i> ' + escHtml(s.name) + '</button>').join('')
         + '</div></div>';
     h += '<div class="mt-8 border-t border-border pt-5"><div class="label-row"><span class="field-label" id="nfQuietLabel">Quiet hours</span>'
-        + tip('Between these times only failed prints and printer alarms are sent. Other messages are dropped. Uses this machine\'s clock.', 'About quiet hours') + '</div>'
+        + tip('Between these times only failed prints, printer alarms and their all-clear are sent. Other messages are dropped. Uses this machine\'s clock.', 'About quiet hours') + '</div>'
         + '<div class="nf-quiet" role="group" aria-labelledby="nfQuietLabel">'
         + '<input id="nfQs" type="time" class="field" aria-label="Quiet hours start" value="' + escHtml(d.quiet_start || '') + '">'
         + '<span class="text-sm text-text-2">to</span>'
         + '<input id="nfQe" type="time" class="field" aria-label="Quiet hours end" value="' + escHtml(d.quiet_end || '') + '">'
         + '<button type="button" class="btn-ghost btn-lg" data-act="quiet-clear">Clear</button>'
         + '<span id="nfQuietMsg" class="text-xs text-text-2" role="status"></span></div></div>';
+    h += '<div class="mt-5"><div class="label-row"><label for="nfAdm" class="field-label">Almost-done alert (minutes before the end)</label>'
+        + tip('A channel that listens to “Almost done” gets a message once per print, when the printer’s own estimate says this many minutes are left. Leave it empty for the default of 10.', 'About the almost-done alert') + '</div>'
+        + '<input id="nfAdm" type="number" inputmode="numeric" min="1" max="120" step="1" placeholder="10" class="field" style="width:6rem" aria-label="Almost-done alert (minutes before the end)" value="' + (d.almost_done_minutes || '') + '"></div>';
     NF.sec.innerHTML = h;
     if (NF.open) {
         const f = NF.sec.querySelector('.nf-edit input.field, .nf-edit select.field');
@@ -266,6 +302,7 @@ function nfEditorHtml(ch) {
     const key = ch._k;
     const fields = NF_FIELDS[ch.kind] || [];
     const chosen = new Set(ch.events || []);
+    const ft = nfFtEvents();
     let h = '<div class="nf-grid2">';
     h += '<div class="nf-full"><label for="nf-' + key + '-name" class="field-label">Name (optional)</label>'
         + '<input id="nf-' + key + '-name" data-f="name" class="field" maxlength="60" autocomplete="off" placeholder="' + escHtml(svc.name) + '" value="' + escHtml(ch.name || '') + '"></div>';
@@ -273,7 +310,7 @@ function nfEditorHtml(ch) {
     h += '</div>';
 
     h += '<fieldset class="mt-5"><legend class="field-label">Send a message when</legend><div class="nf-checks">'
-        + NF.data.events.map(e => '<label class="nf-check"><input type="checkbox" data-ev="' + e.kind + '"' + (chosen.has(e.kind) ? ' checked' : '') + '> ' + escHtml(e.label) + '</label>').join('')
+        + NF.data.events.map(e => '<label class="nf-check"><input type="checkbox" data-ev="' + e.kind + '"' + (chosen.has(e.kind) ? ' checked' : '') + '> ' + escHtml(e.label) + (ft && (typeof foxtrackLinked === 'function' && foxtrackLinked()) && ft.has(e.kind) ? ' <span class="text-xs text-text-2">' + escHtml(i18n('(FoxTrack sends it too)')) + '</span>' : '') + '</label>').join('')
         + '</div></fieldset>';
 
     const ps = (typeof configuredPrinters !== 'undefined' && configuredPrinters) || [];
@@ -395,6 +432,7 @@ function nfClick(ev) {
 
 function nfChange(ev) {
     if (ev.target.id === 'nfQs' || ev.target.id === 'nfQe') nfSaveQuiet();
+    if (ev.target.id === 'nfAdm') nfSaveAlmostDone();
     if (ev.target.dataset && ev.target.dataset.f === 'smtp.security') {
         // The server picks 465 for TLS and 25 for None only when the port is 0,
         // so a port left at the previous security's default would be ignored.
@@ -561,5 +599,19 @@ async function nfSaveQuiet() {
     } catch (err) {
         msg.className = 'text-xs text-danger';
         msg.textContent = friendlyError(err.message);
+    }
+}
+
+// nfSaveAlmostDone saves the almost-done threshold the same way quiet hours
+// are saved: one POST of just the setting, the reply updates the view.
+async function nfSaveAlmostDone() {
+    const inp = document.getElementById('nfAdm');
+    if (!inp) return;
+    try {
+        const v = await apiFetch('/api/notifications', { method: 'POST', body: JSON.stringify({ almost_done_minutes: inp.value === '' ? 0 : parseInt(inp.value, 10) }) });
+        NF.data.almost_done_minutes = v.almost_done_minutes;
+        inp.value = v.almost_done_minutes || '';
+    } catch (err) {
+        toast(friendlyError(err.message), 'error');
     }
 }

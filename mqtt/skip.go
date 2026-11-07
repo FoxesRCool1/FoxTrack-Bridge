@@ -61,6 +61,8 @@ type skipJob struct {
 	reported   map[string]bool // ids the printer says are skipped
 	sent       map[string]bool // ids Bridge sent
 	bridgeTask string
+	bridge     Printer // the printer Bridge started its print on
+	uploads    int     // Bridge uploads started; a pending file removal skips if it moved
 	cacheKey   string
 	cached     []SkipObject
 }
@@ -115,6 +117,9 @@ func noteSkipFields(name string, payload []byte) {
 	case "IDLE", "FINISH", "FAILED":
 		if !j.idle {
 			j.doneFile = j.gcodeFile
+			if j.bridgeTask != "" {
+				removeBridgeFileAfter(j, j.bridge, j.uploads)
+			}
 			if j.doneFile == "" {
 				j.doneFile = pr.GcodeFile
 			}
@@ -165,11 +170,46 @@ func skipIDText(v any) string {
 }
 
 // noteBridgeJob is called when Bridge itself started a print.
-func noteBridgeJob(name, taskName string) {
-	j := jobFor(name)
+func noteBridgeJob(p Printer, taskName string) {
+	j := jobFor(p.Name)
 	j.mu.Lock()
 	j.bridgeTask = taskName
+	j.bridge = p
 	j.mu.Unlock()
+}
+
+// noteBridgeUpload is called when Bridge starts uploading a print file.
+func noteBridgeUpload(name string) {
+	j := jobFor(name)
+	j.mu.Lock()
+	j.uploads++
+	j.mu.Unlock()
+}
+
+// removeBridgeFileAfter removes the file Bridge stored on the printer once its
+// print has ended (the printer keeps it otherwise). It waits bridgeFileWait
+// first, and skips the delete if the printer is printing or preparing again,
+// or if Bridge began a new upload since (a queued next print overwrites the
+// same file and may still be uploading). Called with j.mu held.
+func removeBridgeFileAfter(j *skipJob, p Printer, uploads int) {
+	wait := bridgeFileWait
+	go func() {
+		time.Sleep(wait)
+		j.mu.Lock()
+		moved := j.uploads != uploads
+		j.mu.Unlock()
+		if moved {
+			return
+		}
+		if s := GetPrinterState(p.Name).Status; InPrint(s) || s == "PREPARE" || s == "SLICING" {
+			return
+		}
+		if err := ftpsDelete(p.IP, p.LANCode, printerStoredName); err != nil {
+			log.Printf("[%s] could not remove %s from the printer: %v", p.Name, printerStoredName, err)
+			return
+		}
+		log.Printf("[%s] removed %s from the printer", p.Name, printerStoredName)
+	}()
 }
 
 // ---- Bambu 3mf reading ----

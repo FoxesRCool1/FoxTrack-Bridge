@@ -18,5 +18,22 @@ var (
 	i18nFS       = web.I18n
 	logoPNG      = assets.Logo
 	logoLightPNG = assets.LogoLight
+	logo192PNG   = assets.Logo192
 	logoDarkPNG  = assets.LogoDark
 )
+
+// manifestJSON is the web app manifest served at /manifest.webmanifest.
+// background_color and theme_color follow the Paper theme's background.
+var manifestJSON = []byte(`{
+	"name": "FoxTrack Bridge",
+	"short_name": "Bridge",
+	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#f3ede0",
+	"theme_color": "#f3ede0",
+	"icons": [
+		{"src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+		{"src": "/logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"}
+	]
+}`)

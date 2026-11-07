@@ -10,6 +10,11 @@ var UI []byte
 //go:embed login.html
 var Login []byte
 
+// Share is the read-only page behind a share link (/share/{token}).
+//
+//go:embed share.html
+var Share []byte
+
 //go:embed tailwind.css
 var TailwindCSS []byte
 

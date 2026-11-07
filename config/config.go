@@ -81,8 +81,28 @@ func NewVirtualPrinterKey() string {
 // Plug is the smart plug a printer is powered through. Address is a host or
 // host:port on the LAN; the Bridge never talks to a plug maker's cloud.
 type Plug struct {
-	Kind    string `json:"kind"` // "shelly" | "tasmota" | "kasa"
+	Kind    string `json:"kind"` // one of the Plug* kinds below
 	Address string `json:"address"`
+	// Tuya (Smart Life): the device ID and 16-character local key from the
+	// tinytuya wizard, and the protocol version ("3.3", "3.4", "3.5"; empty is
+	// auto). Meross: LocalKey is the optional Meross key, and MAC the plug's
+	// MAC address for models that encrypt local traffic. LocalKey is a
+	// secret: never sent to the dashboard.
+	DeviceID string `json:"device_id,omitempty"`
+	LocalKey string `json:"local_key,omitempty"`
+	Version  string `json:"version,omitempty"`
+	MAC      string `json:"mac,omitempty"`
+	// Username, Password and Token also serve myStrom (Token: its API token).
+	// Username and Password: the TP-Link account for Tapo and newer Kasa
+	// firmware, or an ESPHome web server login. Password is a secret.
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	// Home Assistant: Address is the HA URL, Token a long-lived access token
+	// (a secret), Entity the switch and PowerEntity an optional watts sensor.
+	// ESPHome uses Entity and PowerEntity to pick among several entities.
+	Token       string `json:"token,omitempty"`
+	Entity      string `json:"entity,omitempty"`
+	PowerEntity string `json:"power_entity,omitempty"`
 	// AutoOff turns the plug off after a print ends, once the printer has
 	// been idle for AutoOffDelayMinutes and the nozzle is cool.
 	AutoOff             bool `json:"auto_off,omitempty"`
@@ -94,6 +114,14 @@ const (
 	PlugShelly  = "shelly"
 	PlugTasmota = "tasmota"
 	PlugKasa    = "kasa"
+	PlugTuya    = "tuya"
+	PlugTapo    = "tapo"
+	PlugESPHome = "esphome"
+	PlugHA      = "home_assistant"
+	PlugMyStrom = "mystrom"
+	PlugWiZ     = "wiz"
+	PlugSonoff  = "sonoff"
+	PlugMeross  = "meross"
 )
 
 // DefaultAutoOffDelayMinutes is used when AutoOffDelayMinutes is 0.
@@ -131,6 +159,12 @@ type AI struct {
 	// printer on someone else's server, which is a decision they have to make
 	// on purpose rather than inherit from turning the assistant on.
 	AllowCamera bool `json:"allow_camera,omitempty"`
+	// WatchFailures has the assistant look at each printing printer's camera
+	// every WatchEveryMin minutes (default 5) and send a notification when
+	// it sees a failed print twice in a row. Needs AllowCamera. Optional and
+	// additive; it never pauses or stops a print.
+	WatchFailures bool `json:"watch_failures,omitempty"`
+	WatchEveryMin int  `json:"watch_every_min,omitempty"`
 }
 
 // Configured reports whether there is enough here to call a provider at all.

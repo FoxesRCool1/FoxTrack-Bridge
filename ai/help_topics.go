@@ -226,7 +226,7 @@ The Bridge never controls a print on its own. It can pause, stop, set speed and 
 	{
 		ID:       "controls",
 		Title:    "What the control buttons do, and which printers have them",
-		Keywords: []string{"pause", "stop", "resume", "cancel", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "console", "command", "advanced", "temperature", "nozzle", "bed", "heat", "preheat", "home", "temps"},
+		Keywords: []string{"pause", "stop", "resume", "cancel", "pause all", "all printers", "bulk", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "console", "command", "advanced", "temperature", "nozzle", "bed", "heat", "preheat", "home", "temps"},
 		Body: `Available controls depend on how the printer is connected.
 
 Bambu Lab in LAN mode: pause, stop, light toggle, print speed (Silent, Standard, Sport, Ludicrous), fan speed, the Temps panel, and a GCode console for single commands. The GCode console only appears in Advanced mode.
@@ -245,7 +245,9 @@ Home Assistant (read-only): no controls. The Bridge only reads the status.
 
 A printer with a smart plug set in the Bridge also has a "Plug on" / "Plug off" button. "Plug off" is disabled while the printer prints or is paused, and the Bridge refuses it while the nozzle is above 50 C.
 
-AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.`,
+AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.
+
+The command menu (Ctrl+K or Cmd+K) also has bulk actions, shown only when they apply: Pause all printing, Resume all paused, and Turn off idle plugs (printers that are not printing or paused and whose nozzle is below 50 C). Each one asks first and lists the printers it will act on.`,
 	},
 	{
 		ID:       "files-on-printer",
@@ -282,18 +284,46 @@ The network scan finds OctoPrint on port 80 and port 5000. The Bridge checks rea
 	{
 		ID:       "smart-plugs",
 		Title:    "Smart plugs: watts, energy per print, auto off",
-		Keywords: []string{"plug", "smart plug", "shelly", "tasmota", "kasa", "power", "watts", "energy", "kwh", "electricity", "auto off", "turn off", "switch"},
-		Body: `A printer can be powered through a smart plug the Bridge reads and switches over your network. Supported: Shelly (Gen1, Gen2 and Plus), Tasmota, and Kasa plugs on older firmware (HS110, KP115, EP25). Newer Kasa firmware (KLAP) is not supported yet; the plug check says so. No maker's cloud is ever called. It works for every printer type the Bridge controls, a Bambu printer added through a Bambu account included.
+		Keywords: []string{"plug", "smart plug", "shelly", "tasmota", "kasa", "tapo", "tuya", "smart life", "meross", "sonoff", "esphome", "athom", "mystrom", "wiz", "home assistant", "power", "watts", "energy", "kwh", "electricity", "auto off", "turn off", "switch"},
+		Body: `A printer can be powered through a smart plug the Bridge reads and switches over your network. Supported types: Shelly, Tasmota, TP-Link Kasa, TP-Link Tapo, Tuya / Smart Life, Meross, Sonoff (DIY mode), ESPHome, myStrom, WiZ, and Home Assistant (any plug Home Assistant can switch, such as Zigbee, Matter or Hue plugs). The Bridge talks to the plug on your network and never calls a maker's cloud. It works for every printer type the Bridge controls, a Bambu printer added through a Bambu account included. What each type needs is in "Setting up each smart plug type".
 
-To set one: open the printer's pencil (edit) or add it, scroll to Smart plug, choose the type, enter the plug's address on your network, and click "Check plug". The check reports on or off and the watts if the plug has an energy meter.
+To set one: open the printer's pencil (edit) or add it, scroll to Smart plug, choose the type, fill in the fields that appear (the form shows setup help for the type you pick), and click "Check plug". The check reports on or off and the watts if the plug has an energy meter, or says what is wrong. Keys, passwords and tokens are stored only on the machine running the Bridge and are never shown again; leave such a field blank when you edit the printer to keep the saved one.
 
-The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button, also while the printer itself is switched off. "Plug off" is disabled while the printer prints or is paused, and refused while the nozzle is above 50 C, so a print is never cut.
+The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button, also while the printer itself is switched off. "Plug off" is disabled while the printer prints or is paused, refused while the nozzle is above 50 C, and refused when the Bridge cannot tell whether the printer is idle, so a print is never cut.
 
 "Turn the plug off after a print": once a print ends (finished, stopped or failed), the Bridge waits the number of minutes you set (10 by default) with the printer idle and the nozzle under 50 C, then turns the plug off. A new print in that time cancels it. The log says "plug turned off after the print".
 
-Energy per print: the Bridge reads the plug's energy counter when a print starts and ends (or sums watts over time for a plug without a counter) and sends the Wh to FoxTrack with the print history. FoxTrack shows it in Reports under Printer use as kWh and a cost. A plug without a meter switches but reports no watts or energy.
+Energy per print: the Bridge reads the plug's energy counter when a print starts and ends (Shelly, Tasmota, Kasa), or sums watts over time for a plug without a counter (Tapo, Tuya, Meross, ESPHome, myStrom, WiZ, Home Assistant), and sends the Wh to FoxTrack with the print history. FoxTrack shows it in Reports under Printer use as kWh and a cost. A plug without a meter (or a Sonoff in DIY mode) switches but reports no watts or energy.
 
 The plug is polled every 10 seconds. "Plug not answering" means the last poll failed; the Bridge keeps trying.`,
+	},
+	{
+		ID:       "smart-plug-setup",
+		Title:    "Setting up each smart plug type",
+		Keywords: []string{"plug", "smart plug", "setup", "tapo", "kasa", "tp-link", "tuya", "smart life", "local key", "tinytuya", "meross", "key", "sonoff", "diy mode", "ewelink", "esphome", "athom", "mystrom", "token", "wiz", "home assistant", "long-lived", "entity", "shelly", "tasmota", "check plug", "not answering", "login refused"},
+		Body: `Every type needs the plug's address on your network (its IP address, shown in the maker's app under device info, or in your router's list of devices). Give the plug a fixed IP address in your router so it does not move. Then pick the type and fill in what it asks for.
+
+Shelly (Gen1 to Gen4) and Tasmota: only the address. Any plug running Tasmota works, including Sonoff, Athom and Nous plugs flashed with it.
+
+TP-Link Kasa: older Kasa plugs need only the address. Newer Kasa firmware also needs the email and password of the TP-Link account used in the Kasa app. The plug checks them itself; the Bridge never contacts TP-Link.
+
+TP-Link Tapo (P100, P110, P115 and others): the address plus the email and password of the TP-Link account used in the Tapo app, both case-sensitive. Both the current (KLAP) and the older Tapo login are supported. If "Check plug" says the login was refused although it is right, turn on Third-Party Compatibility in the Tapo app (Me, Tapo Lab) and check again.
+
+Tuya / Smart Life (also sold under many other names that use the Smart Life or Tuya Smart app): the address, the device ID and the 16-character local key. The key only comes from Tuya, so get it once: 1) sign up at iot.tuya.com, create a Cloud project (Smart Home) in the data center of your Smart Life account, and link your Smart Life app to it (Devices, Link App Account, scan the QR code with the app); 2) on any computer with Python run "pip install tinytuya" and then "python -m tinytuya wizard", and give it the project's Access ID and Access Secret; 3) copy the plug's "id" and "key" from the list it prints. Leave Protocol on Auto. Re-pairing the plug in Smart Life changes its key, so fetch it again then. A Tuya plug answers one local connection at a time: close Home Assistant's Local Tuya or tinytuya if the check cannot reach it.
+
+Meross: the address; leave the key blank, most Meross plugs answer without it. Newer models that encrypt their local traffic need the Meross key and the plug's MAC address (on its label or in the Meross app's device info; on Linux the Bridge finds the MAC itself). The key belongs to your Meross account; Home Assistant's meross_lan shows it, or run "pip install meross_iot" and then: python -c "import asyncio; from meross_iot.http_api import MerossHttpClient as C; print(asyncio.run(C.async_from_user_password(api_base_url='https://iotx-eu.meross.com', email='YOUR EMAIL', password='YOUR PASSWORD')).cloud_credentials.key)".
+
+Sonoff: works in DIY mode (firmware 3.5 or later), which takes the plug off the eWeLink cloud; Itead's DIY instructions for each model show how to turn it on. A Sonoff in its normal eWeLink mode encrypts its local traffic and "Check plug" says so. If you type no port, the Bridge uses 8081, the DIY mode port. DIY mode has no power reading: for watts, flash the plug with Tasmota or ESPHome, or add it through Home Assistant.
+
+ESPHome (Athom plugs ship with it): only the address, as long as the device YAML has "web_server:". The Bridge finds the relay and the power sensor itself; type their names only if it picks the wrong ones, and the login only if the web server has one.
+
+myStrom: the address, plus the API token if you secured the plug with one in the myStrom app.
+
+WiZ: the address, with "Allow local communication" turned on in the WiZ app settings.
+
+Home Assistant: the Home Assistant URL (for example http://homeassistant.local:8123), a long-lived access token (Home Assistant: your profile, Security, Long-lived access tokens, Create token), the switch entity (for example switch.printer_plug) and, for watts, the plug's power sensor entity. This covers any plug Home Assistant can switch, including Zigbee, Matter, Hue, Meross and Sonoff plugs in eWeLink mode.
+
+If "Check plug" fails: "did not answer" means the address is wrong or the plug is offline or on another network; a login, key or token message means that value is wrong. The plug and the machine running the Bridge must be on the same network (with Docker, use host networking for WiZ, which uses UDP).`,
 	},
 	{
 		ID:       "virtual-printer",
@@ -317,13 +347,17 @@ The virtual printer listens on port 8090 by default; the Bridge log says if the 
 		Keywords: []string{"alarm", "hms", "error code", "warning", "fault", "shutdown", "attention", "bell", "alert"},
 		Body: `The Bridge reports what a printer says is wrong, and shows it on the printer's card and in FoxTrack's Printers page, Alarms view.
 
-Bambu Lab: HMS codes (the printer's health messages) with their severity (fatal, serious, common, info) and the print error code when a print fails. The card shows the code as Bambu does, for example 0300_1200_0002_0001, with a "What it means" link to the Bambu wiki page for that code. The Bridge does not fetch Bambu's own text for a code.
+Bambu Lab: HMS codes (the printer's health messages) with their severity (fatal, serious, common, info) and the print error code when a print fails. The card shows the code as Bambu does, for example 0300_1200_0002_0001, with a "What it means" link to the Bambu wiki page for that code, and Bambu's own words for the code when the Bridge knows them.
 
 Klipper: a firmware shutdown or error (the state message Klipper shows, for example "MCU 'mcu' shutdown: Timer too close") as a fatal alarm, and a print that ended in error as a serious one.
 
 PrusaLink: the error or attention text the printer shows. OctoPrint: the printer error OctoPrint reports.
 
-An alarm clears when the printer stops reporting it. In FoxTrack, a fatal or serious alarm rings the bell and sends the printer error alert (Telegram, WhatsApp, Discord, Slack or email, whichever is set up). Home Assistant printers report no alarms.`,
+An alarm clears when the printer stops reporting it. Alarms come from the printer itself: one can clear before you reach the printer, so its screen may show nothing.
+
+Bridge notifications (Telegram, Discord, ntfy and the rest): all the alarms a printer raises at once arrive as one message. Once they have been gone for 2 minutes, a quiet "Alarm cleared" message follows, to every channel that gets alarms. An alarm that flickers on and off sends no more than one "cleared" in 30 minutes. A printer that drops off the network again within 30 minutes of coming back is reported offline only after 15 minutes. The same text never goes to the same channel twice within 2 minutes.
+
+In FoxTrack, a fatal or serious alarm rings the bell and sends the printer error alert (Telegram, WhatsApp, Discord, Slack or email, whichever is set up). Home Assistant printers report no alarms.`,
 	},
 	{
 		ID:       "foxtrack-link",
@@ -346,8 +380,8 @@ Pause, resume, stop and light commands sent from FoxTrack reach the Bridge withi
 	{
 		ID:       "config-files",
 		Title:    "Where settings and history are stored",
-		Keywords: []string{"config", "config.json", "history.json", "file", "location", "folder", "directory", "backup", "corrupt", "lost", "missing", "printers gone", "port"},
-		Body: `The Bridge stores config.json and history.json in the standard per-user configuration directory:
+		Keywords: []string{"config", "config.json", "history.json", "queue.json", "file", "location", "folder", "directory", "backup", "backups", "corrupt", "lost", "missing", "printers gone", "port"},
+		Body: `The Bridge stores config.json, history.json and queue.json (the print queue) in the standard per-user configuration directory:
 
 - Linux: ~/.config/FoxTrack-Bridge/ (or $XDG_CONFIG_HOME/FoxTrack-Bridge if set)
 - macOS: ~/Library/Application Support/FoxTrack-Bridge/
@@ -355,7 +389,9 @@ Pause, resume, stop and light commands sent from FoxTrack reach the Bridge withi
 
 If config.json is not found there, the older location (the executable's directory, then config/config.json) is read automatically and migrated on the next save. This fallback is config-only. history.json has no equivalent, so history written by a very old install at the legacy location does not appear after upgrading.
 
-If either file fails to load, for example because it is corrupted, the Bridge renames the broken file next to itself as config.json.corrupt-<timestamp> or history.json.corrupt-<timestamp> and starts fresh. It never deletes or overwrites the original, so a broken file can always be recovered by hand.
+A backups folder next to them holds a daily copy of config.json and history.json (config-YYYY-MM-DD.json, history-YYYY-MM-DD.json); the last 7 of each are kept. Settings > General > Back up and restore can restore from one of them.
+
+If one of these files fails to load, for example because it is corrupted, the Bridge renames the broken file next to itself as <name>.corrupt-<timestamp> (config.json.corrupt-<timestamp>, for example) and starts fresh. It never deletes or overwrites the original, so a broken file can always be recovered by hand.
 
 config.json is written with file mode 0600 because it holds printer access codes and API keys.
 
@@ -377,13 +413,19 @@ On Linux the Bridge repairs its own systemd unit on startup, so the unit file do
 	},
 	{
 		ID:       "history-and-notifications",
-		Title:    "Print history and browser notifications",
-		Keywords: []string{"history", "past prints", "record", "log", "notification", "notify", "push", "alert", "finished", "browser"},
-		Body: `Print history is stored locally in history.json and shown in the History view. Each record holds the printer name, file name, start and end time, duration, result (finished, cancelled or error), and temperature samples taken during the print.
+		Title:    "Print history, notes and notifications",
+		Keywords: []string{"history", "past prints", "record", "log", "note", "notes", "add a note", "note on a print", "comment", "csv", "export", "notification", "notify", "push", "alert", "finished", "browser", "discord", "telegram", "ntfy", "almost done", "minutes left", "quiet hours"},
+		Body: `Print history is stored locally in history.json and shown in the History view. Each record holds the printer name, file name, start and end time, duration, result (finished, cancelled or error), filament and energy when known, and temperature samples taken during the print.
+
+Each print can carry a note: click the pencil on its row in History, type, and click Save (an empty note removes it). Export CSV includes the notes.
 
 History is only recorded while the Bridge is running. A print that finishes while the Bridge is stopped leaves no record.
 
-The dashboard can raise browser push notifications when prints finish, fail or pause. These are browser notifications, so the browser must have granted permission and the dashboard tab's origin must be allowed to send them.`,
+Notification channels are set up in Settings > Notifications: Discord, Slack, Telegram, ntfy, Pushover, Gotify, email or a webhook. Each channel picks its printers and events (print started, almost done, paused, resumed, finished, failed, cancelled, failure spotted by the camera watch, printer alarm, offline, back online, maintenance due) and can attach a camera picture. During quiet hours only failures and errors are sent.
+
+"Almost done" is off until it is ticked on a channel. It is sent once per print when the time left drops to the minutes set under Almost-done alert (10 by default), and only once the print is past halfway.
+
+The dashboard can also raise browser notifications when prints finish, fail or pause. The browser must have granted permission for them.`,
 	},
 	{
 		ID:       "assistant",
@@ -399,7 +441,43 @@ The camera tool is off by default. When it is switched on, the assistant can fet
 
 The assistant can only read. It cannot add, change or delete a printer, cannot start, pause or stop a print, and cannot change any setting. It can only tell you what to press.
 
-The Bridge dashboard has no login. Anyone who can reach it on your network can use the assistant and spend credit on the configured key.`,
+Unless a dashboard password is set in Settings > Security, anyone who can reach the dashboard on your network can use the assistant and spend credit on the configured key.
+
+Watch prints for failures (Settings > Assistant, needs camera access) has the assistant look at each printing printer's camera every few minutes (5 by default, 2 to 60), starting 5 minutes into a print. After two checks in a row that look like a failed print, the channels that have "Failure spotted by camera watch" ticked get one notification for that print. It never pauses or stops a print. Each check sends a picture to the provider, which can cost money with a paid provider.`,
+	},
+	{
+		ID:       "print-queue",
+		Title:    "Print queue: lining up the next prints",
+		Keywords: []string{"queue", "queued", "next", "up next", "start next", "line up", "batch", "farm", "after this print", "add to queue"},
+		Body: `The print queue lines up files that are already on a printer. It works on printers that can start a file: Bambu Lab in LAN mode, Klipper and OctoPrint.
+
+To add a file: open Start a print for the printer, type the name of a file on the printer, and click Add to queue. The printer's card then shows Up next with the first file. Open the list to move a file up or down or remove it. A printer holds up to 50 queued files.
+
+When the printer is idle or finished, a Start next button appears. It asks whether the bed is clear, then starts the first file. The file only leaves the queue once the printer accepted the start; if the printer refuses, it stays first in line. The Bridge never starts a queued print by itself, because a print started on a full bed crashes into the previous one.
+
+The queue is saved in queue.json next to config.json and survives a restart. Removing a printer drops its queue.`,
+	},
+	{
+		ID:       "share-links",
+		Title:    "Share links: a read-only view of one printer",
+		Keywords: []string{"share", "link", "share link", "watch", "family", "friend", "read-only", "public", "view only", "revoke"},
+		Body: `A share link lets someone watch one printer without access to anything else. Make one in Settings > Security > Share links: pick the printer, give it a name, and tick Show the camera if the page may show a camera picture (it refreshes every 10 seconds).
+
+The page shows the printer's status, file, progress, time left and temperatures. It has no controls, shows no other printer, and never shows addresses, access codes or file lists. It works without the dashboard password, for anyone who can reach the Bridge's address, so it is meant for people on your network (or who can reach it some other way you set up).
+
+The link is shown once, when it is made: copy it then. Only a hash of it is stored. Revoke stops it at once, and removing the printer stops it too. Up to 20 links can exist.`,
+	},
+	{
+		ID:       "backup-restore",
+		Title:    "Back up, restore and move the Bridge to another machine",
+		Keywords: []string{"backup", "back up", "restore", "export", "import", "move", "migrate", "new computer", "transfer", "copy settings", "reinstall"},
+		Body: `Settings > General > Back up and restore downloads the printers and settings as one file (foxtrack-bridge-backup-<date>.json), and Restore from file loads one back. The file holds the printers' access codes and API keys, so keep it private.
+
+The dashboard password, API tokens, share links, the linked Bambu account and the assistant's API key are not in the file. A restore never changes the first four, and keeps the assistant's key unless the backup uses a different AI provider. Before a restore the current settings are saved next to config.json as config.json.before-import-<date>, so a restore can be undone by hand.
+
+Restore also accepts a plain config.json, such as one of the daily copies in the backups folder next to config.json. A file with no printers is refused unless you confirm that every saved printer should be removed.
+
+To move to another machine: download a backup on the old one, install the Bridge on the new one, and restore the file there.`,
 	},
 	{
 		ID:       "getting-help",

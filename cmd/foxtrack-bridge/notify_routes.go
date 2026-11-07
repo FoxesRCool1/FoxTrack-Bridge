@@ -32,6 +32,9 @@ type notifyResult struct {
 var (
 	notifyMu   sync.Mutex
 	notifyLast = map[string]notifyResult{} // by channel ID, in memory only
+	// notifySeen: when each channel last got a message with this exact text,
+	// so the same words never go out twice in notifyRepeatAfter.
+	notifySeen = map[string]time.Time{}
 
 	// Swapped by tests.
 	notifySnapshot = printerSnapshot
@@ -64,6 +67,41 @@ func recordNotify(id string, err error) {
 	notifyMu.Lock()
 	notifyLast[id] = r
 	notifyMu.Unlock()
+}
+
+// notifyRepeatAfter is how soon the same text may go to the same channel again.
+const notifyRepeatAfter = 2 * time.Minute
+
+// firstSend reports whether this channel has not had this text in the last
+// notifyRepeatAfter, and notes it as sent. The test button always goes.
+func firstSend(ch config.NotifyChannel, m notify.Message, now time.Time) bool {
+	if m.Event.Kind == events.Test {
+		return true
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	for k, t := range notifySeen {
+		if now.Sub(t) >= notifyRepeatAfter {
+			delete(notifySeen, k)
+		}
+	}
+	key := ch.ID + "\x00" + m.Plain()
+	if _, ok := notifySeen[key]; ok {
+		return false
+	}
+	notifySeen[key] = now
+	return true
+}
+
+// forgetSent drops the note firstSend made, so a send that failed does not
+// suppress the next identical message. The test button is never recorded.
+func forgetSent(ch config.NotifyChannel, m notify.Message) {
+	if m.Event.Kind == events.Test {
+		return
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	delete(notifySeen, ch.ID+"\x00"+m.Plain())
 }
 
 // dispatchNotification sends one event to every channel that wants it. The
@@ -106,6 +144,9 @@ func dispatchNotification(e events.Event) {
 	}
 	var wg sync.WaitGroup
 	for _, ch := range chans {
+		if !firstSend(ch, msg, time.Now()) {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -114,6 +155,7 @@ func dispatchNotification(e events.Event) {
 			err := notifySend(ctx, ch, msg)
 			if err != nil {
 				log.Printf("[notify] %s: %v", channelName(ch), err)
+				forgetSent(ch, msg)
 			}
 			recordNotify(ch.ID, err)
 		}()
@@ -156,15 +198,18 @@ type notifyEventInfo struct {
 }
 
 type notifyView struct {
-	Channels   []notifyChannelView `json:"channels"`
-	QuietStart string              `json:"quiet_start"`
-	QuietEnd   string              `json:"quiet_end"`
-	Services   []notify.Service    `json:"services"`
-	Events     []notifyEventInfo   `json:"events"`
+	Channels          []notifyChannelView `json:"channels"`
+	QuietStart        string              `json:"quiet_start"`
+	QuietEnd          string              `json:"quiet_end"`
+	AlmostDoneMinutes int                 `json:"almost_done_minutes"`
+	Services          []notify.Service    `json:"services"`
+	Events            []notifyEventInfo   `json:"events"`
+	FoxTrackAlerts    map[string][]string `json:"foxtrack_alerts"`
 }
 
 func redactNotifications(n *config.Notifications) notifyView {
 	v := notifyView{Channels: []notifyChannelView{}, Services: notify.Services}
+	v.FoxTrackAlerts = foxtrackAlertsView(time.Now())
 	isDefault := map[events.Kind]bool{}
 	for _, k := range events.Default {
 		isDefault[k] = true
@@ -176,6 +221,7 @@ func redactNotifications(n *config.Notifications) notifyView {
 		return v
 	}
 	v.QuietStart, v.QuietEnd = n.QuietStart, n.QuietEnd
+	v.AlmostDoneMinutes = n.AlmostDoneMinutes
 	notifyMu.Lock()
 	defer notifyMu.Unlock()
 	for _, ch := range n.Channels {
@@ -221,10 +267,11 @@ type notifyChannelReq struct {
 }
 
 type notifyReq struct {
-	Channels     *[]notifyChannelReq `json:"channels"` // absent keeps the stored list
-	QuietStart   *string             `json:"quiet_start"`
-	QuietEnd     *string             `json:"quiet_end"`
-	ConfirmClear bool                `json:"confirm_clear_channels"`
+	Channels          *[]notifyChannelReq `json:"channels"` // absent keeps the stored list
+	QuietStart        *string             `json:"quiet_start"`
+	QuietEnd          *string             `json:"quiet_end"`
+	AlmostDoneMinutes *int                `json:"almost_done_minutes"`
+	ConfirmClear      bool                `json:"confirm_clear_channels"`
 }
 
 // badNotify is a mistake in the request, shown to the user as it is.
@@ -318,6 +365,16 @@ func applyNotifications(c *config.Config, req notifyReq) error {
 	}
 	if req.QuietEnd != nil {
 		next.QuietEnd = strings.TrimSpace(*req.QuietEnd)
+	}
+	if req.AlmostDoneMinutes != nil {
+		m := *req.AlmostDoneMinutes
+		if m < 1 {
+			m = 0 // a cleared field: back to the default of 10
+		}
+		if m > 120 {
+			m = 120
+		}
+		next.AlmostDoneMinutes = m
 	}
 	if !notify.ValidClock(next.QuietStart) || !notify.ValidClock(next.QuietEnd) {
 		return badNotify("Quiet hours need times like 22:00 and 07:00.")

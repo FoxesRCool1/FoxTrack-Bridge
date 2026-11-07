@@ -102,6 +102,9 @@ type TelemetryData struct {
 	TotalPrintHours float64   `json:"total_print_hours,omitempty"` // lifetime hours: from printer for Bambu/Klipper, Bridge-tracked otherwise
 	PrinterModel    string    `json:"printer_model,omitempty"`     // e.g. "X1 Carbon", "P1S", "Klipper"
 	ExternalSpool   *AmsSlot  `json:"external_spool,omitempty"`    // Bambu vt_tray, Slot = ExternalSlot; nil until reported
+
+	// ExternalSpool2 is the left (deputy) external spool of a dual-nozzle printer, Slot = ExternalSlot2; nil otherwise.
+	ExternalSpool2 *AmsSlot `json:"external_spool_2,omitempty"`
 	// Alarms is what the printer reports as wrong right now (Bambu HMS and
 	// print_error, Klipper shutdowns, PrusaLink and OctoPrint error text).
 	Alarms []webhook.RelayAlarm `json:"alarms,omitempty"`
@@ -288,6 +291,10 @@ func copyTelemetry(s *TelemetryData) *TelemetryData {
 	if s.ExternalSpool != nil {
 		ext := *s.ExternalSpool
 		c.ExternalSpool = &ext
+	}
+	if s.ExternalSpool2 != nil {
+		ext2 := *s.ExternalSpool2
+		c.ExternalSpool2 = &ext2
 	}
 	if s.Alarms != nil {
 		c.Alarms = append([]webhook.RelayAlarm(nil), s.Alarms...)
@@ -995,7 +1002,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 
 		// Ignore messages that carry no print or system data at all.
 		// msg:1 is a wifi signal heartbeat: silent skip, expected every few seconds.
-		vtTray, hasVtTray := parseVtTray(msg.Payload())
+		vtTray, vtDeputy, hasVtTray := parseVtTray(msg.Payload())
 		hasAlarmKeys := payloadHasAlarmKeys(msg.Payload())
 		hasData := pr.GcodeState != "" || pr.NozzleTemper != nil || pr.BedTemper != nil || pr.NozzleTargetTemper != nil || pr.BedTargetTemper != nil || len(pr.Lights) > 0 || pr.Ams != nil || pr.SpdLvl != 0 || pr.McPercent != nil || pr.McRemainingTime != 0 || hasVtTray || hasAlarmKeys
 		if !hasData {
@@ -1148,7 +1155,8 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		if pr.Ams != nil {
 			trayNow = pr.Ams.TrayNow
 		}
-		extSpool := mergeExternalSpool(prev.ExternalSpool, vtTray, trayNow)
+		extSpool := mergeExternalSpool(ExternalSlot, prev.ExternalSpool, vtTray, trayNow)
+		extSpool2 := mergeExternalSpool(ExternalSlot2, prev.ExternalSpool2, vtDeputy, trayNow)
 
 		// Cooling fan: raw 0-15 → 0-100%. Preserve previous when not reported (0).
 		coolingFanPct := prev.CoolingFanPct
@@ -1190,6 +1198,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			SpeedLevel:      speedLevel,
 			AMS:             amsSlots,
 			ExternalSpool:   extSpool,
+			ExternalSpool2:  extSpool2,
 			ActiveExtruder:  prev.ActiveExtruder,
 			CoolingFanPct:   coolingFanPct,
 			TotalPrintHours: totalPrintHours,

@@ -8,6 +8,11 @@ import _ "embed"
 //go:embed logo.png
 var Logo []byte
 
+// Logo192 is the same icon at 192 px, for the web app manifest.
+//
+//go:embed logo-192.png
+var Logo192 []byte
+
 // Theme-specific rail logos (the FoxTrack web app's header marks): dark ink
 // lines for the light theme, light lines for the dark theme.
 //

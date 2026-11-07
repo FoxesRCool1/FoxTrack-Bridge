@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"foxtrack-bridge/backup"
 	"foxtrack-bridge/config"
 	"foxtrack-bridge/costs"
 	"foxtrack-bridge/history"
@@ -122,13 +123,17 @@ func StartServer(port int) {
 
 	go autoUpdateLoop()
 	go pollBridgeCommands()
+	go backup.Loop()
 	startEventWatcher()
 	runStartupHooks()
 
 	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/logo.png", handleLogo)
+	http.HandleFunc("/logo-192.png", pngHandler(logo192PNG))
 	http.HandleFunc("/logo-light.png", pngHandler(logoLightPNG))
 	http.HandleFunc("/logo-dark.png", pngHandler(logoDarkPNG))
+	http.HandleFunc("/manifest.webmanifest", handleManifest)
+	http.HandleFunc("/favicon.ico", handleFavicon)
 	http.HandleFunc("/tailwind.css", cssHandler(tailwindCSS))
 	http.HandleFunc("/icons.css", cssHandler(iconsCSS))
 	http.HandleFunc("/fonts.css", cssHandler(fontsCSS))
@@ -149,6 +154,7 @@ func StartServer(port int) {
 	http.HandleFunc("/api/logs", handleLogs)                      // GET: SSE log stream
 	http.HandleFunc("/api/history", handleHistory)                // GET all history records
 	http.HandleFunc("/api/history/", handleHistoryByPrinter)      // GET /api/history/{name}
+	http.HandleFunc("POST /api/history/note", handleHistoryNote)  // POST: set a note on one record
 	http.HandleFunc("/api/cloud/", handleCloud)                   // Bambu Cloud account: status, login, verify, token, devices, unlink, retry
 	http.HandleFunc("/api/ai/settings", handleAISettings)         // GET/POST: assistant provider settings
 	http.HandleFunc("/api/ai/models", handleAIModels)             // POST: list a provider's models
@@ -296,6 +302,13 @@ func writeSaveFailed(w http.ResponseWriter, err error) {
 	http.Error(w, "The change is active, but the config file could not be written ("+err.Error()+"). It will be lost when the Bridge restarts.", http.StatusInternalServerError)
 }
 
+// writeSaveRefused answers a change that was not applied because the config
+// file could not be written, so nothing changed in memory either.
+func writeSaveRefused(w http.ResponseWriter, err error) {
+	log.Printf("ERROR: failed to save config: %v", err)
+	http.Error(w, "The settings could not be written to the config file, so nothing was changed ("+err.Error()+").", http.StatusInternalServerError)
+}
+
 // maxRequestBody caps every request body. Nothing the dashboard or FoxTrack
 // sends comes close; the cap only stops a client from exhausting memory.
 const maxRequestBody = 1 << 20
@@ -422,6 +435,21 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func handleLogo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
+	w.Write(logoPNG)
+}
+
+// handleManifest serves the web app manifest so the dashboard can be
+// installed to a phone home screen.
+func handleManifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(manifestJSON)
+}
+
+// handleFavicon serves the main logo as the favicon.
+func handleFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.Write(logoPNG)
 }
 
@@ -988,8 +1016,9 @@ type redactedPrinter struct {
 	HAFileEntity          string `json:"ha_file_entity,omitempty"`
 	HARemainingEntity     string `json:"ha_remaining_entity,omitempty"`
 	OctoPrintURL          string `json:"octoprint_url,omitempty"`
-	// Plug has no secret: the dashboard gets it as stored.
-	Plug *config.Plug `json:"plug,omitempty"`
+	// Plug comes as stored, minus its secrets (local key, password, token).
+	Plug          *config.Plug `json:"plug,omitempty"`
+	PlugSecretSet bool         `json:"plug_secret_set,omitempty"`
 }
 
 // redactedConfig mirrors config.Config with the FoxTrack cloud tokens blanked
@@ -1012,13 +1041,15 @@ type redactedConfig struct {
 // redactedCloud drops the Bambu access token. APIKeySet is what lets the
 // dashboard show "a key is saved" without ever holding one.
 type redactedAI struct {
-	Enabled     bool   `json:"enabled"`
-	Preset      string `json:"preset,omitempty"`
-	BaseURL     string `json:"base_url,omitempty"`
-	Model       string `json:"model,omitempty"`
-	APIKeySet   bool   `json:"api_key_set"`
-	AllowCamera bool   `json:"allow_camera"`
-	Configured  bool   `json:"configured"`
+	Enabled       bool   `json:"enabled"`
+	Preset        string `json:"preset,omitempty"`
+	BaseURL       string `json:"base_url,omitempty"`
+	Model         string `json:"model,omitempty"`
+	APIKeySet     bool   `json:"api_key_set"`
+	AllowCamera   bool   `json:"allow_camera"`
+	WatchFailures bool   `json:"watch_failures"`
+	WatchEveryMin int    `json:"watch_every_min,omitempty"`
+	Configured    bool   `json:"configured"`
 }
 
 // redactAI converts the stored AI settings into the view the dashboard gets.
@@ -1027,13 +1058,15 @@ func redactAI(a *config.AI) *redactedAI {
 		return nil
 	}
 	return &redactedAI{
-		Enabled:     a.Enabled,
-		Preset:      a.Preset,
-		BaseURL:     a.BaseURL,
-		Model:       a.Model,
-		APIKeySet:   a.APIKey != "",
-		AllowCamera: a.AllowCamera,
-		Configured:  a.Configured(),
+		Enabled:       a.Enabled,
+		Preset:        a.Preset,
+		BaseURL:       a.BaseURL,
+		Model:         a.Model,
+		APIKeySet:     a.APIKey != "",
+		AllowCamera:   a.AllowCamera,
+		WatchFailures: a.WatchFailures,
+		WatchEveryMin: a.WatchEveryMin,
+		Configured:    a.Configured(),
 	}
 }
 
@@ -1046,6 +1079,12 @@ type redactedCloud struct {
 }
 
 func redactPrinter(p config.Printer) redactedPrinter {
+	var plug *config.Plug
+	if p.Plug != nil {
+		cp := *p.Plug
+		cp.LocalKey, cp.Password, cp.Token = "", "", ""
+		plug = &cp
+	}
 	return redactedPrinter{
 		ID:           p.ID,
 		Name:         p.Name,
@@ -1068,7 +1107,8 @@ func redactPrinter(p config.Printer) redactedPrinter {
 		HAFileEntity:          p.HAFileEntity,
 		HARemainingEntity:     p.HARemainingEntity,
 		OctoPrintURL:          p.OctoPrintURL,
-		Plug:                  p.Plug,
+		Plug:                  plug,
+		PlugSecretSet:         plugHasSecret(p.Plug),
 	}
 }
 
@@ -1272,6 +1312,7 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 		if p.HomeAssistantToken == "" {
 			p.HomeAssistantToken = prev.HomeAssistantToken
 		}
+		keepPlugSecrets(p.Plug, prev.Plug)
 		// PreviousNames has no redacted-view counterpart, so a client echoing
 		// back the config it was given always omits it. Treat "absent" as "keep"
 		// rather than letting a round-trip drop the rename history.
@@ -1385,6 +1426,8 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		if oldCfg == nil || oldCfg.FoxTrack2APIKey != snapshot.FoxTrack2APIKey {
 			wakeBridgeCommands()
 		}
+		// On purpose: the change stays active and the user is told it was not
+		// written (a read-only config.json must not block every setting).
 		if saveErr != nil {
 			writeSaveFailed(w, saveErr)
 			return
@@ -1707,7 +1750,9 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 	}
 	if edit.Plug != nil {
 		g := *edit.Plug
+		prevPlug := p.Plug
 		p.Plug = normalizePlug(&g)
+		keepPlugSecrets(p.Plug, prevPlug)
 	}
 
 	switch {
@@ -2078,6 +2123,36 @@ func handleHistoryByPrinter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"records": records})
+}
+
+// handleHistoryNote sets the free-form note on one history record.
+// POST /api/history/note with {"printer_name": string, "start_time": number, "note": string}
+func handleHistoryNote(w http.ResponseWriter, r *http.Request) {
+	jsonHeaders(w)
+	var body struct {
+		PrinterName string  `json:"printer_name"`
+		StartTime   float64 `json:"start_time"`
+		Note        string  `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if body.PrinterName == "" || body.StartTime <= 0 {
+		http.Error(w, "printer_name and a positive start_time are required", http.StatusBadRequest)
+		return
+	}
+	note, err := history.SetNote(body.PrinterName, int64(body.StartTime), body.Note)
+	if errors.Is(err, history.ErrNotFound) {
+		http.Error(w, "no such history record", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "note": note})
 }
 
 func isBambuPrinterConfig(p config.Printer) bool {

@@ -29,16 +29,18 @@ var hmsCode = regexp.MustCompile(`^[0-9A-Fa-f]{4}(_[0-9A-Fa-f]{4}){3}$`)
 
 // Labels are the dashboard's names for the event kinds.
 var Labels = map[events.Kind]string{
-	events.PrintStarted:   "Print started",
-	events.PrintPaused:    "Print paused",
-	events.PrintResumed:   "Print resumed",
-	events.PrintFinished:  "Print finished",
-	events.PrintFailed:    "Print failed",
-	events.PrintCancelled: "Print cancelled",
-	events.PrinterError:   "Printer alarm",
-	events.PrinterOffline: "Printer offline",
-	events.PrinterOnline:  "Printer back online",
-	events.MaintenanceDue: "Maintenance due",
+	events.PrintStarted:          "Print started",
+	events.PrintPaused:           "Print paused",
+	events.PrintResumed:          "Print resumed",
+	events.PrintFinished:         "Print finished",
+	events.PrintFailed:           "Print failed",
+	events.PrintCancelled:        "Print cancelled",
+	events.PrinterError:          "Printer alarm",
+	events.PrinterOffline:        "Printer offline",
+	events.PrinterOnline:         "Printer back online",
+	events.MaintenanceDue:        "Maintenance due",
+	events.PrintAlmostDone:       "Almost done",
+	events.PrintFailureSuspected: "Failure spotted by camera watch",
 }
 
 // Duration writes seconds the way the messages do: "2h 14m", "14m", "40s".
@@ -131,16 +133,39 @@ func Compose(e events.Event) Message {
 		if g := grams(); g != "" {
 			add(g + " used")
 		}
-	case events.PrinterError:
-		m.Title = "Printer alarm"
+	case events.PrinterError, events.PrinterAlarmCleared:
+		as := eventAlarms(e)
+		cleared := e.Kind == events.PrinterAlarmCleared
+		switch {
+		case cleared && len(as) == 1:
+			m.Title = "Alarm cleared"
+		case cleared:
+			m.Title = fmt.Sprintf("%d alarms cleared", len(as))
+		case len(as) > 1:
+			m.Title = fmt.Sprintf("%d printer alarms", len(as))
+		default:
+			m.Title = "Printer alarm"
+		}
 		if e.Printer != "" {
 			m.Title += ": " + e.Printer
 		}
-		add(e.Message)
-		if e.Code != "" {
-			add("Code " + e.Code)
-			if hmsCode.MatchString(e.Code) {
-				m.Link = "https://wiki.bambulab.com/en/hms/error-code?code=" + e.Code
+		for i, a := range as {
+			if i == maxAlarmLines {
+				add(fmt.Sprintf("And %d more. The Bridge dashboard lists them all.", len(as)-i))
+				break
+			}
+			add(alarmLine(a))
+		}
+		if cleared {
+			if len(as) == 1 && as[0].Lasted >= time.Minute {
+				add("It lasted " + Duration(int64(as[0].Lasted.Seconds())) + ".")
+			}
+			break
+		}
+		for _, a := range as {
+			if hmsCode.MatchString(a.Code) {
+				m.Link = "https://wiki.bambulab.com/en/hms/error-code?code=" + a.Code
+				break
 			}
 		}
 	case events.PrinterOffline:
@@ -154,6 +179,25 @@ func Compose(e events.Event) Message {
 		m.Title = "Maintenance due"
 		add(e.Printer)
 		add(e.Message)
+	case events.PrintAlmostDone:
+		m.Title = "Almost done"
+		what := e.File
+		if what == "" {
+			what = "the print"
+		}
+		if e.Remaining > 0 {
+			add(fmt.Sprintf("%s: about %d min left on %s.", e.Printer, e.Remaining, what))
+		} else {
+			add(e.Printer + ": the end is near.")
+		}
+	case events.PrintFailureSuspected:
+		m.Title = "Print may have failed"
+		what := e.File
+		if what == "" {
+			what = "the print"
+		}
+		add(fmt.Sprintf("The camera watch thinks %s on %s has failed. Check the printer: the Bridge has not paused it.", what, e.Printer))
+		add(e.Message)
 	case events.Test:
 		m.Title = "Test from FoxTrack Bridge"
 		add("If you can read this, this channel works.")
@@ -163,6 +207,32 @@ func Compose(e events.Event) Message {
 		add(e.Message)
 	}
 	return m
+}
+
+// maxAlarmLines is how many alarms one message lists.
+const maxAlarmLines = 5
+
+// eventAlarms is the event's alarm list; an event made without one (an older
+// caller, a test) counts as one alarm from its Code and Message.
+func eventAlarms(e events.Event) []events.Alarm {
+	if len(e.Alarms) > 0 {
+		return e.Alarms
+	}
+	if e.Code == "" && e.Message == "" {
+		return nil
+	}
+	return []events.Alarm{{Code: e.Code, Message: e.Message, Severity: e.Severity}}
+}
+
+// alarmLine is one alarm in words: "Filament ran out (code 0700_...)".
+func alarmLine(a events.Alarm) string {
+	switch {
+	case a.Message == "":
+		return "Alarm code " + a.Code + ". Check the printer."
+	case a.Code == "":
+		return a.Message
+	}
+	return a.Message + " (code " + a.Code + ")"
 }
 
 // linkText is what the alarm link says.
@@ -257,6 +327,10 @@ func Wants(ch config.NotifyChannel, e events.Event) bool {
 			ok = true
 			break
 		}
+	}
+	if !ok && e.Kind == events.PrinterAlarmCleared {
+		// The all-clear goes wherever the alarm went.
+		return Wants(ch, events.Event{Kind: events.PrinterError, PrinterID: e.PrinterID})
 	}
 	if !ok {
 		return false

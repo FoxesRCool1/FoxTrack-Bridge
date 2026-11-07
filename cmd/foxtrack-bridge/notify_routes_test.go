@@ -27,6 +27,7 @@ func seedNotifications(t *testing.T, n *config.Notifications) {
 	configMutex.Unlock()
 	notifyMu.Lock()
 	notifyLast = map[string]notifyResult{}
+	notifySeen = map[string]time.Time{}
 	notifyMu.Unlock()
 }
 
@@ -87,6 +88,15 @@ func TestNotificationsGETRedactsSecrets(t *testing.T) {
 	}
 	if len(v.Events) != len(events.All) || len(v.Services) != 8 {
 		t.Fatalf("lists: %d events, %d services", len(v.Events), len(v.Services))
+	}
+	found := false
+	for _, e := range v.Events {
+		if e.Kind == "print_almost_done" && e.Label == "Almost done" && !e.Default {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("print_almost_done is opt-in and listed: %+v", v.Events)
 	}
 }
 
@@ -364,5 +374,53 @@ func TestDispatchFiltersQuietHoursAndSharesOneSnapshot(t *testing.T) {
 	dispatchNotification(events.Event{Kind: events.PrinterError, PrinterID: "p1"})
 	if len(sent) != 1 {
 		t.Fatal("an alarm passes quiet hours")
+	}
+}
+
+func TestDispatchRetriesAfterFailedSend(t *testing.T) {
+	stubSnapshot(t, func(config.Printer) ([]byte, error) { return nil, errNoCamera })
+	var calls atomic.Int32
+	stubSend(t, func(ch config.NotifyChannel, m notify.Message) error {
+		if calls.Add(1) == 1 {
+			return errors.New("network blip")
+		}
+		return nil
+	})
+	flaky := config.NotifyChannel{ID: "flaky", Kind: "webhook", URL: "http://x", Enabled: true, Events: []string{"printer_error"}}
+	seedNotifications(t, &config.Notifications{Channels: []config.NotifyChannel{flaky}})
+
+	alarm := events.Event{Kind: events.PrinterError, PrinterID: "p1", Printer: "Fox", Code: "0700_2000_0002_0001", Message: "Jam"}
+	dispatchNotification(alarm) // fails: the note is forgotten
+	dispatchNotification(alarm) // goes through
+	if calls.Load() != 2 {
+		t.Fatalf("after a failed send, sent %d times, want 2", calls.Load())
+	}
+	dispatchNotification(alarm) // delivered: the same words stay suppressed
+	if calls.Load() != 2 {
+		t.Fatalf("after a delivered send, sent %d times, want 2", calls.Load())
+	}
+}
+
+func TestDispatchSameTextOnceAndClearedFollowsAlarm(t *testing.T) {
+	stubSnapshot(t, func(config.Printer) ([]byte, error) { return nil, errNoCamera })
+	var mu sync.Mutex
+	var got []string
+	stubSend(t, func(ch config.NotifyChannel, m notify.Message) error {
+		mu.Lock()
+		got = append(got, ch.ID+":"+m.Title)
+		mu.Unlock()
+		return nil
+	})
+	alarmsOnly := config.NotifyChannel{ID: "a", Kind: "webhook", URL: "http://x", Enabled: true, Events: []string{"printer_error"}}
+	finishedOnly := config.NotifyChannel{ID: "f", Kind: "webhook", URL: "http://x", Enabled: true, Events: []string{"print_finished"}}
+	seedNotifications(t, &config.Notifications{Channels: []config.NotifyChannel{alarmsOnly, finishedOnly}})
+
+	alarm := events.Event{Kind: events.PrinterError, PrinterID: "p1", Printer: "Fox", Code: "0700_2000_0002_0001", Message: "Jam"}
+	dispatchNotification(alarm)
+	dispatchNotification(alarm) // the same words again at once: dropped
+	dispatchNotification(events.Event{Kind: events.PrinterAlarmCleared, PrinterID: "p1", Printer: "Fox", Code: "0700_2000_0002_0001", Message: "Jam"})
+	want := []string{"a:Printer alarm: Fox", "a:Alarm cleared: Fox"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

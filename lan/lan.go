@@ -54,9 +54,19 @@ type sessionEnd struct {
 }
 
 // updateSession applies one poll to the printer's print session and returns
-// the print that this poll ended, if any. pollErr is set when the poll failed;
-// t is then a "disconnected" placeholder and is not trusted.
+// the print that this poll ended, if any. When a print ends, the file Bridge
+// uploaded for it is deleted from the printer (deleteEndedUpload).
 func (c *Controller) updateSession(name string, t *mqttpkg.TelemetryData, pollErr error, now int64) *sessionEnd {
+	end := c.applyPoll(name, t, pollErr, now)
+	if end != nil {
+		c.deleteEndedUpload(name, end.rec.FileName)
+	}
+	return end
+}
+
+// applyPoll is the session bookkeeping behind updateSession. pollErr is set when
+// the poll failed; t is then a "disconnected" placeholder and is not trusted.
+func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr error, now int64) *sessionEnd {
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
 	sess := c.sessions[name]
@@ -201,6 +211,7 @@ type Controller struct {
 	relayQMu       sync.Mutex
 	relayBusy      map[string]bool
 	relayPending   map[string]*relayJob
+	uploaded       map[string]string // printer -> file UploadAndPrint started; guarded by mu
 }
 
 func NewController() *Controller {
@@ -215,6 +226,7 @@ func NewController() *Controller {
 		relayHeld:    map[string]bool{},
 		relayBusy:    map[string]bool{},
 		relayPending: map[string]*relayJob{},
+		uploaded:     map[string]string{},
 	}
 }
 
@@ -691,11 +703,11 @@ func pollErrorText(err error) string {
 	}
 	var ne net.Error
 	if errors.As(err, &ne) && ne.Timeout() {
-		return fmt.Sprintf("Can't reach %s. Check that the printer is on and on the same network.", host)
+		return fmt.Sprintf("Can't reach the printer at %s. Check that it is on and on the same network.", host)
 	}
 	for _, s := range []string{"connection refused", "no route to host", "unreachable", "host is down", "dial tcp", "eof", "reset by peer"} {
 		if strings.Contains(low, s) {
-			return fmt.Sprintf("Can't reach %s. Check that the printer is on and on the same network.", host)
+			return fmt.Sprintf("Can't reach the printer at %s. Check that it is on and on the same network.", host)
 		}
 	}
 	return msg

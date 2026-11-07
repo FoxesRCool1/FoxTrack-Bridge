@@ -349,6 +349,29 @@ func TestUpload_DeletesBeforeStoreSoTheSecondUploadOverwrites(t *testing.T) {
 	}
 }
 
+// Delete sends DELE for the stored file; a 550 (no such file) is not an error.
+func TestDelete_RemovesFileAndToleratesMissing(t *testing.T) {
+	s := newFakeServer(t)
+	path, _ := writeTemp(t, 1000)
+	if err := Upload(context.Background(), s.config(), path, "gone.gcode.3mf"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := deleteFile(context.Background(), s.config(), "gone.gcode.3mf"); err != nil {
+			t.Fatalf("delete %d: %v", i, err)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.stored["gone.gcode.3mf"]; ok {
+		t.Fatal("file still stored after DELE")
+	}
+	got := strings.Join(s.verbs, " | ")
+	if want := "DELE gone.gcode.3mf | STOR gone.gcode.3mf | DELE gone.gcode.3mf | DELE gone.gcode.3mf"; got != want {
+		t.Fatalf("verbs = %s, want %s", got, want)
+	}
+}
+
 // The 227 reply names a host that does not exist; only the port may be used.
 func TestUpload_PASVHostIsIgnored(t *testing.T) {
 	s := newFakeServer(t)

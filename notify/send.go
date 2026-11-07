@@ -389,8 +389,12 @@ func sendTelegram(ctx context.Context, ch config.NotifyChannel, m Message) error
 	}
 	text := m.Telegram()
 	chat := strings.TrimSpace(ch.Target)
+	quiet := "false"
+	if m.Event.Kind.Silent() {
+		quiet = "true" // arrives without a sound
+	}
 	if m.Snapshot != nil {
-		fields := map[string]string{"chat_id": chat}
+		fields := map[string]string{"chat_id": chat, "disable_notification": quiet}
 		// A caption holds 1024 characters; a longer message follows the photo.
 		if len([]rune(text)) <= 1024 {
 			fields["caption"], fields["parse_mode"] = text, "HTML"
@@ -400,7 +404,11 @@ func sendTelegram(ctx context.Context, ch config.NotifyChannel, m Message) error
 			return err
 		}
 	}
-	return call("sendMessage", map[string]string{"chat_id": chat, "text": trunc(text, 4000), "parse_mode": "HTML"}, nil)
+	// No link preview: the alarm link would add a large card to every alarm.
+	return call("sendMessage", map[string]string{
+		"chat_id": chat, "text": trunc(text, 4000), "parse_mode": "HTML",
+		"disable_notification": quiet, "link_preview_options": `{"is_disabled":true}`,
+	}, nil)
 }
 
 func telegramCheck(r reply) error {
@@ -428,14 +436,17 @@ func header(s string) string {
 var ntfyTags = map[events.Kind]string{
 	events.PrintStarted: "arrow_forward", events.PrintPaused: "pause_button", events.PrintResumed: "arrow_forward",
 	events.PrintFinished: "white_check_mark", events.PrintFailed: "x", events.PrintCancelled: "stop_button",
-	events.PrinterError: "rotating_light", events.PrinterOffline: "electric_plug", events.PrinterOnline: "electric_plug",
-	events.MaintenanceDue: "wrench",
+	events.PrinterError: "rotating_light", events.PrinterAlarmCleared: "white_check_mark",
+	events.PrinterOffline: "electric_plug", events.PrinterOnline: "electric_plug", events.MaintenanceDue: "wrench",
+	events.PrintAlmostDone: "hourglass_half", events.PrintFailureSuspected: "warning",
 }
 
 func sendNtfy(ctx context.Context, ch config.NotifyChannel, m Message) error {
 	prio := "default"
-	if m.Event.Kind.Urgent() && m.Event.Kind != events.Test {
+	if m.Event.Kind.Loud() {
 		prio = "high"
+	} else if m.Event.Kind.Silent() {
+		prio = "low"
 	}
 	tag := ntfyTags[m.Event.Kind]
 	if tag == "" {
@@ -486,8 +497,10 @@ func sendPushover(ctx context.Context, ch config.NotifyChannel, m Message) error
 	if m.Event.Time.IsZero() {
 		delete(fields, "timestamp")
 	}
-	if m.Event.Kind.Urgent() && m.Event.Kind != events.Test {
+	if m.Event.Kind.Loud() {
 		fields["priority"] = "1"
+	} else if m.Event.Kind.Silent() {
+		fields["priority"] = "-1" // no sound or vibration
 	}
 	if m.Link != "" {
 		fields["url"], fields["url_title"] = m.Link, linkText
@@ -528,8 +541,10 @@ func sendPushover(ctx context.Context, ch config.NotifyChannel, m Message) error
 
 func sendGotify(ctx context.Context, ch config.NotifyChannel, m Message) error {
 	prio := 5
-	if m.Event.Kind.Urgent() && m.Event.Kind != events.Test {
+	if m.Event.Kind.Loud() {
 		prio = 8
+	} else if m.Event.Kind.Silent() {
+		prio = 2 // Gotify's Android app shows 1-3 without a sound
 	}
 	payload := map[string]any{"title": m.Title, "message": m.Body(), "priority": prio}
 	if m.Link != "" {
@@ -554,6 +569,14 @@ type webhookRecord struct {
 	PercentAtEnd int     `json:"percent_at_end,omitempty"`
 }
 
+// webhookAlarm is one alarm of a printer_error or printer_alarm_cleared event.
+type webhookAlarm struct {
+	Code       string `json:"code,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Severity   string `json:"severity,omitempty"`
+	LastedSecs int64  `json:"lasted_seconds,omitempty"`
+}
+
 // WebhookPayload is the JSON a "webhook" channel receives.
 type WebhookPayload struct {
 	Event     string         `json:"event"`
@@ -567,6 +590,7 @@ type WebhookPayload struct {
 	Message   string         `json:"message,omitempty"`
 	Code      string         `json:"code,omitempty"`
 	Severity  string         `json:"severity,omitempty"`
+	Alarms    []webhookAlarm `json:"alarms,omitempty"`
 	Record    *webhookRecord `json:"record,omitempty"`
 	Snapshot  string         `json:"snapshot_base64,omitempty"`
 }
@@ -581,6 +605,9 @@ func sendWebhook(ctx context.Context, ch config.NotifyChannel, m Message) error 
 		Event: string(e.Kind), Time: t.UTC().Format(time.RFC3339), Title: m.Title, Text: m.Body(),
 		PrinterID: e.PrinterID, Printer: e.Printer, File: e.File, Progress: e.Progress,
 		Message: e.Message, Code: e.Code, Severity: e.Severity,
+	}
+	for _, a := range e.Alarms {
+		p.Alarms = append(p.Alarms, webhookAlarm{a.Code, a.Message, a.Severity, int64(a.Lasted.Seconds())})
 	}
 	if r := e.Record; r != nil {
 		p.Record = &webhookRecord{Result: r.Result, StartedAt: r.StartTime, EndedAt: r.EndTime, DurationSec: r.Duration, FilamentG: r.TotalGrams(), PercentAtEnd: r.PercentAtEnd}

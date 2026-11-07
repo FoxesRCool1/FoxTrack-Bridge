@@ -41,8 +41,8 @@ func TestPollErrorText(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"timeout", timeoutErr, "Can't reach " + host + "."},
-		{"refused", refusedErr, "Can't reach 127.0.0.1."},
+		{"timeout", timeoutErr, "Can't reach the printer at " + host + "."},
+		{"refused", refusedErr, "Can't reach the printer at 127.0.0.1."},
 		{"web page", pageErr, "not like the printer's software"},
 		{"bad key", errors.New("HTTP 401"), errMoonKey.Error()},
 		{"forbidden", errors.New("HTTP 403"), errMoonKey.Error()},

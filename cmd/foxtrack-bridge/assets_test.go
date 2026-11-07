@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -170,6 +171,54 @@ func TestUIReferencesThemeLogos(t *testing.T) {
 // The dashboard follows the FoxTrack design tokens (bg-panel, text-text-2,
 // border-border, bg-brand …). A Tailwind palette colour or a white/black
 // utility would not follow the theme, so none may creep back in.
+func TestManifestHandler(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/manifest.webmanifest", nil)
+	handleManifest(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/manifest+json" {
+		t.Errorf("Content-Type = %q, want application/manifest+json", ct)
+	}
+	var m struct {
+		Name  string `json:"name"`
+		Icons []struct {
+			Src string `json:"src"`
+		} `json:"icons"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+		t.Fatalf("manifest is not valid JSON: %v", err)
+	}
+	if m.Name != "FoxTrack Bridge" {
+		t.Errorf("name = %q, want %q", m.Name, "FoxTrack Bridge")
+	}
+	if len(m.Icons) == 0 {
+		t.Error("manifest has no icons")
+	}
+}
+
+func TestFaviconHandler(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+	handleFavicon(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("Content-Type = %q, want image/png", ct)
+	}
+	if !bytes.HasPrefix(rec.Body.Bytes(), []byte("\x89PNG")) {
+		t.Error("favicon body is not a PNG (bad magic)")
+	}
+}
+
+func TestUIReferencesManifest(t *testing.T) {
+	if !bytes.Contains(uiHTML, []byte(`rel="manifest"`)) {
+		t.Error(`ui.html missing rel="manifest" link`)
+	}
+}
+
 func TestUIUsesNoPaletteColors(t *testing.T) {
 	re := regexp.MustCompile(`\b(?:bg|text|border|ring|from|to|divide)-(?:zinc|gray|slate|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|white|black)(?:-\d+)?(?:/\d+)?\b`)
 	if m := re.FindAll(uiHTML, -1); len(m) > 0 {
