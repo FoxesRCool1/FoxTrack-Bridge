@@ -1,90 +1,104 @@
 # Changelog
 
-## Unreleased
+## v2.6.1
 
-**New**
-- Notifications: an "Alarm cleared" message once a printer's alarms have been
-  gone for 2 minutes. It goes to every channel that gets alarms, without a
-  sound where the service allows it (Telegram, ntfy, Pushover, Gotify), and
-  gets through quiet hours like the alarm did.
-- More smart plugs, all over the LAN: TP-Link Tapo (current and older
-  firmware) and newer Kasa firmware, Tuya / Smart Life (protocol 3.3 to 3.5),
+**Printing**
+
+- There's a print queue now. From the Start a print dialog, line up files
+  that are already on the printer, then reorder or remove them on the
+  printer's card. Once you've cleared the bed, press **Start next**. The
+  Bridge never starts a queued print by itself. The queue is saved in
+  `queue.json`, next to `config.json`.
+- Add a note to any print in History. Notes are kept in `history.json` and
+  come along in the CSV export.
+- Camera failure watch (Settings, Assistant, experimental). While a printer
+  prints, the assistant looks at its camera every few minutes and tells you
+  if the print looks failed twice in a row. It never pauses the print. You
+  need an AI provider that can read images, and camera access turned on.
+
+**Smart plugs**
+
+- Lots more plugs work over the LAN: TP-Link Tapo (current and older
+  firmware), newer Kasa firmware, Tuya / Smart Life (protocol 3.3 to 3.5),
   Meross (with or without the key, encrypted models too), Sonoff in DIY mode,
-  ESPHome, myStrom (with its API token), WiZ, and any switch in Home Assistant.
-  The plug form shows setup help for each type, and the in-app help has a
-  setup article per brand. Plug passwords, keys and tokens are never sent
-  to the dashboard.
-- Print queue: line up files that are already on a printer from the Start a
-  print dialog, reorder or remove them on the printer's card, and start the
-  next one with **Start next** once you have cleared the bed. The Bridge
-  never starts a queued print by itself. The queue lives in `queue.json` next
-  to `config.json`.
-- Share links (Settings, Security): a read-only page with one printer's
-  progress, temperatures and, if you allow it, a camera picture, for anyone
-  with the link who can reach the Bridge. No controls and no other printers.
-  Only a hash of each link is stored, and a link can be revoked at any time.
-- Back up and restore (Settings, General): download printers and settings as
-  one file, or restore them from it or from a `config.json`. The current
-  settings are saved next to `config.json` first. The dashboard password, API
-  tokens, share links, Bambu account and assistant key are never in the file.
-  A restore never changes the first four, and keeps the assistant key unless
-  the backup uses a different AI provider. A FoxTrack key the file does not
-  have is kept too.
-- Daily copies of `config.json` and `history.json` in a `backups` folder next
-  to them; the last 7 of each are kept.
-- An "Almost done" notification, sent once per print when the time left drops
-  to a set number of minutes (10 by default). Off until you tick it on a
-  channel.
-- Camera failure watch (Settings, Assistant, experimental): while a printer
-  prints, the assistant looks at its camera every few minutes and sends a
-  notification if the print looks failed twice in a row. It never pauses a
-  print. Needs an AI provider that reads images and camera access turned on.
-- Notes on prints in History, kept in `history.json` and exported in the CSV.
-- Bulk actions in the command menu (Ctrl+K): pause every printing printer,
-  resume every paused one, and turn off the plugs of idle printers whose
-  nozzle has cooled. Each asks first and lists the printers.
-- The dashboard can be added to a phone's home screen and opens like an app.
+  ESPHome, myStrom (with its API token), WiZ, and any switch in Home
+  Assistant.
+- The plug form shows setup help for each type, and the in-app help has a
+  setup article for each brand.
+- Plug passwords, keys and tokens never go to the dashboard.
 
-**Improved**
-- Notifications send less: all the alarms a printer raises at once arrive as
-  one message (worst first, five listed); a flickering alarm sends at most one
-  "cleared" in 30 minutes; a printer that drops off again within 30 minutes of
-  coming back is reported offline only after 15 minutes; the same text never
-  goes to one channel twice within 2 minutes.
-- Telegram messages have no link preview card, and print started, resumed,
-  back online and alarm cleared arrive without a sound. ntfy, Pushover and
-  Gotify send those at low priority.
+**Notifications**
+
+- You'll get an "Alarm cleared" message once a printer's alarms have been
+  gone for 2 minutes. It goes everywhere the alarm went, gets through quiet
+  hours like the alarm did, and is silent where the service allows it
+  (Telegram, ntfy, Pushover, Gotify).
+- New "Almost done" alert, sent once per print when the time left drops to
+  a number of minutes you pick (10 by default). It's off until you tick it
+  on a channel.
+- Far less noise. All the alarms a printer raises at once now come as one
+  message, worst first, with up to five listed. A flickering alarm sends at
+  most one "cleared" every 30 minutes. If a printer drops off again within
+  30 minutes of coming back, you only hear about it after 15 minutes. And
+  one channel never gets the same text twice within 2 minutes.
+- Telegram messages have no link preview card anymore. Print started,
+  resumed, back online and alarm cleared arrive without a sound. ntfy,
+  Pushover and Gotify send those at low priority.
+- If your Bridge is linked to FoxTrack, the Notifications tab tells you
+  which alerts FoxTrack already sends (to Telegram, say), so you can turn
+  each one on in one place only. FoxTrack's Alerts card does the same for
+  the Bridge.
 - The webhook payload lists every alarm of the event in `alarms`.
-- Dashboard browser notifications: a second open tab no longer shows a
-  second copy.
-- The Notifications tab of a Bridge linked to FoxTrack says that FoxTrack can
-  send the same alerts, so each is best turned on in one place only.
-- The Notifications tab names the alerts FoxTrack already sends (to Telegram,
-  for example), so you can turn each one on in one place only. FoxTrack's
-  Alerts card does the same for the Bridge.
-- The sign-in page and share pages follow the dashboard's language.
-- The in-app help (what the assistant reads) covers the print queue, share
-  links, backups, notes and the camera watch.
+- With two dashboard tabs open, you no longer get each browser notification
+  twice.
 
-**Fixed**
-- A Bambu print sent from FoxTrack is reported as started only once the
-  printer leaves the preparing stage. An AMS mapping error or any other stop
-  during heat-up now comes back to FoxTrack as a failure with the printer's
-  reason, instead of the print counting as started.
-- The file the Bridge sends to a printer for a FoxTrack print is deleted once
-  that print ends: `foxtrack-print.gcode.3mf` from a Bambu printer's storage
-  (30 seconds after the end, unless the printer is printing again) and the
-  uploaded file from a Klipper printer's gcodes folder. Files you started
-  yourself are left alone.
-- Setting the filament of an AMS HT slot, and of both external spools of an
-  H2D, H2D Pro, H2C or X2D, works. Both external spools show on the card.
-- Event names in the notification settings and the sign-in page were not
+**Sharing and backups**
+
+- Share links (Settings, Security). A share link opens a read-only page for
+  one printer: progress, temperatures and, if you allow it, a camera picture.
+  Anyone with the link who can reach the Bridge can see it, but they get no
+  controls and no other printers. The Bridge only stores a hash of each link,
+  and you can revoke one at any time.
+- Back up and restore (Settings, General). Download your printers and
+  settings as one file, and restore from it or from a `config.json`. Before
+  a restore, the Bridge saves your current settings next to `config.json`.
+  The dashboard password, API tokens, share links, Bambu account and
+  assistant key are never in the file. A restore never touches the first
+  four. It keeps your assistant key unless the backup uses a different AI
+  provider, and it keeps a FoxTrack key the file doesn't have.
+- Every day the Bridge copies `config.json` and `history.json` into a
+  `backups` folder next to them, and keeps the last 7 of each.
+
+**Dashboard**
+
+- Bulk actions in the command menu (Ctrl+K): pause every printing printer,
+  resume every paused one, or turn off the plugs of idle printers whose
+  nozzle has cooled. Each one asks first and lists the printers.
+- Add the dashboard to your phone's home screen and it opens like an app.
+- The sign-in page and share pages use the dashboard's language.
+- The in-app help (which the assistant reads too) covers the print queue,
+  share links, backups, notes and the camera watch.
+
+**Fixes**
+
+- A Bambu print sent from FoxTrack now counts as started only once the
+  printer is past the preparing stage. If it stops during heat-up (an AMS
+  mapping error, for example), FoxTrack gets a failure with the printer's
+  reason instead of a print that looks started.
+- The Bridge cleans up the file it sent for a FoxTrack print once that print
+  ends. On a Bambu printer it deletes `foxtrack-print.gcode.3mf` 30 seconds
+  after the end, unless the printer is printing again. On Klipper it deletes
+  the uploaded file from the gcodes folder. Files you started yourself are
+  left alone.
+- You can set the filament of an AMS HT slot, and of both external spools on
+  an H2D, H2D Pro, H2C or X2D. Both external spools show on the card.
+- Event names in the notification settings and on the sign-in page weren't
   translated.
-- A smart plug's auto off that fails (the plug was busy or did not answer) is
-  tried again on the next check, instead of leaving the printer on until the
-  next print. A plug is never asked two things at once.
-- A notification that failed to send is no longer held back as a duplicate
-  when the same event comes again within 2 minutes.
+- When a smart plug's auto off failed (the plug was busy or didn't answer),
+  the printer stayed on until the next print. Now it tries again on the next
+  check, and a plug is never asked two things at once.
+- A notification that failed to send could be held back as a duplicate if
+  the same event came again within 2 minutes.
 
 ## v2.6.0
 
