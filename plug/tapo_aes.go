@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -113,11 +114,68 @@ func tapoErrorCode(v map[string]json.RawMessage) int {
 	return code
 }
 
+// tapoNow is the clock for the login-failure cache; tests replace it.
+var tapoNow = time.Now
+
+// loginFailTTL is how long a rejected login is remembered, so a wrong password
+// is not retried on every poll and the account is not locked out.
+const loginFailTTL = 5 * time.Minute
+
+type loginFail struct {
+	err   error
+	until time.Time
+}
+
+var (
+	loginFailMu sync.Mutex
+	loginFails  = map[string]loginFail{}
+)
+
+// tapoLoginKey identifies a login by host and a SHA-256 of the credentials, so
+// the password itself is never kept in memory as a map key.
+func tapoLoginKey(host, user, pass string) string {
+	h := sha256.Sum256([]byte(user + "\x00" + pass))
+	return host + "|" + hex.EncodeToString(h[:])
+}
+
+// cachedLoginFail returns the error of a recent rejected login, or nil.
+func cachedLoginFail(key string) error {
+	loginFailMu.Lock()
+	defer loginFailMu.Unlock()
+	f, ok := loginFails[key]
+	if !ok {
+		return nil
+	}
+	if !tapoNow().Before(f.until) {
+		delete(loginFails, key)
+		return nil
+	}
+	return f.err
+}
+
+// rememberLoginFail stores a credential rejection for loginFailTTL.
+func rememberLoginFail(key string, err error) {
+	loginFailMu.Lock()
+	defer loginFailMu.Unlock()
+	loginFails[key] = loginFail{err: err, until: tapoNow().Add(loginFailTTL)}
+}
+
+// forgetLoginFail drops any cached rejection once a login succeeds.
+func forgetLoginFail(key string) {
+	loginFailMu.Lock()
+	defer loginFailMu.Unlock()
+	delete(loginFails, key)
+}
+
 // tapoAESLogin runs the handshake, then login_device with the user's login
 // (both login versions), then the default Tapo login.
 func tapoAESLogin(ctx context.Context, host, user, pass string) (*tapoAESSession, error) {
 	if _, _, err := net.SplitHostPort(host); err != nil {
 		host = net.JoinHostPort(host, "80")
+	}
+	key := tapoLoginKey(host, user, pass)
+	if err := cachedLoginFail(key); err != nil {
+		return nil, err
 	}
 	priv, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
@@ -166,9 +224,11 @@ func tapoAESLogin(ctx context.Context, host, user, pass string) (*tapoAESSession
 				return nil, errKlapBadReply
 			}
 			s.token = tok.Token
+			forgetLoginFail(key)
 			return s, nil
 		}
 	}
+	rememberLoginFail(key, errKlapLogin)
 	return nil, errKlapLogin
 }
 

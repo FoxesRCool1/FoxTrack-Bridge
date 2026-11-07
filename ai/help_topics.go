@@ -313,7 +313,7 @@ Tuya / Smart Life (also sold under many other names that use the Smart Life or T
 
 Meross: the address; leave the key blank, most Meross plugs answer without it. Newer models that encrypt their local traffic need the Meross key and the plug's MAC address (on its label or in the Meross app's device info; on Linux the Bridge finds the MAC itself). The key belongs to your Meross account; Home Assistant's meross_lan shows it, or run "pip install meross_iot" and then: python -c "import asyncio; from meross_iot.http_api import MerossHttpClient as C; print(asyncio.run(C.async_from_user_password(api_base_url='https://iotx-eu.meross.com', email='YOUR EMAIL', password='YOUR PASSWORD')).cloud_credentials.key)".
 
-Sonoff: works in DIY mode (firmware 3.5 or later), which takes the plug off the eWeLink cloud; Itead's DIY instructions for each model show how to turn it on. A Sonoff in its normal eWeLink mode encrypts its local traffic and "Check plug" says so. DIY mode has no power reading: for watts, flash the plug with Tasmota or ESPHome, or add it through Home Assistant.
+Sonoff: works in DIY mode (firmware 3.5 or later), which takes the plug off the eWeLink cloud; Itead's DIY instructions for each model show how to turn it on. A Sonoff in its normal eWeLink mode encrypts its local traffic and "Check plug" says so. If you type no port, the Bridge uses 8081, the DIY mode port. DIY mode has no power reading: for watts, flash the plug with Tasmota or ESPHome, or add it through Home Assistant.
 
 ESPHome (Athom plugs ship with it): only the address, as long as the device YAML has "web_server:". The Bridge finds the relay and the power sensor itself; type their names only if it picks the wrong ones, and the login only if the web server has one.
 

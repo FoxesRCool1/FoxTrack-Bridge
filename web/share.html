@@ -35,7 +35,6 @@
         .status[data-tone="warn"] { color: var(--warning); }
         .status[data-tone="bad"] { color: var(--danger); }
         .muted { color: var(--text-2); font-size: .875rem; }
-        .file { margin: 12px 0 0; overflow-wrap: anywhere; }
         .bar { height: 8px; border-radius: 99px; background: var(--panel); margin: 14px 0 8px; overflow: hidden; }
         .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
         .temps { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
@@ -57,7 +56,6 @@
             <span class="status" id="status">Connecting…</span>
             <span class="muted" id="remaining"></span>
         </div>
-        <p class="file" id="file" hidden></p>
         <div id="progressWrap" hidden>
             <div class="bar" role="progressbar" aria-label="Print progress" aria-valuemin="0" aria-valuemax="100" id="bar"><div id="barFill"></div></div>
             <span class="muted" id="percent"></span>
@@ -147,21 +145,21 @@
     }
     function render(s) {
         $('name').textContent = s.name || T('Printer');
-        document.title = (s.name || 'Printer') + ' · FoxTrack Bridge';
+        document.title = (s.name || T('Printer')) + ' · FoxTrack Bridge';
         var l = labels[s.status] || [s.status || 'Unknown', ''];
         $('status').textContent = T(l[0]);
         $('status').setAttribute('data-tone', l[1]);
         var active = s.status === 'printing' || s.status === 'paused';
-        $('file').hidden = !(active && s.file_name);
-        $('file').textContent = s.file_name || '';
         $('progressWrap').hidden = !active;
         var pct = Math.max(0, Math.min(100, s.progress || 0));
         $('barFill').style.width = pct + '%';
         $('bar').setAttribute('aria-valuenow', String(pct));
         $('percent').textContent = pct + '%';
         $('remaining').textContent = active ? remaining(s.time_remaining) : '';
-        $('nozzle').textContent = temp(s.nozzle_temp, s.nozzle_target);
-        $('bed').textContent = temp(s.bed_temp, s.bed_target);
+        // Offline: no reading, not a real 0 degrees.
+        var live = s.status !== 'disconnected' && s.status !== 'connecting';
+        $('nozzle').textContent = live ? temp(s.nozzle_temp, s.nozzle_target) : '–';
+        $('bed').textContent = live ? temp(s.bed_temp, s.bed_target) : '–';
         $('cam').hidden = !s.camera;
         if (s.camera && !camTimer) { refreshCam(); camTimer = setInterval(refreshCam, 10000); }
         if (!s.camera && camTimer) { clearInterval(camTimer); camTimer = null; }
@@ -181,6 +179,8 @@
                     clearInterval(timer);
                     if (camTimer) clearInterval(camTimer);
                     $('cam').hidden = true;
+                    $('updated').textContent = '';
+                    $('progressWrap').hidden = true;
                 } else {
                     $('updated').textContent = T('Cannot reach the Bridge. Retrying…');
                 }

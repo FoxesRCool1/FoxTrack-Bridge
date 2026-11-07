@@ -294,6 +294,7 @@ func (m *Manager) poll(name string) {
 	}
 
 	turnOff := false
+	var armedAt time.Time // pendingOff before it is cleared, to re-arm on a failed switch
 	// No status (printer link down) changes nothing: it is not a print end.
 	if haveStatus {
 		e.known, e.knownAt, e.lastNozzleC = true, m.now(), nozzle
@@ -311,6 +312,7 @@ func (m *Manager) poll(name string) {
 				// Due now. A plug that is off or unreachable has nothing to
 				// cut, and must not be cut later when it is switched on by hand.
 				turnOff = e.on && e.reachable
+				armedAt = e.pendingOff
 				e.pendingOff = time.Time{}
 			}
 		}
@@ -336,6 +338,12 @@ func (m *Manager) poll(name string) {
 		cancel()
 		if err != nil {
 			log.Printf("[plug/%s] auto off failed: %v", name, err)
+			// Re-arm so the next poll retries, unless the plug changed meanwhile.
+			m.mu.Lock()
+			if cur, ok := m.plugs[name]; ok && cur == e && cur.cfg == cfg && !cur.inPrint {
+				cur.pendingOff = armedAt
+			}
+			m.mu.Unlock()
 			return
 		}
 		log.Printf("[plug/%s] plug turned off after the print (auto off, %d min idle, nozzle %.0f C)", name, int(cfg.Delay().Minutes()), nozzle)

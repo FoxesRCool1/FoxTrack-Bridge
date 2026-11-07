@@ -103,7 +103,10 @@
             if (!failed.length) {
                 toast(countText(text.done, done.length), 'info');
             } else {
-                toast(fill('Failed: {0}', failed.map(p => p.name).join(', ')), 'error');
+                const failedNames = failed.map(p => p.name).join(', ');
+                toast(done.length
+                    ? fill('Done: {0}. Failed: {1}', done.map(p => p.name).join(', '), failedNames)
+                    : fill('Failed: {0}', failedNames), 'error');
             }
         });
     }

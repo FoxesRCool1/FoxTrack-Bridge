@@ -77,6 +77,11 @@
   H2D, H2D Pro, H2C or X2D, works. Both external spools show on the card.
 - Event names in the notification settings and the sign-in page were not
   translated.
+- A smart plug's auto off that fails (the plug was busy or did not answer) is
+  tried again on the next check, instead of leaving the printer on until the
+  next print. A plug is never asked two things at once.
+- A notification that failed to send is no longer held back as a duplicate
+  when the same event comes again within 2 minutes.
 
 ## v2.6.0
 

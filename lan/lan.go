@@ -703,11 +703,11 @@ func pollErrorText(err error) string {
 	}
 	var ne net.Error
 	if errors.As(err, &ne) && ne.Timeout() {
-		return fmt.Sprintf("Can't reach %s. Check that the printer is on and on the same network.", host)
+		return fmt.Sprintf("Can't reach the printer at %s. Check that it is on and on the same network.", host)
 	}
 	for _, s := range []string{"connection refused", "no route to host", "unreachable", "host is down", "dial tcp", "eof", "reset by peer"} {
 		if strings.Contains(low, s) {
-			return fmt.Sprintf("Can't reach %s. Check that the printer is on and on the same network.", host)
+			return fmt.Sprintf("Can't reach the printer at %s. Check that it is on and on the same network.", host)
 		}
 	}
 	return msg

@@ -289,6 +289,36 @@ func TestAutoOff_PendingClearedWhenPlugOffOrSwitchedOnByHand(t *testing.T) {
 	}
 }
 
+func TestAutoOff_FailedSwitchIsRetriedOnNextPoll(t *testing.T) {
+	m, reading, _, now := fakeManager(t)
+	addNoLoop(m, plugged(true))
+	inPrint := true
+	m.SetStatusSource(func(string) (bool, float64, bool) { return inPrint, 30, true })
+	reading.On = true
+	m.poll("P1") // printing
+	inPrint = false
+	m.poll("P1") // print ended: the wait starts
+	*now = now.Add(3 * time.Minute)
+
+	calls := 0
+	m.switchF = func(_ context.Context, _ config.Plug, on bool) error {
+		calls++
+		if calls == 1 {
+			return errors.New("plug offline")
+		}
+		reading.On = on
+		return nil
+	}
+	m.poll("P1") // due, but the switch fails
+	if m.plugs["P1"].pendingOff.IsZero() {
+		t.Fatalf("pendingOff cleared after a failed switch")
+	}
+	m.poll("P1") // retried
+	if calls != 2 || m.plugs["P1"].on {
+		t.Fatalf("calls = %d, on = %v; want the retry to switch off", calls, m.plugs["P1"].on)
+	}
+}
+
 func TestAutoOff_RechecksRightBeforeSwitching(t *testing.T) {
 	m, _, switches, now := fakeManager(t)
 	addNoLoop(m, plugged(true))

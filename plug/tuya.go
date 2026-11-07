@@ -107,14 +107,17 @@ func tuyaDo(ctx context.Context, host string, g config.Plug, fn func(*tuyaConn) 
 	} else if v, ok := tuyaDetected.Load(id); ok {
 		versions = []string{v.(string)}
 	}
-	// Auto-detect gives each version 2.5 s, so all three fit in the 8 s
-	// plug check even when a plug ignores a wrong version instead of hanging up.
+	// Auto-detect gives each version 1.5 s, so all three tries fit in the 5 s
+	// poll even when a plug ignores a wrong version instead of hanging up.
 	wait := requestTimeout
 	if len(versions) > 1 {
-		wait = 2500 * time.Millisecond
+		wait = 1500 * time.Millisecond
 	}
 	var firstErr error
 	for _, v := range versions {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		err := tuyaSession(ctx, host, id, key, v, wait, fn)
 		if err == nil {
 			if g.Version == "" {
@@ -397,10 +400,16 @@ func (t *tuyaConn) set(on bool) error {
 		if err := tuyaBodyErr(body); err != nil {
 			return err
 		}
-		if cmd == tuyaControl || cmd == tuyaControlNew || cmd == tuyaStatus {
+		if isControlAck(cmd) {
 			return nil
 		}
 	}
+}
+
+// isControlAck reports whether a frame command is the ack for a control
+// request. Plain status pushes are not acks and must be skipped.
+func isControlAck(cmd uint32) bool {
+	return cmd == tuyaControl || cmd == tuyaControlNew
 }
 
 var errTuyaDevice22 = errors.New("tuya: data unvalid")

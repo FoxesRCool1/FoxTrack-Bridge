@@ -302,6 +302,13 @@ func writeSaveFailed(w http.ResponseWriter, err error) {
 	http.Error(w, "The change is active, but the config file could not be written ("+err.Error()+"). It will be lost when the Bridge restarts.", http.StatusInternalServerError)
 }
 
+// writeSaveRefused answers a change that was not applied because the config
+// file could not be written, so nothing changed in memory either.
+func writeSaveRefused(w http.ResponseWriter, err error) {
+	log.Printf("ERROR: failed to save config: %v", err)
+	http.Error(w, "The settings could not be written to the config file, so nothing was changed ("+err.Error()+").", http.StatusInternalServerError)
+}
+
 // maxRequestBody caps every request body. Nothing the dashboard or FoxTrack
 // sends comes close; the cap only stops a client from exhausting memory.
 const maxRequestBody = 1 << 20
@@ -1419,6 +1426,8 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		if oldCfg == nil || oldCfg.FoxTrack2APIKey != snapshot.FoxTrack2APIKey {
 			wakeBridgeCommands()
 		}
+		// On purpose: the change stays active and the user is told it was not
+		// written (a read-only config.json must not block every setting).
 		if saveErr != nil {
 			writeSaveFailed(w, saveErr)
 			return

@@ -77,6 +77,10 @@ func queueLoadLocked() {
 			}
 			log.Printf("[queue] queue.json did not parse (%v); moved it to %s", err, filepath.Base(bak))
 		}
+		if printQueue.byPrinter == nil {
+			// The file held the JSON literal null.
+			printQueue.byPrinter = map[string][]queueItem{}
+		}
 	}
 	printQueue.loaded = true
 }
@@ -86,6 +90,21 @@ var errQueueUnreadable = errors.New("queue.json could not be read, so the queue 
 func queueSaveLocked() error {
 	if !printQueue.loaded {
 		return errQueueUnreadable
+	}
+	// Queues of printers that were removed, and empty queues, are not written.
+	// With no printers configured (not loaded yet), every queue is kept.
+	known := map[string]bool{}
+	configMutex.RLock()
+	if configStore != nil {
+		for _, p := range configStore.Printers {
+			known[p.ID] = true
+		}
+	}
+	configMutex.RUnlock()
+	for id, items := range printQueue.byPrinter {
+		if len(items) == 0 || (len(known) > 0 && !known[id]) {
+			delete(printQueue.byPrinter, id)
+		}
 	}
 	data, err := json.MarshalIndent(printQueue.byPrinter, "", "  ")
 	if err != nil {

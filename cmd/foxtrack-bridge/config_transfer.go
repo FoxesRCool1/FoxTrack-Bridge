@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -144,6 +146,13 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 	if err := rejectNewlyIntroducedDuplicateNames(nil, cfg.Printers); err != nil {
 		return nil, err
 	}
+	var oldPrinters []config.Printer
+	if old != nil {
+		oldPrinters = old.Printers
+	}
+	if err := rejectNewlyBlankNames(oldPrinters, cfg.Printers); err != nil {
+		return nil, err
+	}
 	for i := range cfg.Printers {
 		cfg.Printers[i].Plug = normalizePlug(cfg.Printers[i].Plug)
 	}
@@ -165,6 +174,7 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 			cfg.AI.APIKey = ""
 		}
 	}
+	mergeVirtualPrinter(cfg, old, cfg.VirtualPrinter != nil)
 	return cfg, nil
 }
 
@@ -194,7 +204,7 @@ func saveBeforeImport(cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name := "config.json.before-import-" + time.Now().Format("20060102-150405")
+	name := "config.json.before-import-" + time.Now().Format("20060102-150405.000")
 	dir := config.ConfigDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
@@ -202,7 +212,30 @@ func saveBeforeImport(cfg *config.Config) (string, error) {
 	if err := config.WriteFileAtomic(filepath.Join(dir, name), data, 0600); err != nil {
 		return "", err
 	}
+	pruneBeforeImportFiles(dir, 5)
 	return name, nil
+}
+
+// pruneBeforeImportFiles keeps the newest keep "before-import" copies in dir
+// and removes the rest. Failures are logged, never returned.
+func pruneBeforeImportFiles(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Printf("ERROR: could not list %s to prune old imports: %v", dir, err)
+		return
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "config.json.before-import-") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	for i := 0; i < len(names)-keep; i++ {
+		if err := os.Remove(filepath.Join(dir, names[i])); err != nil {
+			log.Printf("ERROR: could not remove old import copy %s: %v", names[i], err)
+		}
+	}
 }
 
 func handleConfigImport(w http.ResponseWriter, r *http.Request) {
@@ -244,19 +277,19 @@ func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not save a copy of the current settings first, so nothing was changed ("+err.Error()+").", http.StatusInternalServerError)
 		return
 	}
-	configStore = newCfg
 	snapshot := newCfg.Clone()
+	if saveErr := config.SaveConfig(snapshot); saveErr != nil {
+		configMutex.Unlock()
+		writeSaveRefused(w, saveErr)
+		return
+	}
+	configStore = newCfg
 	configMutex.Unlock()
 
 	syncPrinterConnections(oldCfg, snapshot)
 	applyImportedMQTTExport(snapshot)
-	saveErr := config.SaveConfig(snapshot)
 	if oldCfg == nil || oldCfg.FoxTrack2APIKey != snapshot.FoxTrack2APIKey {
 		wakeBridgeCommands()
-	}
-	if saveErr != nil {
-		writeSaveFailed(w, saveErr)
-		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":   "ok",

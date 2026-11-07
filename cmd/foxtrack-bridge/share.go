@@ -33,6 +33,8 @@ const (
 	// shareStillTTL is how long one camera still is reused, so several people
 	// watching a link do not each open a camera connection to the printer.
 	shareStillTTL = 10 * time.Second
+	// shareStillFailTTL is how long a failed camera fetch is remembered.
+	shareStillFailTTL = 5 * time.Second
 )
 
 func init() {
@@ -97,6 +99,7 @@ func handleShares(w http.ResponseWriter, r *http.Request) {
 		}
 		tok := sharePrefix + base64.RawURLEncoding.EncodeToString(raw)
 		link := config.ShareLink{ID: randomHex(8), Name: name, PrinterID: req.PrinterID, Camera: req.Camera, Hash: sha256Hex(tok), Hint: tok[len(tok)-4:], CreatedAt: time.Now().Unix()}
+		added := false
 		err := mutateConfig(func(c *config.Config) error {
 			found := false
 			for _, p := range c.Printers {
@@ -118,9 +121,29 @@ func handleShares(w http.ResponseWriter, r *http.Request) {
 				return errors.New("There are already 20 share links. Revoke one first.")
 			}
 			c.Security.Shares = append(c.Security.Shares, link)
+			added = true
 			return nil
 		})
 		if err != nil {
+			if added {
+				// The save failed, so the link must not stay live in memory.
+				if rbErr := mutateConfig(func(c *config.Config) error {
+					if c.Security != nil {
+						kept := c.Security.Shares[:0:0]
+						for _, s := range c.Security.Shares {
+							if s.ID != link.ID {
+								kept = append(kept, s)
+							}
+						}
+						c.Security.Shares = kept
+					}
+					return nil
+				}); rbErr != nil {
+					log.Printf("[share] rollback after failed save: %v", rbErr)
+				}
+				writeSaveRefused(w, err)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -193,7 +216,6 @@ func shareLookup(tok string) (config.ShareLink, config.Printer, bool) {
 type shareStatus struct {
 	Name          string  `json:"name"`
 	Status        string  `json:"status"`
-	FileName      string  `json:"file_name,omitempty"`
 	Progress      int     `json:"progress"`
 	TimeRemaining int     `json:"time_remaining"`
 	NozzleTemp    float64 `json:"nozzle_temp"`
@@ -214,7 +236,6 @@ func shareStatusFor(link config.ShareLink, p config.Printer) shareStatus {
 		return out
 	}
 	out.Status = t.Status
-	out.FileName = t.FileName
 	out.Progress = int(t.Progress)
 	out.TimeRemaining = int(t.TimeRemaining)
 	out.NozzleTemp, out.NozzleTarget = t.NozzleTemp, t.NozzleTarget
@@ -223,32 +244,53 @@ func shareStatusFor(link config.ShareLink, p config.Printer) shareStatus {
 	return out
 }
 
+// shareStills holds one entry per printer. The global mutex only guards the
+// map; each entry's own mutex is held while its camera is fetched.
 var shareStills struct {
 	sync.Mutex
-	byPrinter map[string]shareStill
+	byPrinter map[string]*shareStill
 }
+
+var shareSnapshot = printerSnapshot
 
 type shareStill struct {
+	sync.Mutex
 	at  time.Time
 	jpg []byte
+	err error
 }
 
-// ponytail: one lock for all printers, so two shared printers' stills are
-// fetched one after the other; per-printer locks if that ever matters.
+// shareCameraStill returns a cached still or fetches a new one. A failure is
+// remembered for shareStillFailTTL, so a dead camera is not retried on every
+// request, but a caller that gave up does not poison the cache.
 func shareCameraStill(ctx context.Context, p config.Printer) ([]byte, error) {
 	shareStills.Lock()
-	defer shareStills.Unlock()
-	if s, ok := shareStills.byPrinter[p.ID]; ok && time.Since(s.at) < shareStillTTL {
+	if shareStills.byPrinter == nil {
+		shareStills.byPrinter = map[string]*shareStill{}
+	}
+	s := shareStills.byPrinter[p.ID]
+	if s == nil {
+		s = &shareStill{}
+		shareStills.byPrinter[p.ID] = s
+	}
+	shareStills.Unlock()
+
+	s.Lock()
+	defer s.Unlock()
+	if s.err != nil && time.Since(s.at) < shareStillFailTTL {
+		return nil, s.err
+	}
+	if s.err == nil && s.jpg != nil && time.Since(s.at) < shareStillTTL {
 		return s.jpg, nil
 	}
-	jpg, err := printerSnapshot(ctx, p)
+	jpg, err := shareSnapshot(ctx, p)
 	if err != nil {
+		if ctx.Err() == nil {
+			s.at, s.jpg, s.err = time.Now(), nil, err
+		}
 		return nil, err
 	}
-	if shareStills.byPrinter == nil {
-		shareStills.byPrinter = map[string]shareStill{}
-	}
-	shareStills.byPrinter[p.ID] = shareStill{at: time.Now(), jpg: jpg}
+	s.at, s.jpg, s.err = time.Now(), jpg, nil
 	return jpg, nil
 }
 

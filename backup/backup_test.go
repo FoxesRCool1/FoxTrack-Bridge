@@ -42,7 +42,7 @@ func fileMode(t *testing.T, path string) os.FileMode {
 
 func TestFirstRunCreatesBothCopies(t *testing.T) {
 	dir := t.TempDir()
-	write(t, filepath.Join(dir, "config.json"), `{"a":1}`)
+	write(t, filepath.Join(dir, "config.json"), `{"printers":[]}`)
 	write(t, filepath.Join(dir, "history.json"), `[]`)
 
 	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
@@ -66,7 +66,7 @@ func TestFirstRunCreatesBothCopies(t *testing.T) {
 
 func TestSecondRunSameDayChangesNothing(t *testing.T) {
 	dir := t.TempDir()
-	write(t, filepath.Join(dir, "config.json"), `{"a":1}`)
+	write(t, filepath.Join(dir, "config.json"), `{"printers":[]}`)
 	write(t, filepath.Join(dir, "history.json"), `[]`)
 
 	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
@@ -82,7 +82,7 @@ func TestSecondRunSameDayChangesNothing(t *testing.T) {
 	firstMtime := info.ModTime()
 
 	// Change the source after the first run: the skip must keep the old copy.
-	write(t, filepath.Join(dir, "config.json"), `{"a":2}`)
+	write(t, filepath.Join(dir, "config.json"), `{"printers":[{"id":2}]}`)
 
 	again := now.Add(2 * time.Hour)
 	if err := Run(dir, again); err != nil {
@@ -100,8 +100,8 @@ func TestSecondRunSameDayChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read copy: %v", err)
 	}
-	if string(data) != `{"a":1}` {
-		t.Errorf("copy content = %q, want the original %q", data, `{"a":1}`)
+	if string(data) != `{"printers":[]}` {
+		t.Errorf("copy content = %q, want the original %q", data, `{"printers":[]}`)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestPruneKeepsNewestSeven(t *testing.T) {
 		write(t, filepath.Join(backups, "config-"+d+".json"), "c")
 		write(t, filepath.Join(backups, "history-"+d+".json"), "h")
 	}
-	write(t, filepath.Join(dir, "config.json"), `{"a":1}`)
+	write(t, filepath.Join(dir, "config.json"), `{"printers":[]}`)
 	write(t, filepath.Join(dir, "history.json"), `[]`)
 
 	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
@@ -147,7 +147,7 @@ func TestPruneKeepsNewestSeven(t *testing.T) {
 
 func TestMissingHistoryIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
-	write(t, filepath.Join(dir, "config.json"), `{"a":1}`)
+	write(t, filepath.Join(dir, "config.json"), `{"printers":[]}`)
 
 	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
 	if err := Run(dir, now); err != nil {
@@ -174,7 +174,7 @@ func TestUnrelatedFilesAreNeverDeleted(t *testing.T) {
 		d := time.Date(2026, 10, 1+i, 0, 0, 0, 0, time.Local).Format("2006-01-02")
 		write(t, filepath.Join(backups, "config-"+d+".json"), "c")
 	}
-	write(t, filepath.Join(dir, "config.json"), `{"a":1}`)
+	write(t, filepath.Join(dir, "config.json"), `{"printers":[]}`)
 
 	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
 	if err := Run(dir, now); err != nil {
@@ -182,5 +182,81 @@ func TestUnrelatedFilesAreNeverDeleted(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(backups, "notes.txt")); err != nil {
 		t.Errorf("notes.txt was deleted: %v", err)
+	}
+}
+
+func TestGarbageConfigIsNotBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "config.json"), `not json`)
+	write(t, filepath.Join(dir, "history.json"), `[]`)
+
+	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
+	if err := Run(dir, now); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	backups := filepath.Join(dir, "backups")
+	if got := listCopies(t, backups, "config-"); len(got) != 0 {
+		t.Errorf("config copies = %v, want none", got)
+	}
+	date := now.Format("2006-01-02")
+	if _, err := os.Stat(filepath.Join(backups, "history-"+date+".json")); err != nil {
+		t.Errorf("history copy not made: %v", err)
+	}
+}
+
+func TestEmptyConfigFileIsNotBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	backups := filepath.Join(dir, "backups")
+	if err := os.MkdirAll(backups, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// 7 good older config copies; a bad copy must not push them out.
+	for i := 0; i < 7; i++ {
+		d := time.Date(2026, 10, 1+i, 0, 0, 0, 0, time.Local).Format("2006-01-02")
+		write(t, filepath.Join(backups, "config-"+d+".json"), `{"printers":[]}`)
+	}
+	write(t, filepath.Join(dir, "config.json"), ``)
+
+	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
+	if err := Run(dir, now); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	names := listCopies(t, backups, "config-")
+	if len(names) != 7 {
+		t.Errorf("config copies = %d (%v), want the 7 older ones kept", len(names), names)
+	}
+	if _, err := os.Stat(filepath.Join(backups, "config-"+now.Format("2006-01-02")+".json")); !os.IsNotExist(err) {
+		t.Errorf("empty config copy should not exist, stat err = %v", err)
+	}
+}
+
+func TestConfigWithoutPrintersIsNotBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "config.json"), `{"a":1}`)
+
+	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
+	if err := Run(dir, now); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := listCopies(t, filepath.Join(dir, "backups"), "config-"); len(got) != 0 {
+		t.Errorf("config copies = %v, want none", got)
+	}
+}
+
+func TestUnreadableConfigDoesNotStopHistory(t *testing.T) {
+	dir := t.TempDir()
+	// A directory named config.json makes ReadFile fail with a non-not-exist error.
+	if err := os.Mkdir(filepath.Join(dir, "config.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "history.json"), `[]`)
+
+	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.Local)
+	if err := Run(dir, now); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	date := now.Format("2006-01-02")
+	if _, err := os.Stat(filepath.Join(dir, "backups", "history-"+date+".json")); err != nil {
+		t.Errorf("history copy not made: %v", err)
 	}
 }

@@ -5,15 +5,172 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"foxtrack-bridge/config"
 )
+
+// blockConfigFile points the config dir at a fresh temp dir in which
+// config.json is a directory, so SaveConfig cannot rename its file into place
+// while the dir itself (and the before-import copy) can still be written.
+func blockConfigFile(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(config.ConfigDir(), "config.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveConfigImport_RefusesBlankPrinterName(t *testing.T) {
+	old := transferConfig()
+	_, err := resolveConfigImport(old, []byte(`{"printers":[{"name":"Solo","ip":"10.0.0.2"},{"name":"   ","ip":"10.0.0.3"}]}`), false)
+	if !errors.Is(err, errBlankPrinterName) {
+		t.Fatalf("err = %v, want errBlankPrinterName", err)
+	}
+}
+
+func TestConfigImport_BlankPrinterNameIs400AndKeepsConfig(t *testing.T) {
+	old := transferConfig()
+	configMutex.Lock()
+	saved := configStore
+	configStore = old
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		configStore = saved
+		configMutex.Unlock()
+	})
+
+	req := httptest.NewRequest("POST", "/api/config/import", strings.NewReader(`{"printers":[{"name":" "}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handleConfigImport(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if configStore != old {
+		t.Fatalf("configStore changed by a refused import")
+	}
+}
+
+func TestResolveConfigImport_KeepsVirtualPrinterWhenAbsent(t *testing.T) {
+	old := transferConfig()
+	old.VirtualPrinter = &config.VirtualPrinter{Enabled: true, Port: 8091, APIKey: "vp-key"}
+	got, err := resolveConfigImport(old, []byte(`{"printers":[{"name":"Solo","ip":"10.0.0.2"}]}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.VirtualPrinter == nil || got.VirtualPrinter.APIKey != "vp-key" || !got.VirtualPrinter.Enabled {
+		t.Fatalf("virtual printer = %+v, want the current one kept", got.VirtualPrinter)
+	}
+}
+
+func TestConfigImport_SaveFailureKeepsOldConfig(t *testing.T) {
+	blockConfigFile(t)
+	old := transferConfig()
+	configMutex.Lock()
+	saved := configStore
+	configStore = old
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		configStore = saved
+		configMutex.Unlock()
+	})
+
+	req := httptest.NewRequest("POST", "/api/config/import", strings.NewReader(`{"printers":[{"name":"Solo","ip":"10.0.0.2"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handleConfigImport(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if configStore != old {
+		t.Fatalf("a failed save must leave the old config in memory")
+	}
+}
+
+func TestSaveBeforeImport_PrunesOldCopies(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := config.ConfigDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var fakes []string
+	for i := 1; i <= 7; i++ {
+		name := fmt.Sprintf("config.json.before-import-202601%02d-000000.000", i)
+		fakes = append(fakes, name)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	name, err := saveBeforeImport(&config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	present := map[string]bool{}
+	copies := 0
+	for _, e := range entries {
+		present[e.Name()] = true
+		if strings.HasPrefix(e.Name(), "config.json.before-import-") {
+			copies++
+		}
+	}
+	if copies != 5 {
+		t.Fatalf("before-import copies = %d, want 5", copies)
+	}
+	if !present[name] {
+		t.Fatalf("the copy just written (%s) was pruned", name)
+	}
+	for _, f := range fakes[:3] {
+		if present[f] {
+			t.Errorf("old copy %s was not pruned", f)
+		}
+	}
+	for _, f := range fakes[3:] {
+		if !present[f] {
+			t.Errorf("recent copy %s was pruned", f)
+		}
+	}
+	if !present["notes.txt"] {
+		t.Fatalf("an unrelated file was removed")
+	}
+}
+
+func TestSaveBeforeImport_NamesDifferWithinASecond(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	first, err := saveBeforeImport(&config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	second, err := saveBeforeImport(&config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("two restores gave the same copy name %s", first)
+	}
+}
 
 func transferConfig() *config.Config {
 	return &config.Config{

@@ -118,6 +118,7 @@
         .btn-primary:disabled, .btn-outline:disabled, .btn-ghost:disabled, .btn-danger:disabled, .chip:disabled { opacity: .4; cursor: default; pointer-events: none; }
         .btn-icon { width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 0; background: transparent; color: var(--text-2); font-size: 1rem; cursor: pointer; }
         .btn-icon:hover { background: var(--panel); color: var(--text); }
+        .tap-32 { min-width: 2rem; min-height: 2rem; }
         /* Selectable chips (fan and speed levels): a border, never a fill. */
         .chip { height: 1.625rem; padding: 0 .625rem; font-size: .6875rem; border-radius: 9999px; border-color: var(--border); color: var(--text-2); }
         .chip:hover { background: var(--panel); color: var(--text); }
@@ -187,6 +188,10 @@
         /* Phones: stat tiles drop their icon, cards drop the printer type
            chip, so the numbers and the printer name keep their room. */
         @media (max-width: 640px) { .stat-icon { display: none !important; } }
+        /* Phones: three stat tiles and three temperature tiles across must not overflow; long words wrap. */
+        #statCardsRow > div { min-width: 0; }
+        #statCardsRow p { overflow-wrap: anywhere; }
+        @media (max-width: 480px) { .temp-tiles > div { min-width: 0; } .temp-tiles p { white-space: normal; overflow-wrap: anywhere; } }
         @media (max-width: 480px) { .type-badge { display: none; } }
         /* The external spool sits apart from the AMS slots. */
         .ams-ext { border-left: 1px solid var(--border); padding-left: .5rem; margin-left: .25rem; }
@@ -557,7 +562,7 @@
                     </div>
                     <p id="plugHelp" class="hidden text-xs leading-relaxed text-text-2"></p>
                     <div id="plugAutoOffRow" class="hidden flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-                        <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" id="pPlugAutoOff" class="w-4 h-4 rounded"> Turn off after a print</label>
+                        <label class="inline-flex items-center gap-2 cursor-pointer tap-32"><input type="checkbox" id="pPlugAutoOff" class="w-4 h-4 rounded"> Turn off after a print</label>
                         <span class="inline-flex items-center gap-1.5 text-text-2 whitespace-nowrap">Wait <input type="number" id="pPlugDelay" min="1" max="240" value="10" class="field py-1 text-sm" style="width:4.5rem" aria-label="Minutes to wait"> min, once cool</span>
                     </div>
                     <p id="plugTestResult" class="hidden text-xs leading-relaxed" role="status" aria-live="polite"></p>
@@ -3265,6 +3270,13 @@ async function queueMoveEncoded(enc, itemId, to) {
 
 async function queueRemoveEncoded(enc, itemId) {
     const id = decodePrinterId(enc);
+    const item = (queueMap[id] || []).find(i => String(i.id) === String(itemId));
+    const ok = await confirmDialog({
+        title: 'Remove from queue',
+        body: fill('Remove {0} from the queue?', item ? item.file_name : itemId),
+        confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     try {
         await apiFetch('/api/queue/' + encodeURIComponent(id) + '/' + encodeURIComponent(itemId), { method: 'DELETE' });
     } catch (e) { toast(friendlyError(e.message), 'error'); }
@@ -4038,7 +4050,7 @@ function cardInnerHTML(printer, live) {
         + '</div>'
         + '<p data-no-i18n class="file-name text-[11px] text-text-2 truncate mb-1' + (file ? '' : ' hidden') + '" title="' + escHtml(file) + '">' + escHtml(file) + '</p>'
         + '<div class="progress-wrap w-full bg-border rounded-full h-1.5 mt-3 overflow-hidden' + ((status==='printing'||status==='paused') ? '' : ' hidden') + '"><div class="progress-fill h-1.5 rounded-full bg-brand transition-all duration-500" style="width:' + progress + '%"></div></div>'
-        + '<div class="grid grid-cols-3 gap-2 mt-3">'
+        + '<div class="grid grid-cols-3 gap-2 mt-3 temp-tiles">'
         + '<div class="rounded-md border border-border px-3 py-2">'
         + '<p class="nozzle-label text-[11px] text-text-2">' + (live && live.active_extruder ? 'Active toolhead' : 'Nozzle') + '</p>'
         + tempValueP('nozzle-value', nozzle, nozzleTgt)
@@ -4493,7 +4505,8 @@ async function restoreFromFile(file) {
         }
         const out = await res.json();
         input.value = '';
-        toast(fill('Restored {0} printers', out.printers == null ? n : out.printers));
+        const restored = out.printers == null ? n : out.printers;
+        toast(restored === 1 ? 'Restored 1 printer' : fill('Restored {0} printers', restored));
         await loadConfig();
         await pollStatus();
     } catch (e) {

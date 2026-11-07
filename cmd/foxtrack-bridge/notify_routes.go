@@ -93,6 +93,17 @@ func firstSend(ch config.NotifyChannel, m notify.Message, now time.Time) bool {
 	return true
 }
 
+// forgetSent drops the note firstSend made, so a send that failed does not
+// suppress the next identical message. The test button is never recorded.
+func forgetSent(ch config.NotifyChannel, m notify.Message) {
+	if m.Event.Kind == events.Test {
+		return
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	delete(notifySeen, ch.ID+"\x00"+m.Plain())
+}
+
 // dispatchNotification sends one event to every channel that wants it. The
 // camera is read once, only if a matching channel can use the picture, and
 // shared by all of them.
@@ -144,6 +155,7 @@ func dispatchNotification(e events.Event) {
 			err := notifySend(ctx, ch, msg)
 			if err != nil {
 				log.Printf("[notify] %s: %v", channelName(ch), err)
+				forgetSent(ch, msg)
 			}
 			recordNotify(ch.ID, err)
 		}()

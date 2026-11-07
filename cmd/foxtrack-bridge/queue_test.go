@@ -161,6 +161,76 @@ func TestQueue_StartNext(t *testing.T) {
 	}
 }
 
+func TestQueue_NullFileLoadsEmpty(t *testing.T) {
+	withQueue(t)
+	os.MkdirAll(config.ConfigDir(), 0700)
+	os.WriteFile(queuePath(), []byte("null"), 0600)
+	code, q := queueCall(t, "POST", "/api/queue/p1", `{"file_name":"a.3mf"}`)
+	if code != 200 {
+		t.Fatalf("add to a null queue.json: %d", code)
+	}
+	if names(q["p1"]) != "a.3mf" {
+		t.Fatalf("queue = %s", names(q["p1"]))
+	}
+}
+
+func readSavedQueues(t *testing.T) (string, map[string][]queueItem) {
+	t.Helper()
+	data, err := os.ReadFile(queuePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string][]queueItem
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	return string(data), saved
+}
+
+func TestQueue_SaveDropsRemovedPrinters(t *testing.T) {
+	withQueue(t)
+	configMutex.Lock()
+	configStore.Printers = []config.Printer{{ID: "p1", Name: "Monsieur"}}
+	configMutex.Unlock()
+	printQueue.Lock()
+	printQueue.loaded = true
+	printQueue.byPrinter = map[string][]queueItem{
+		"p1":   {{ID: "1", FileName: "a.3mf"}},
+		"gone": {{ID: "2", FileName: "b.3mf"}},
+	}
+	err := queueSaveLocked()
+	printQueue.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, saved := readSavedQueues(t)
+	if len(saved) != 1 || names(saved["p1"]) != "a.3mf" {
+		t.Fatalf("saved queues = %s", raw)
+	}
+}
+
+func TestQueue_SaveKeepsAllWithoutPrinters(t *testing.T) {
+	withQueue(t)
+	configMutex.Lock()
+	configStore.Printers = nil
+	configMutex.Unlock()
+	printQueue.Lock()
+	printQueue.loaded = true
+	printQueue.byPrinter = map[string][]queueItem{
+		"p1":   {{ID: "1", FileName: "a.3mf"}},
+		"gone": {{ID: "2", FileName: "b.3mf"}},
+	}
+	err := queueSaveLocked()
+	printQueue.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, saved := readSavedQueues(t)
+	if len(saved) != 2 {
+		t.Fatalf("saved queues = %s", raw)
+	}
+}
+
 func TestQueue_CorruptFileMovedAside(t *testing.T) {
 	withQueue(t)
 	os.MkdirAll(config.ConfigDir(), 0700)

@@ -290,14 +290,14 @@ async function refreshGlobalHistory() {
                 const isExtra = i >= 5;
                 const TEMP_CHART_LABEL = 'Temperature chart';
                 const tempsBtn = hasSamples
-                    ? '<button onclick="toggleTempChart(\'' + uid + '\')" class="inline-flex items-center gap-1 rounded-full border border-border text-text-2 hover:text-text hover:bg-panel p-1 text-[11px]" title="' + TEMP_CHART_LABEL + '" aria-label="' + TEMP_CHART_LABEL + '"><i class="fas fa-chart-line"></i></button>'
+                    ? '<button onclick="toggleTempChart(\'' + uid + '\')" class="inline-flex items-center gap-1 rounded-full border border-border text-text-2 hover:text-text hover:bg-panel tap-32 justify-center text-[11px]" title="' + TEMP_CHART_LABEL + '" aria-label="' + TEMP_CHART_LABEL + '"><i class="fas fa-chart-line"></i></button>'
                     : '';
-                const noteBtn = '<button onclick="toggleNoteEdit(event, \'' + uid + '\')" class="inline-flex items-center gap-1 rounded-full border border-border text-text-2 hover:text-text hover:bg-panel p-1 text-[11px]" title="Edit note" aria-label="Edit note"><i class="fas fa-pencil"></i></button>';
+                const noteBtn = '<button onclick="toggleNoteEdit(event, \'' + uid + '\')" class="inline-flex items-center gap-1 rounded-full border border-border text-text-2 hover:text-text hover:bg-panel tap-32 justify-center text-[11px]" title="Edit note" aria-label="Edit note"><i class="fas fa-pencil"></i></button>';
                 const dataRowClass = 'border-t border-border hover:bg-panel' + (isExtra ? ' hist-data-extra hidden' : '');
                 const chartRowClass = 'hidden border-t border-border bg-panel' + (isExtra ? ' hist-chart-extra' : '');
                 const extraAttr = isExtra ? ' data-extra-for="' + enc + '"' : '';
                 const noteLine = r.note
-                    ? '<span class="block text-[11px] text-text-2 truncate mt-0.5" title="' + escHtml(r.note) + '">' + escHtml(r.note) + '</span>'
+                    ? '<span data-hist-note class="block text-[11px] text-text-2 truncate mt-0.5" title="' + escHtml(r.note) + '">' + escHtml(r.note) + '</span>'
                     : '';
                 const dataRow = '<tr id="hr-' + uid + '" class="' + dataRowClass + '"' + extraAttr + '>'
                     + '<td class="py-2 pl-4 pr-3 text-text max-w-[160px]" data-no-i18n><span class="block truncate" title="' + escHtml(r.file_name) + '">' + escHtml(r.file_name||'-') + '</span>' + noteLine + '</td>'

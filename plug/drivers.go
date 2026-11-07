@@ -45,6 +45,7 @@ func Read(ctx context.Context, g config.Plug) (Reading, error) {
 	if err != nil {
 		return Reading{}, err
 	}
+	defer lockPlug(plugKey(g, host))()
 	switch strings.ToLower(strings.TrimSpace(g.Kind)) {
 	case config.PlugShelly:
 		return shellyRead(ctx, host)
@@ -78,6 +79,7 @@ func Switch(ctx context.Context, g config.Plug, on bool) error {
 	if err != nil {
 		return err
 	}
+	defer lockPlug(plugKey(g, host))()
 	switch strings.ToLower(strings.TrimSpace(g.Kind)) {
 	case config.PlugShelly:
 		return shellySwitch(ctx, host, on)
@@ -103,6 +105,27 @@ func Switch(ctx context.Context, g config.Plug, on bool) error {
 		return esphomeSwitch(ctx, host, g, on)
 	}
 	return errBadKind
+}
+
+// plugLocks holds one *sync.Mutex per device key. A plug takes one TCP client
+// or one KLAP session at a time, so Read, Switch and the poll loop must not overlap.
+var plugLocks sync.Map
+
+// lockPlug waits for the device's lock and returns the func that releases it.
+func lockPlug(host string) func() {
+	v, _ := plugLocks.LoadOrStore(host, &sync.Mutex{})
+	m := v.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
+}
+
+// plugKey is the lock key. HA plugs share one Home Assistant host but are
+// independent of each other, so each is keyed by its own address.
+func plugKey(g config.Plug, host string) string {
+	if strings.ToLower(strings.TrimSpace(g.Kind)) == config.PlugHA {
+		return g.Address
+	}
+	return host
 }
 
 // hostOf accepts "192.168.1.80", "192.168.1.80:80", "http://plug.local" and

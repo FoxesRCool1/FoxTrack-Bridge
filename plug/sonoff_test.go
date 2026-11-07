@@ -187,3 +187,18 @@ func TestSonoffNoAnswer(t *testing.T) {
 		t.Errorf("err = %v, want %v", err, errNoAnswer)
 	}
 }
+
+func TestSonoffAddr(t *testing.T) {
+	cases := map[string]string{
+		"x":        "x:8081",
+		"x:80":     "x:80",
+		"[::1]":    "[::1]:8081",
+		"[::1]:80": "[::1]:80",
+		"::1":      "[::1]:8081",
+	}
+	for host, want := range cases {
+		if got := sonoffAddr(host); got != want {
+			t.Errorf("sonoffAddr(%q) = %q, want %q", host, got, want)
+		}
+	}
+}

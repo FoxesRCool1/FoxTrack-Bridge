@@ -20,6 +20,37 @@ func twoPrinters() []config.Printer {
 	}
 }
 
+// A settings save that cannot be written still applies (a read-only
+// config.json must not block every setting) and says it was not written.
+func TestHandleConfig_SaveFailureAppliesAndWarns(t *testing.T) {
+	blockConfigFile(t)
+	old := transferConfig()
+	configMutex.Lock()
+	saved := configStore
+	configStore = old
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		configStore = saved
+		configMutex.Unlock()
+	})
+
+	req := httptest.NewRequest("POST", "/api/config", strings.NewReader(`{"auto_update":true}`))
+	rec := httptest.NewRecorder()
+	handleConfig(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "lost when the Bridge restarts") {
+		t.Fatalf("the answer must say the change was not written: %s", rec.Body.String())
+	}
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if !configStore.AutoUpdate || len(configStore.Printers) != len(old.Printers) {
+		t.Fatalf("the change must be active and the printers kept")
+	}
+}
+
 // Settings save with empty local printer state must NOT clear printers:
 // the new client omits the "printers" key entirely -> existing list is kept.
 func TestResolveConfigUpdate_OmittedPrintersPreservesExisting(t *testing.T) {

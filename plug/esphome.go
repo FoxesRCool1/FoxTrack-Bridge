@@ -19,11 +19,12 @@ import (
 // --- ESPHome (web_server REST API and /events stream) ---
 
 var (
-	errESPHomeLogin    = errors.New("The ESPHome web server needs a login: enter its username and password.")
-	errESPHomeNoWeb    = errors.New("This ESPHome device has no web server. Add web_server: to its YAML.")
-	errESPHomeNoSwitch = errors.New("The ESPHome device has no switch. Check that web_server is enabled in its YAML.")
-	errESPHomeRefused  = errors.New("The ESPHome device refused the switch command.")
-	errESPHomeFormat   = errors.New("The ESPHome device sent a reply the Bridge does not understand.")
+	errESPHomeLogin        = errors.New("The ESPHome web server needs a login: enter its username and password.")
+	errESPHomeNoWeb        = errors.New("This ESPHome device has no web server. Add web_server: to its YAML.")
+	errESPHomeNoSwitch     = errors.New("The ESPHome device has no switch. Check that web_server is enabled in its YAML.")
+	errESPHomeManySwitches = errors.New("This ESPHome device has several switches. Type the switch name in Entity.")
+	errESPHomeRefused      = errors.New("The ESPHome device refused the switch command.")
+	errESPHomeFormat       = errors.New("The ESPHome device sent a reply the Bridge does not understand.")
 )
 
 const (
@@ -236,9 +237,10 @@ func esphomeDiscover(ctx context.Context, host string, g config.Plug) (switchPat
 	case len(switches) == 1:
 		sw = &switches[0]
 	default:
+		// Several switches: take an obvious plug name, never guess (it could be an LED).
 		sw = esphomeKeyword(switches, "relay", "power", "plug", "socket", "outlet")
 		if sw == nil {
-			sw = &switches[0]
+			return "", "", errESPHomeManySwitches
 		}
 	}
 	var pw *esphomeEntity

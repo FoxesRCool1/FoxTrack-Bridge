@@ -377,6 +377,30 @@ func TestDispatchFiltersQuietHoursAndSharesOneSnapshot(t *testing.T) {
 	}
 }
 
+func TestDispatchRetriesAfterFailedSend(t *testing.T) {
+	stubSnapshot(t, func(config.Printer) ([]byte, error) { return nil, errNoCamera })
+	var calls atomic.Int32
+	stubSend(t, func(ch config.NotifyChannel, m notify.Message) error {
+		if calls.Add(1) == 1 {
+			return errors.New("network blip")
+		}
+		return nil
+	})
+	flaky := config.NotifyChannel{ID: "flaky", Kind: "webhook", URL: "http://x", Enabled: true, Events: []string{"printer_error"}}
+	seedNotifications(t, &config.Notifications{Channels: []config.NotifyChannel{flaky}})
+
+	alarm := events.Event{Kind: events.PrinterError, PrinterID: "p1", Printer: "Fox", Code: "0700_2000_0002_0001", Message: "Jam"}
+	dispatchNotification(alarm) // fails: the note is forgotten
+	dispatchNotification(alarm) // goes through
+	if calls.Load() != 2 {
+		t.Fatalf("after a failed send, sent %d times, want 2", calls.Load())
+	}
+	dispatchNotification(alarm) // delivered: the same words stay suppressed
+	if calls.Load() != 2 {
+		t.Fatalf("after a delivered send, sent %d times, want 2", calls.Load())
+	}
+}
+
 func TestDispatchSameTextOnceAndClearedFollowsAlarm(t *testing.T) {
 	stubSnapshot(t, func(config.Printer) ([]byte, error) { return nil, errNoCamera })
 	var mu sync.Mutex

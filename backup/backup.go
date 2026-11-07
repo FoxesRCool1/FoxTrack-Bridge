@@ -3,6 +3,7 @@
 package backup
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
@@ -27,8 +28,10 @@ var (
 
 // Run copies config.json and history.json from dir (if present) to
 // dir/backups/<name>-YYYY-MM-DD.json, skipping a copy for today that already
-// exists, and prunes each kind down to the newest maxCopies. A missing source
-// file is not an error; the sources themselves are never touched.
+// exists, and prunes each kind down to the newest maxCopies. A config.json that
+// is not valid JSON with a "printers" key is not copied, so a bad file never
+// replaces good copies. A missing or unreadable source file is logged and
+// skipped rather than failing the run; the sources themselves are never touched.
 func Run(dir string, now time.Time) error {
 	dir = filepath.Clean(dir)
 	backups := filepath.Join(dir, "backups")
@@ -41,10 +44,14 @@ func Run(dir string, now time.Time) error {
 		src := filepath.Join(dir, name)
 		data, err := os.ReadFile(src)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
+			if !os.IsNotExist(err) {
+				log.Printf("[backup] could not read %s: %v", name, err)
 			}
-			return err
+			continue
+		}
+		if name == "config.json" && !validConfig(data) {
+			log.Printf("[backup] %s is not a usable config, not copying it", name)
+			continue
 		}
 		dst := filepath.Join(backups, name[:len(name)-len(".json")]+"-"+date+".json")
 		if _, err := os.Stat(dst); err == nil {
@@ -62,6 +69,16 @@ func Run(dir string, now time.Time) error {
 		return err
 	}
 	return prune(backups, historyCopyRe)
+}
+
+// validConfig reports whether data is a JSON object with a top-level "printers" key.
+func validConfig(data []byte) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return false
+	}
+	_, ok := fields["printers"]
+	return ok
 }
 
 // prune deletes the oldest copies matching re so that at most maxCopies

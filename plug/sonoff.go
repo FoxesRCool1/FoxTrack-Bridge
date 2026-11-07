@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 )
 
 var (
@@ -16,9 +19,18 @@ var (
 	errSonoffNoState   = errors.New("The Sonoff answered without an on/off state. DIY mode needs firmware 3.5 or later.")
 )
 
+// sonoffAddr returns host with port 8081, the DIY mode port, when the address
+// has no port. A host typed without a port would otherwise hit port 80.
+func sonoffAddr(host string) string {
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		bare := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+		return net.JoinHostPort(bare, "8081")
+	}
+	return host
+}
+
 // sonoffPost POSTs data to the zeroconf endpoint of a Sonoff in DIY mode and
-// returns the reply's "data". The device wants at least 200 ms between
-// requests; the Bridge polls every 10 s, so nothing is done here.
+// returns the reply's "data". A host without a port uses 8081 (see sonoffAddr).
 func sonoffPost(ctx context.Context, host, path string, data any) (json.RawMessage, error) {
 	body, err := json.Marshal(map[string]any{"deviceid": "", "data": data})
 	if err != nil {
@@ -26,7 +38,7 @@ func sonoffPost(ctx context.Context, host, path string, data any) (json.RawMessa
 	}
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://"+host+"/zeroconf"+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://"+sonoffAddr(host)+"/zeroconf"+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +126,12 @@ func sonoffSwitch(ctx context.Context, host string, on bool) error {
 	info, err := sonoffInfo(ctx, host)
 	if err != nil {
 		return err
+	}
+	// The device wants at least 200 ms between requests.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(250 * time.Millisecond):
 	}
 	var multi struct {
 		Switches []any `json:"switches"`

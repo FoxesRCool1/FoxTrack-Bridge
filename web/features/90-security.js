@@ -107,7 +107,7 @@
                         </div>
                         <label for="secShareName" class="sr-only">Name</label>
                         <input id="secShareName" class="field" placeholder="e.g. Living room" maxlength="60">
-                        <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" id="secShareCamera" class="w-4 h-4 rounded"> Show the camera</label>
+                        <label class="inline-flex items-center gap-2 cursor-pointer tap-32"><input type="checkbox" id="secShareCamera" class="w-4 h-4 rounded"> Show the camera</label>
                         <button type="submit" class="btn-outline btn-lg shrink-0">Create link</button>
                     </div>
                 </form>
@@ -197,7 +197,7 @@
                     <button type="button" class="btn-outline shrink-0" id="secShareCopy" aria-label="Copy link"><i class="fas fa-copy"></i> Copy</button></div>`;
                 box.querySelector('#secShareCopy').addEventListener('click', async () => {
                     try { await navigator.clipboard.writeText(location.origin + res.path); toast('Link copied.'); }
-                    catch (_) { getSelection().selectAllChildren(box.querySelector('#secShareVal')); toast('Select and copy it by hand.', 'info'); }
+                    catch (_) { const v = box.querySelector('#secShareVal'); v.focus(); v.select(); toast('Select and copy it by hand.', 'info'); }
                 });
             } catch (err) { toast(err.message, 'error'); }
         });

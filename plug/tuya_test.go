@@ -48,3 +48,12 @@ func TestTuyaAgainstTinytuya(t *testing.T) {
 		}
 	}
 }
+
+func TestIsControlAck(t *testing.T) {
+	if !isControlAck(tuyaControl) || !isControlAck(tuyaControlNew) {
+		t.Fatal("control frames must be acks")
+	}
+	if isControlAck(tuyaStatus) {
+		t.Fatal("status push must not be taken as ack")
+	}
+}

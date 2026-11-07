@@ -247,6 +247,39 @@ func TestESPHomeBasicAuth(t *testing.T) {
 	}
 }
 
+func TestESPHomeManySwitchesNeedEntity(t *testing.T) {
+	f := &esphomeFake{
+		states: []string{
+			`{"id":"switch/Status LED","state":"ON","value":true}`,
+			`{"id":"switch/Child Lock","state":"OFF","value":false}`,
+		},
+	}
+	host := newESPHomeFake(t, f)
+	_, err := Read(context.Background(), config.Plug{Kind: config.PlugESPHome, Address: host})
+	if err != errESPHomeManySwitches {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestESPHomeOneSwitchNoEntity(t *testing.T) {
+	f := &esphomeFake{
+		states: []string{
+			`{"id":"switch/Power","state":"ON","value":true}`,
+		},
+		rest: map[string]string{
+			"/switch/Power": `{"id":"switch/Power","state":"ON","value":true}`,
+		},
+	}
+	host := newESPHomeFake(t, f)
+	r, err := Read(context.Background(), config.Plug{Kind: config.PlugESPHome, Address: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.On {
+		t.Fatalf("Read = %+v", r)
+	}
+}
+
 func TestESPHomeNoWebServer(t *testing.T) {
 	f := &esphomeFake{noWeb: true}
 	host := newESPHomeFake(t, f)
