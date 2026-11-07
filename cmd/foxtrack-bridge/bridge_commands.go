@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"foxtrack-bridge/config"
 	mqttpkg "foxtrack-bridge/mqtt"
 	"foxtrack-bridge/pace"
 	"foxtrack-bridge/version"
@@ -33,11 +34,13 @@ type bridgeCommandResult struct {
 
 // bridgeCommandsReply is the bridge-commands GET reply. Watched and
 // PollAfterMs are missing on FoxTrack servers from before 2026-09-30; Bridge
-// then keeps its old pace (package pace).
+// then keeps its old pace (package pace). AppAlerts is missing on FoxTrack
+// servers that do not send it; nil means absent.
 type bridgeCommandsReply struct {
-	Commands    []bridgeCommand `json:"commands"`
-	Watched     *bool           `json:"watched"`
-	PollAfterMs int64           `json:"poll_after_ms"`
+	Commands    []bridgeCommand     `json:"commands"`
+	Watched     *bool               `json:"watched"`
+	PollAfterMs int64               `json:"poll_after_ms"`
+	AppAlerts   map[string][]string `json:"app_alerts"`
 }
 
 // httpStatusError is a non-2xx answer from FoxTrack.
@@ -119,6 +122,9 @@ func pollBridgeCommandsUntil(stop <-chan struct{}) {
 			}
 			pace.Update(reply.Watched != nil, reply.Watched != nil && *reply.Watched, time.Now().Unix())
 			delay = pace.PollDelay(reply.PollAfterMs)
+			if reply.AppAlerts != nil {
+				storeAppAlerts(reply.AppAlerts, time.Now())
+			}
 
 			for _, cmd := range reply.Commands {
 				if cmd.Command == "print_file" {
@@ -173,6 +179,14 @@ func fetchBridgeCommands(apiKey string) (bridgeCommandsReply, error) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("X-Bridge-Capabilities", bridgeCapabilities)
 	req.Header.Set("X-Bridge-Version", version.AppVersion)
+
+	configMutex.RLock()
+	var nt *config.Notifications
+	if configStore != nil {
+		nt = configStore.Notifications
+	}
+	configMutex.RUnlock()
+	req.Header.Set("X-Bridge-Notify", notifyHeader(nt))
 
 	resp, err := bridgeCommandsHTTPClient.Do(req)
 	if err != nil {

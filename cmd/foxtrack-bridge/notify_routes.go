@@ -204,10 +204,12 @@ type notifyView struct {
 	AlmostDoneMinutes int                 `json:"almost_done_minutes"`
 	Services          []notify.Service    `json:"services"`
 	Events            []notifyEventInfo   `json:"events"`
+	FoxTrackAlerts    map[string][]string `json:"foxtrack_alerts"`
 }
 
 func redactNotifications(n *config.Notifications) notifyView {
 	v := notifyView{Channels: []notifyChannelView{}, Services: notify.Services}
+	v.FoxTrackAlerts = foxtrackAlertsView(time.Now())
 	isDefault := map[events.Kind]bool{}
 	for _, k := range events.Default {
 		isDefault[k] = true

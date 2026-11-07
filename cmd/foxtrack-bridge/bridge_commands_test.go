@@ -237,3 +237,45 @@ func TestBridgeAck_NotFoundStopsRetrying(t *testing.T) {
 		t.Fatalf("hits = %d, want 1 (no retry after 404)", rec.hits.Load())
 	}
 }
+
+func TestBridgeCommandsReply_OldReplyWithoutAppAlerts(t *testing.T) {
+	var reply bridgeCommandsReply
+	if err := json.Unmarshal([]byte(`{"commands":[],"watched":true,"poll_after_ms":5000}`), &reply); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if reply.AppAlerts != nil {
+		t.Fatalf("AppAlerts = %v, want nil", reply.AppAlerts)
+	}
+}
+
+func TestBridgeCommandsReply_AppAlertsDecodes(t *testing.T) {
+	var reply bridgeCommandsReply
+	if err := json.Unmarshal([]byte(`{"commands":[],"app_alerts":{"telegram":["print_error"]}}`), &reply); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(reply.AppAlerts["telegram"]) != 1 || reply.AppAlerts["telegram"][0] != "print_error" {
+		t.Fatalf("AppAlerts = %v", reply.AppAlerts)
+	}
+}
+
+func TestBridgeCommandsReply_EmptyAppAlertsIsNonNil(t *testing.T) {
+	var reply bridgeCommandsReply
+	if err := json.Unmarshal([]byte(`{"app_alerts":{}}`), &reply); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if reply.AppAlerts == nil || len(reply.AppAlerts) != 0 {
+		t.Fatalf("AppAlerts = %v, want a non-nil empty map", reply.AppAlerts)
+	}
+}
+
+func TestBridgePoll_GetCarriesEmptyNotifyHeaderWithoutChannels(t *testing.T) {
+	e := newPrintEnv(t)
+	startBridgePoller(t)
+	waitBridge(t, 10*time.Second, e.fetched)
+	e.mu.Lock()
+	notify := e.getHeader.Get("X-Bridge-Notify")
+	e.mu.Unlock()
+	if notify != "{}" {
+		t.Fatalf("X-Bridge-Notify = %q, want {}", notify)
+	}
+}

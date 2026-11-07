@@ -59,6 +59,9 @@
   second copy.
 - The Notifications tab of a Bridge linked to FoxTrack says that FoxTrack can
   send the same alerts, so each is best turned on in one place only.
+- The Notifications tab names the alerts FoxTrack already sends (to Telegram,
+  for example), so you can turn each one on in one place only. FoxTrack's
+  Alerts card does the same for the Bridge.
 - The sign-in page and share pages follow the dashboard's language.
 - The in-app help (what the assistant reads) covers the print queue, share
   links, backups, notes and the camera watch.
