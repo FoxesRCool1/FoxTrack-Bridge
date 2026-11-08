@@ -117,7 +117,7 @@ func requireAuth(next http.Handler) http.Handler {
 		// password both need the sign-in like any request (not a public path, so
 		// the check below holds); with none, only this computer may use them.
 		if sec == nil && isConfigTransferPath(r.URL.Path) && !loopbackClient(r) {
-			http.Error(w, "Backup and restore from another device need a dashboard password. Set one in Settings, or use the Bridge on the computer it runs on.", http.StatusForbidden)
+			writeErr(w, http.StatusForbidden, "Backup and restore from another device need a dashboard password. Set one in Settings, or use the Bridge on the computer it runs on.")
 			return
 		}
 		if sec == nil || isPublicPath(r.URL.Path) || authorized(r, sec) {
@@ -143,9 +143,9 @@ func requireAuth(next http.Handler) http.Handler {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 		case r.URL.Path == "/metrics":
 			w.Header().Set("WWW-Authenticate", `Bearer realm="FoxTrack Bridge"`)
-			http.Error(w, "This Bridge has a password. Send an API token as a bearer token.", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "This Bridge has a password. Send an API token as a bearer token.")
 		default:
-			http.Error(w, "Sign in to the Bridge first.", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Sign in to the Bridge first.")
 		}
 	})
 }
@@ -369,7 +369,7 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		http.Error(w, "The request was not valid JSON.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "The request was not valid JSON.")
 		return false
 	}
 	return true
@@ -387,7 +387,7 @@ func handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
@@ -405,13 +405,13 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	ip, now := clientIP(r), time.Now()
 	if wait := beginLogin(ip, now); wait > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		http.Error(w, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)), http.StatusTooManyRequests)
+		writeErr(w, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)))
 		return
 	}
 	ok, err := checkPassword(req.Password, sec.PasswordHash)
 	if err != nil {
 		w.Header().Set("Retry-After", "5")
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	if ok {
@@ -419,7 +419,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		log.Printf("[security] wrong dashboard password from %s", ip)
-		http.Error(w, "That password is not right.", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "That password is not right.")
 		return
 	}
 	setSessionCookie(w, r, sec, req.Remember)
@@ -440,7 +440,7 @@ func roundWait(d time.Duration) string {
 func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	clearSessionCookie(w)
@@ -505,16 +505,16 @@ func handleSecurity(w http.ResponseWriter, r *http.Request) {
 		}
 		ip, now := clientIP(r), time.Now()
 		if wait := loginLockedFor(ip, now); wait > 0 {
-			http.Error(w, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)), http.StatusTooManyRequests)
+			writeErr(w, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)))
 			return
 		}
 		if !req.Remove {
 			if utf8.RuneCountInString(req.New) < minPasswordLen {
-				http.Error(w, fmt.Sprintf("Use at least %d characters.", minPasswordLen), http.StatusBadRequest)
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf("Use at least %d characters.", minPasswordLen))
 				return
 			}
 			if len(req.New) > 256 {
-				http.Error(w, "That password is too long.", http.StatusBadRequest)
+				writeErr(w, http.StatusBadRequest, "That password is too long.")
 				return
 			}
 		}
@@ -524,16 +524,16 @@ func handleSecurity(w http.ResponseWriter, r *http.Request) {
 		if sec := securitySnapshot(); sec != nil {
 			prevHash = sec.PasswordHash
 			if wait := beginLogin(ip, now); wait > 0 {
-				http.Error(w, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)), http.StatusTooManyRequests)
+				writeErr(w, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.", roundWait(wait)))
 				return
 			}
 			ok, err := checkPassword(req.Current, prevHash)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				writeErr(w, http.StatusServiceUnavailable, err.Error())
 				return
 			}
 			if !ok {
-				http.Error(w, errWrongCurrent.Error(), http.StatusForbidden)
+				writeErr(w, http.StatusForbidden, errWrongCurrent.Error())
 				return
 			}
 		}
@@ -541,7 +541,7 @@ func handleSecurity(w http.ResponseWriter, r *http.Request) {
 		if !req.Remove {
 			h, err := hashPassword(req.New)
 			if err != nil {
-				http.Error(w, "Could not set the password: "+err.Error(), http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Could not set the password: "+err.Error())
 				return
 			}
 			hash = h
@@ -569,7 +569,7 @@ func handleSecurity(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 		if errors.Is(err, errWrongCurrent) {
-			http.Error(w, err.Error(), http.StatusForbidden)
+			writeErr(w, http.StatusForbidden, err.Error())
 			return
 		}
 		if err != nil {
@@ -586,7 +586,7 @@ func handleSecurity(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(currentSecurityView())
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -609,7 +609,7 @@ func handleTokens(w http.ResponseWriter, r *http.Request) {
 			name = "API token"
 		}
 		if utf8.RuneCountInString(name) > 60 {
-			http.Error(w, "Keep the name under 60 characters.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "Keep the name under 60 characters.")
 			return
 		}
 		raw := make([]byte, 32)
@@ -627,7 +627,7 @@ func handleTokens(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		log.Printf("[security] API token %q created", name)
@@ -654,12 +654,12 @@ func handleTokens(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !found {
-			http.Error(w, "No such token.", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "No such token.")
 			return
 		}
 		json.NewEncoder(w).Encode(currentSecurityView())
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 

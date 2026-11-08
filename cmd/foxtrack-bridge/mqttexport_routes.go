@@ -116,7 +116,7 @@ func decodeMQTTExport(w http.ResponseWriter, r *http.Request) (mqttExportRequest
 	stored := mqttExportSettings()
 	req := mqttExportRequest{MQTTExport: stored}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
-		http.Error(w, "That request was not valid JSON.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "That request was not valid JSON.")
 		return req, false
 	}
 	req.BridgeID = stored.BridgeID
@@ -153,7 +153,7 @@ func handleMQTTExport(w http.ResponseWriter, r *http.Request) {
 		}
 		c, err := mqttexport.Resolve(req.MQTTExport)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if c.Enabled {
@@ -171,7 +171,7 @@ func handleMQTTExport(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(mqttExportViewOf(c))
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -183,7 +183,7 @@ func handleMQTTExportTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !requireJSON(w, r) {

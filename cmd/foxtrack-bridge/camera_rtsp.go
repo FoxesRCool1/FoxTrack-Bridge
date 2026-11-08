@@ -483,7 +483,7 @@ func rtspLatest(name string) []byte {
 func rtspCameraStream(w http.ResponseWriter, r *http.Request, p config.Printer, ip string) {
 	sub, err := rtspSubscribe(p, ip)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	defer sub.close()
@@ -494,7 +494,7 @@ func rtspCameraStream(w http.ResponseWriter, r *http.Request, p config.Printer, 
 	select {
 	case f, ok := <-sub.ch:
 		if !ok {
-			http.Error(w, "camera unavailable", http.StatusBadGateway)
+			writeErr(w, http.StatusBadGateway, "camera unavailable")
 			return
 		}
 		frame = f
@@ -504,7 +504,7 @@ func rtspCameraStream(w http.ResponseWriter, r *http.Request, p config.Printer, 
 			msg += " (" + why + ")"
 		}
 		log.Printf("[camera/%s] %s", p.Name, msg)
-		http.Error(w, msg, http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, msg)
 		return
 	case <-r.Context().Done():
 		return

@@ -194,7 +194,10 @@ var (
 	webhookNoKeyLogged = make(map[string]bool)
 	// offlineSent marks a printer FoxTrack was told is unreachable (see
 	// reportOffline); the first real report clears it. Guarded by webhookLastSentMu.
-	offlineSent       = make(map[string]bool)
+	offlineSent = make(map[string]bool)
+	// lastRelaySent is each printer's last real report, so the OFFLINE one
+	// keeps its progress, file and spools. Guarded by webhookLastSentMu.
+	lastRelaySent     = make(map[string]webhook.RelayPayload)
 	webhookLastSentMu sync.Mutex
 
 	// Relay posts leave on goroutines, so each waits for the printer's previous
@@ -718,12 +721,17 @@ func RemovePrinterState(name string) {
 	stateMutex.Unlock()
 
 	serialMutex.Lock()
+	serial := printerSerials[name]
 	delete(printerSerials, name)
 	serialMutex.Unlock()
 
 	sessionMu.Lock()
 	delete(activeSessions, name)
 	sessionMu.Unlock()
+	if serial != "" {
+		// The saved session too, so a printer re-added later starts clean.
+		forgetSession(Printer{Name: name, Serial: serial})
+	}
 
 	snapLastTMu.Lock()
 	delete(snapLastT, name)
@@ -740,6 +748,7 @@ func RemovePrinterState(name string) {
 	delete(webhookHeld, name)
 	delete(webhookNoKeyLogged, name)
 	delete(offlineSent, name)
+	delete(lastRelaySent, name)
 	webhookLastSentMu.Unlock()
 
 	relayOrderMu.Lock()
@@ -1556,6 +1565,11 @@ func queueRelay(p Printer, terminal bool, build func() webhook.RelayPayload) {
 			return
 		}
 		payload := build()
+		if payload.Print.GcodeState != "OFFLINE" {
+			webhookLastSentMu.Lock()
+			lastRelaySent[p.Name] = payload
+			webhookLastSentMu.Unlock()
+		}
 		if p.FoxTrack2APIKey != "" {
 			if err := send(p.FoxTrack2APIKey, webhook.RelayURLV2, p.Serial, p.Name, payload); err != nil {
 				log.Printf("[%s] webhook error (v2): %v", p.Name, err)
@@ -1593,9 +1607,19 @@ func reportOffline(p Printer, now int64) {
 }
 
 func offlineRelayPayload(p Printer) webhook.RelayPayload {
-	pr := webhook.RelayPrint{GcodeState: "OFFLINE", McRemainingTime: -1, Plug: plugState(p.Name)}
-	stampRelayIdentity(&pr, p, "")
-	return webhook.RelayPayload{Print: pr}
+	var last *webhook.RelayPayload
+	webhookLastSentMu.Lock()
+	if lp, ok := lastRelaySent[p.Name]; ok {
+		last = &lp
+	}
+	webhookLastSentMu.Unlock()
+	model := ""
+	if last != nil {
+		model = last.Print.PrinterModel
+	}
+	out := OfflinePayload(last, "bambu", model, plugState(p.Name))
+	stampRelayIdentity(&out.Print, p, model)
+	return out
 }
 
 // hasPrintObject reports whether an MQTT payload carries a "print" object.

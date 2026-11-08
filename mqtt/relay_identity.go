@@ -25,17 +25,25 @@ func stampRelayIdentity(pr *webhook.RelayPrint, p Printer, telemetryModel string
 // OfflinePayload is the report for a printer the Bridge cannot reach, for the
 // lan package: gcode_state OFFLINE, remaining time unknown, and no alarms key
 // (FoxTrack reads that as no change). Capabilities are left out: nothing can be
-// sent to the printer now, only to its plug.
-func OfflinePayload(kind, model string, plug *webhook.RelayPlug) webhook.RelayPayload {
-	return webhook.RelayPayload{Print: webhook.RelayPrint{
-		GcodeState:         "OFFLINE",
-		McRemainingTime:    -1,
-		Plug:               plug,
-		PrinterKind:        kind,
-		PrinterModel:       model,
-		BridgeVersion:      version.AppVersion,
-		BridgeCapabilities: WithPlugCaps(nil, plug != nil),
-	}}
+// sent to the printer now, only to its plug. last is the printer's previous
+// report, when there was one: FoxTrack stores each report as sent, so the
+// print's progress, file name and filament slots are carried over rather than
+// shown as 0% and empty; temperatures are unknown and go out as 0.
+func OfflinePayload(last *webhook.RelayPayload, kind, model string, plug *webhook.RelayPlug) webhook.RelayPayload {
+	pr := webhook.RelayPrint{}
+	if last != nil {
+		pr = last.Print
+	}
+	pr.GcodeState = "OFFLINE"
+	pr.McRemainingTime = -1
+	pr.NozzleTemper, pr.NozzleTargetTemper, pr.BedTemper, pr.BedTargetTemper = 0, 0, 0, 0
+	pr.Alarms = nil
+	pr.Plug = plug
+	pr.PrinterKind = kind
+	pr.PrinterModel = model
+	pr.BridgeVersion = version.AppVersion
+	pr.BridgeCapabilities = WithPlugCaps(nil, plug != nil)
+	return webhook.RelayPayload{Print: pr}
 }
 
 // WithPlugCaps adds the plug commands to a printer's capabilities when it has

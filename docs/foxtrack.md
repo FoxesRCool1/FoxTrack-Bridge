@@ -254,3 +254,11 @@ Your FoxTrack plan limits how many Bridge printers a workspace can have (5 on
 Pro, unlimited on Farm). Printers you renamed or removed still count while
 their old device is in FoxTrack. In FoxTrack, open **Printers**, find the old
 device under **Detected on your network, not linked**, and click **Remove**.
+
+### A print that finished while the Bridge was off is missing
+
+The Bridge only sees what happens while it runs. A print that ends while the
+computer is off or the Bridge is restarting is not recorded in history and
+sends no finished-print message; the printer's own screen or Bambu Handy still
+has it. A print that is still running when the Bridge comes back is picked up
+again with its real start time.

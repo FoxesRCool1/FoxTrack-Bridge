@@ -156,13 +156,13 @@ func handleCloud(w http.ResponseWriter, r *http.Request) {
 	case "retry":
 		handleCloudRetry(w, r)
 	default:
-		http.Error(w, "unknown cloud action", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "unknown cloud action")
 	}
 }
 
 func handleCloudStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	resp := cloudStatusResponse{MQTT: mqttpkg.GetCloudStatus()}
@@ -209,7 +209,7 @@ func writeCloudError(w http.ResponseWriter, err error) {
 
 func handleCloudLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
@@ -218,7 +218,7 @@ func handleCloudLogin(w http.ResponseWriter, r *http.Request) {
 		Region   string `json:"region"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
@@ -242,7 +242,7 @@ func handleCloudLogin(w http.ResponseWriter, r *http.Request) {
 
 func handleCloudVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
@@ -251,7 +251,7 @@ func handleCloudVerify(w http.ResponseWriter, r *http.Request) {
 		Region string `json:"region"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
@@ -271,7 +271,7 @@ func handleCloudVerify(w http.ResponseWriter, r *http.Request) {
 
 func handleCloudToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
@@ -280,7 +280,7 @@ func handleCloudToken(w http.ResponseWriter, r *http.Request) {
 		Region      string `json:"region"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
@@ -300,7 +300,7 @@ func handleCloudToken(w http.ResponseWriter, r *http.Request) {
 
 func handleCloudUnlink(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	configMutex.Lock()
@@ -319,7 +319,7 @@ func handleCloudUnlink(w http.ResponseWriter, r *http.Request) {
 
 func handleCloudRetry(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if err := mqttpkg.RetryCloudNow(); err != nil {
@@ -349,7 +349,7 @@ func cloudDevices(ctx context.Context, force bool) ([]cloud.Device, error) {
 
 func handleCloudDevices(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

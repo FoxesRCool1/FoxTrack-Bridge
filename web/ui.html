@@ -460,6 +460,7 @@
                 <div id="fieldKlipperKey" class="hidden">
                     <label for="pKlipperKey" id="labelKlipperKey" class="field-label">Moonraker API key <span class="font-normal">(optional)</span></label>
                     <input type="password" id="pKlipperKey" autocomplete="off" class="field field-mono" placeholder="Moonraker API key">
+                    <p id="klipperKeyHint" class="hidden mt-1.5 text-xs text-text-2">Leave blank to keep the saved key. A new address needs its key again.</p>
                 </div>
                 <div id="fieldWebcamUrl" class="hidden">
                     <label for="pWebcamUrl" class="field-label flex items-center gap-1">Webcam URL <span class="font-normal">(optional)</span> <button type="button" class="info-tip" aria-label="About the webcam URL" aria-expanded="false"><i class="fas fa-info"></i></button><span id="webcamHint" class="tip-text sr-only">Leave blank to find it automatically.</span></label>
@@ -569,8 +570,8 @@
                 </div>
                 <div class="flex items-center gap-2 pt-1 flex-wrap">
                     <button onclick="testConnection()" id="testBtn" class="btn-outline btn-lg">Test connection</button>
-                    <button onclick="addPrinter()" id="connectBtn" class="btn-primary btn-lg">Connect</button>
-                    <button onclick="addPrinter(true)" id="saveAnywayBtn" class="btn-outline btn-lg hidden">Save anyway</button>
+                    <button onclick="addPrinter()" id="connectBtn" class="btn-primary btn-lg">Add printer</button>
+                    <button onclick="addPrinter(true)" id="saveAnywayBtn" class="btn-outline btn-lg hidden">Add anyway</button>
                 </div>
                 <!-- The connection check: what the test found and where to look. -->
                 <div id="checkResult" role="status" aria-live="polite" class="hidden rounded-md border px-3 py-2.5 flex items-start gap-2.5"></div>
@@ -767,18 +768,19 @@
                             <button type="button" class="info-tip" aria-label="Where to get the token" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">In FoxTrack, open Settings, Integrations, FoxTrack Bridge and click Generate token. Paste it here: it saves and checks itself. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge/blob/main/docs/foxtrack.md" target="_blank" rel="noopener">Setup guide</a></span>
                             <a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="ml-auto text-xs text-link hover:underline underline-offset-4 flex items-center gap-1 shrink-0">Get a token <i class="fas fa-arrow-up-right-from-square text-[10px]"></i></a>
                         </div>
-                        <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field" placeholder="ftb_…" oninput="onTokenInput(event, this, saveApiKeys)">
+                        <input type="password" id="foxtrack2ApiKey" autocomplete="off" class="field" placeholder="Loading…" disabled oninput="onTokenInput(event, this, saveApiKeys)">
                         <p id="foxtrackStatus" class="hidden mt-2 text-xs flex items-center gap-1.5" role="status" aria-live="polite">
                             <span id="foxtrackStatusDot" class="w-1.5 h-1.5 rounded-full shrink-0"></span>
                             <span id="foxtrackStatusText" class="min-w-0"></span>
                         </p>
                     </div>
                     <div id="legacyKeyRow" class="hidden mt-5">
-                        <label for="apiKey" class="field-label">FoxTrack key (legacy)</label>
+                        <label for="apiKey" class="field-label">FoxTrack token (legacy)</label>
                         <input type="password" id="apiKey" autocomplete="off" class="field" placeholder="Optional">
                     </div>
-                    <div class="mt-6 flex justify-end">
-                        <button id="saveApiKeysBtn" onclick="saveApiKeys()" class="btn-primary btn-lg">Save</button>
+                    <div class="mt-6 flex items-center justify-between gap-3">
+                        <button id="unlinkFoxTrackBtn" type="button" onclick="unlinkFoxTrack()" class="btn-danger hidden">Unlink FoxTrack</button>
+                        <button id="saveApiKeysBtn" onclick="saveApiKeys()" class="btn-primary btn-lg ml-auto">Save</button>
                     </div>
                 </section>
 
@@ -884,6 +886,7 @@
                             <span class="switch-thumb"></span>
                         </button>
                     </div>
+                    <p id="aiOffHint" class="hidden mt-2 text-xs text-text-2">The assistant is off. Turn it on, pick a provider and save to ask about your printers.</p>
                     <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Ask about your printers, or why a print failed. It can only read.
                         <button type="button" class="info-tip" aria-label="About the assistant" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only"><span class="block">You bring the AI provider and pay for it; the Bridge ships with none. Requests go from this machine straight to the provider, never through FoxTrack.</span><span class="block mt-1.5">It cannot change a setting or control a print.</span></span>
                     </p>
@@ -973,7 +976,7 @@
                             </div>
                             <div class="flex items-start justify-between gap-4">
                                 <div class="min-w-0">
-                                    <p class="text-sm font-medium flex items-center gap-1">Advanced mode <button type="button" class="info-tip" aria-label="About advanced mode" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Adds a GCode console to Bambu printer cards.</span></p>
+                                    <p class="text-sm font-medium flex items-center gap-1">Advanced mode <button type="button" class="info-tip" aria-label="About advanced mode" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Shows the Temps, Fan, Speed and GCode controls on printer cards.</span></p>
                                 </div>
                                 <button id="advancedToggle" onclick="toggleAdvancedMode()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Advanced mode">
                                     <span id="advancedThumb" class="switch-thumb"></span>
@@ -1491,24 +1494,52 @@ function renderView(view) {
 const SETTINGS_GROUPS = ['Printing', 'Connect', 'Bridge'];
 const SETTINGS_TABS = [
     { id: 'cloud', label: 'Bambu Cloud', group: 'Connect', order: 50 },
-    { id: 'foxtrack', label: 'FoxTrack app', group: 'Connect', order: 80 },
+    { id: 'foxtrack', label: 'FoxTrack', group: 'Connect', order: 10 },
     { id: 'virtual', label: 'Virtual printer', group: 'Connect', order: 85 },
     { id: 'assistant', label: 'Assistant', group: 'Bridge', order: 60 },
     { id: 'general', label: 'General', group: 'Bridge', order: 90 },
 ];
 
+// The standalone features: what the Bridge offers on its own. With FoxTrack
+// linked they fold into one "More" group so Settings stays short, since
+// FoxTrack covers most of them (notifications, history, maintenance, costs).
+const STANDALONE_TABS = ['notifications', 'timelapse', 'maintenance', 'costs', 'homeassistant', 'spoolman', 'metrics', 'assistant', 'virtual'];
+const MORE_OPEN_KEY = 'foxtrack.bridge.settingsMoreOpen';
+function settingsMoreOpen() { try { return localStorage.getItem(MORE_OPEN_KEY) === '1'; } catch (_) { return false; } }
+function toggleSettingsMore() {
+    try { localStorage.setItem(MORE_OPEN_KEY, settingsMoreOpen() ? '0' : '1'); } catch (_) {}
+    renderSettingsNav();
+}
+
+// settingsNavGroups is the nav as shown: [{ group, tabs, more }], in order.
+// Pure, so the test can run it: linked is foxtrackLinked().
+function settingsNavGroups(tabs, linked) {
+    const byGroup = g => tabs.filter(t => t.group === g).sort((a, b) => a.order - b.order);
+    if (!linked) return SETTINGS_GROUPS.map(g => ({ group: g, tabs: byGroup(g), more: false })).filter(x => x.tabs.length);
+    const isMore = t => STANDALONE_TABS.includes(t.id);
+    const out = SETTINGS_GROUPS.map(g => ({ group: g, tabs: byGroup(g).filter(t => !isMore(t)), more: false })).filter(x => x.tabs.length);
+    const more = SETTINGS_GROUPS.flatMap(g => byGroup(g).filter(isMore));
+    if (more.length) out.push({ group: 'More', tabs: more, more: true });
+    return out;
+}
+
 function renderSettingsNav() {
     const chips = document.getElementById('settingsNavChips');
     const desk = document.getElementById('settingsNavDesktop');
     if (!chips || !desk) return;
-    const sorted = SETTINGS_GROUPS.flatMap(g => SETTINGS_TABS.filter(t => t.group === g).sort((a, b) => a.order - b.order));
-    const btn = (t, cls) => '<button type="button" class="' + cls + '" data-set-tab="' + escHtml(t.id) + '" onclick="showSettingsTab(\'' + escHtml(t.id) + '\')">' + escHtml(t.label) + '</button>';
+    const groups = settingsNavGroups(SETTINGS_TABS, foxtrackLinked());
+    const sorted = groups.flatMap(x => x.tabs);
+    const btn = (t, cls) => '<button type="button" class="' + cls + '" data-set-tab="' + escHtml(t.id) + '" onclick="pickSettingsTab(\'' + escHtml(t.id) + '\')">' + escHtml(t.label) + '</button>';
     chips.innerHTML = sorted.map(t => btn(t, 'set-chip')).join('');
-    desk.innerHTML = SETTINGS_GROUPS.map((g, i) => {
-        const tabs = sorted.filter(t => t.group === g);
-        if (!tabs.length) return '';
-        return '<p class="eyebrow mb-2 px-3' + (i ? ' mt-8' : '') + '">' + escHtml(g) + '</p><ul class="space-y-0.5">'
-            + tabs.map(t => '<li>' + btn(t, 'set-nav-row') + '</li>').join('') + '</ul>';
+    desk.innerHTML = groups.map((x, i) => {
+        const rows = '<ul class="space-y-0.5">' + x.tabs.map(t => '<li>' + btn(t, 'set-nav-row') + '</li>').join('') + '</ul>';
+        if (!x.more) return '<p class="eyebrow mb-2 px-3' + (i ? ' mt-8' : '') + '">' + escHtml(x.group) + '</p>' + rows;
+        // The section on screen keeps its group open.
+        const open = settingsMoreOpen() || x.tabs.some(t => t.id === settingsTab);
+        return '<button type="button" onclick="toggleSettingsMore()" aria-expanded="' + open + '" class="eyebrow mb-1 mt-8 flex w-full items-center justify-between px-3 text-left hover:text-text">'
+            + '<span>More</span><i class="fas fa-chevron-' + (open ? 'up' : 'down') + ' text-[10px]" aria-hidden="true"></i></button>'
+            + '<p class="mb-2 px-3 text-xs leading-relaxed text-text-2">Standalone features. FoxTrack already covers most of these.</p>'
+            + (open ? rows : '');
     }).join('');
     document.querySelectorAll('[data-set-tab]').forEach(el => {
         if (el.dataset.setTab === settingsTab) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
@@ -1535,7 +1566,10 @@ function registerSettingsTab({ id, label, group = 'Printing', order = 50, mount,
 }
 
 let settingsTab = 'notifications';
+let settingsTabChosen = false; // a section was opened or named in the address; else Settings lands on FoxTrack when linked
 let pendingSettingsTab = null;
+// pickSettingsTab is a click in the nav: from then on the section is the user's choice.
+function pickSettingsTab(tab) { settingsTabChosen = true; showSettingsTab(tab); }
 function showSettingsTab(tab) {
     // A section that is not registered (yet) is remembered: registerSettingsTab
     // opens it when it arrives.
@@ -1568,8 +1602,8 @@ function toggleAdvancedMode() {
     advancedMode = !advancedMode;
     const toggle = document.getElementById('advancedToggle');
     if (toggle) toggle.setAttribute('aria-checked', advancedMode); // .switch styles follow aria-checked
-    // Advanced mode adds/removes the GCode button on Bambu cards. This is a structural
-    // change patchCard's field-level updates can't produce, so force a full rebuild.
+    // Advanced mode adds/removes the Temps, Fan, Speed and GCode buttons. This is a
+    // structural change patchCard's field-level updates can't produce, so force a full rebuild.
     forceFullCardRefresh = true;
     renderPrinters();
 }
@@ -1670,6 +1704,16 @@ async function loadConfig() {
         // The legacy field is only for people who already have one saved.
         const legacyRow = document.getElementById('legacyKeyRow');
         if (legacyRow) legacyRow.classList.toggle('hidden', !legacyKeySet);
+        const unlink = document.getElementById('unlinkFoxTrackBtn');
+        if (unlink) unlink.classList.toggle('hidden', !foxtrackLinked());
+        const tokenField = document.getElementById('foxtrack2ApiKey');
+        if (tokenField) tokenField.disabled = false; // enabled once the stored state is known
+        // On the first load, Settings lands on FoxTrack for a linked Bridge,
+        // unless a section was clicked or named in the address.
+        if (!configEverLoaded && !settingsTabChosen && foxtrackLinked()) {
+            settingsTab = 'foxtrack';
+            if (currentView === 'settings') showSettingsTab('foxtrack');
+        }
         configuredPrinters = (cfg && cfg.printers) ? cfg.printers : [];
         // Reflect the stored value in both directions. Only ever setting it to
         // true left the toggle stuck on after auto-update was switched off
@@ -1678,8 +1722,14 @@ async function loadConfig() {
         configEverLoaded = true;
         configLoadFailed = false;
         setBridgeStatus(true);
-    } catch (_) { configLoadFailed = true; setBridgeStatus(false); }
+    } catch (_) {
+        configLoadFailed = true;
+        setBridgeStatus(false);
+        const tokenField = document.getElementById('foxtrack2ApiKey');
+        if (tokenField) tokenField.disabled = false; // a token can still be saved; the server keeps the rest
+    }
     refreshFoxTrackUi();
+    renderSettingsNav();
 }
 
 async function retryLoadConfig() {
@@ -1732,6 +1782,9 @@ async function checkFoxTrack() {
     else if (state && state !== 'not_set') {
         const warn = state === 'offline';
         setFoxTrackStatus(warn ? 'bg-warning' : 'bg-danger', warn ? 'text-warning' : 'text-danger', r.message || "Couldn't check the FoxTrack connection.");
+    } else if (foxtrackLinked() && !r) {
+        // The Bridge itself did not answer: say so rather than nothing.
+        setFoxTrackStatus('bg-warning', 'text-warning', "Couldn't check the FoxTrack connection.");
     } else setFoxTrackStatus('', '', '');
     // The top-bar chip reads this; a check that gave no verdict is not a problem.
     foxtrackCheckState = state && state !== 'not_set' ? state : 'unknown';
@@ -1766,9 +1819,26 @@ async function saveApiKeys() {
     }
 }
 
-async function saveLegacyApiKey() { await saveApiKeys(); }
-
-async function saveFoxtrack2ApiKey() { await saveApiKeys(); }
+// Unlink FoxTrack. A blank token means "keep the stored one" on every save,
+// so removing it takes this explicit request. Printers and settings stay.
+async function unlinkFoxTrack() {
+    const ok = await confirmDialog({
+        title: 'Unlink FoxTrack?',
+        body: 'The Bridge keeps working on its own and your printers stay. You can paste a token again any time.',
+        confirmLabel: 'Unlink',
+    });
+    if (!ok) return;
+    try {
+        await apiFetch('/api/config', { method:'POST', body:JSON.stringify({ clear_foxtrack_token: true }) });
+    } catch (e) { toast("Couldn't unlink FoxTrack: " + e.message, 'error'); return; }
+    foxtrackCheckState = null;
+    relayProblem = false;
+    relayDelivered = false;
+    setFoxTrackStatus('', '', '');
+    await loadConfig();
+    renderSettingsNav();
+    toast('FoxTrack unlinked');
+}
 
 // ── Bambu Cloud account ───────────────────────────────────────────────────────
 // Sign-in, the emailed code, a pasted token, and the account connection state.
@@ -1937,7 +2007,7 @@ async function cloudRetry() {
 
 // Browser-side flags. Storage can be blocked, so every flag also lives in memory.
 const FLAG_WELCOME_SEEN = 'foxtrack.bridge.welcomeSeen';
-const FLAG_FT_OPEN = 'foxtrack.bridge.openFoxTrack';
+const FLAG_FT_SKIPPED = 'foxtrack.bridge.skipFoxTrack'; // "Not now" on the welcome's FoxTrack step
 const FLAG_FIRST_DISMISSED = 'foxtrack.bridge.firstPrinterDismissed';
 const memFlags = {};
 function flagGet(k) { if (memFlags[k]) return true; try { return localStorage.getItem(k) === '1'; } catch (_) { return false; } }
@@ -2217,7 +2287,7 @@ const WELCOME_HTML =
     + '<li class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
     + '<div class="flex flex-wrap items-center gap-x-3 gap-y-1">'
     + '<span id="wFtPill" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-xs tabular-nums text-text-2" aria-hidden="true">2</span>'
-    + '<h3 class="font-heading text-xl font-medium leading-tight"><span class="sr-only">Step 2: </span>FoxTrack app</h3>'
+    + '<h3 class="font-heading text-xl font-medium leading-tight"><span class="sr-only">Step 2: </span>FoxTrack</h3>'
     + '<span class="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-2">Optional</span>'
     + '</div>'
     + '<div id="wFtOpen" class="mt-4">'
@@ -2228,7 +2298,7 @@ const WELCOME_HTML =
     + '</div>'
     + '<div class="flex gap-2">'
     + '<input type="password" id="wFtToken" autocomplete="off" class="field" placeholder="Paste the token (starts with ftb_)" oninput="onTokenInput(event, this, connectFoxTrackFromWelcome)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();connectFoxTrackFromWelcome()}">'
-    + '<button type="button" id="wFtSave" onclick="connectFoxTrackFromWelcome()" class="btn-outline btn-lg shrink-0">Connect</button>'
+    + '<button type="button" id="wFtSave" onclick="connectFoxTrackFromWelcome()" class="btn-primary btn-lg shrink-0">Connect</button>'
     + '</div>'
     + '<p id="wFtStatus" class="mt-2 hidden items-center gap-1.5 text-xs" role="status" aria-live="polite"><span id="wFtDot" class="h-1.5 w-1.5 shrink-0 rounded-full"></span><span id="wFtText" class="min-w-0"></span></p>'
     + '<div class="mt-3"><button type="button" onclick="skipFoxTrack()" class="btn-ghost -ml-3">Not now</button></div>'
@@ -2261,9 +2331,9 @@ function syncStatRow() {
     if (row) row.classList.toggle('hidden', currentView !== 'printers' || welcomeActive);
 }
 
-function skipFoxTrack() { flagClear(FLAG_FT_OPEN); renderWelcomeFt(); }
+function skipFoxTrack() { flagSet(FLAG_FT_SKIPPED); renderWelcomeFt(); }
 function unskipFoxTrack() {
-    flagSet(FLAG_FT_OPEN);
+    flagClear(FLAG_FT_SKIPPED);
     renderWelcomeFt();
     const input = document.getElementById('wFtToken');
     if (input) input.focus();
@@ -2277,8 +2347,9 @@ function renderWelcomeFt() {
     const mode = foxtrackMode();
     // A token FoxTrack rejects leaves the form open, with the reason under it.
     const showDone = linked && mode !== 'attention';
-    // Folded until asked for: the Bridge is complete without FoxTrack.
-    const skipped = !linked && !flagGet(FLAG_FT_OPEN);
+    // The token form is open on a fresh install (linking FoxTrack is what most
+    // people are here for); "Not now" folds it until asked for again.
+    const skipped = !linked && flagGet(FLAG_FT_SKIPPED);
     open.classList.toggle('hidden', showDone || skipped);
     const done = document.getElementById('wFtDone');
     done.classList.toggle('hidden', !showDone);
@@ -2288,8 +2359,13 @@ function renderWelcomeFt() {
     skip.classList.toggle('flex', skipped);
     document.getElementById('wFtPill').innerHTML = showDone && mode === 'connected' ? '<i class="fas fa-check-circle text-brand"></i>' : '2';
     if (showDone) {
-        document.getElementById('wFtDoneDot').className = 'h-1.5 w-1.5 shrink-0 rounded-full ' + (mode === 'connected' ? 'bg-brand' : 'bg-text-2 pulse');
-        document.getElementById('wFtDoneText').textContent = mode === 'connected' ? 'Connected to FoxTrack.' : 'Token saved. Checking the connection…';
+        const doneText = {
+            connected: 'Connected to FoxTrack.',
+            waiting: 'Token saved. Waiting for the first printer report.',
+            unreachable: "Token saved. Can't reach FoxTrack right now.",
+        }[mode] || 'Token saved. Checking the connection…';
+        document.getElementById('wFtDoneDot').className = 'h-1.5 w-1.5 shrink-0 rounded-full ' + (mode === 'connected' ? 'bg-brand' : mode === 'checking' ? 'bg-text-2 pulse' : 'bg-warning');
+        document.getElementById('wFtDoneText').textContent = doneText;
     }
     mirrorWelcomeFtStatus();
 }
@@ -2339,22 +2415,29 @@ function onTokenInput(e, el, save) {
 
 let foxtrackCheckState = null;   // last /api/foxtrack/check state; 'unknown' when it gave no verdict; null before the first check
 let relayProblem = false;        // /api/relay-health says FoxTrack is refusing the Bridge's data
+let relayDelivered = false;      // /api/relay-health: FoxTrack accepted at least one report since the Bridge started
 let lastFtStatus = { dotCls: '', textCls: '', text: '' };
 
 function foxtrackLinked() { return foxtrackTokenSet || legacyKeySet; }
 
+// The chip says "connected" only when it knows: the token check passed and a
+// printer report has been accepted. Anything less is said as what it is.
 function foxtrackMode() {
     if (!foxtrackLinked()) return 'standalone';
     if (relayProblem || (foxtrackCheckState && foxtrackCheckState !== 'ok' && foxtrackCheckState !== 'unknown')) return 'attention';
     if (foxtrackCheckState === null) return 'checking';
+    if (foxtrackCheckState === 'unknown') return 'unreachable';
+    if (!relayDelivered) return 'waiting';
     return 'connected';
 }
 
 const FT_CHIP = {
-    connected:  ['bg-brand', 'FoxTrack connected', 'Connected to FoxTrack. Open the FoxTrack settings.'],
-    standalone: ['bg-text-2', 'Standalone', 'The Bridge is running on its own. Open Settings to connect FoxTrack.'],
-    attention:  ['bg-warning', 'FoxTrack needs attention', 'FoxTrack is not accepting this Bridge. Open the FoxTrack settings.'],
-    checking:   ['bg-text-2 pulse', 'Checking FoxTrack…', 'Checking the FoxTrack connection.'],
+    connected:   ['bg-brand', 'FoxTrack connected', 'Connected to FoxTrack. Open the FoxTrack settings.'],
+    standalone:  ['bg-text-2', 'Standalone', 'The Bridge is running on its own. Open Settings to connect FoxTrack.'],
+    attention:   ['bg-warning', 'FoxTrack needs attention', 'FoxTrack is not accepting this Bridge. Open the FoxTrack settings.'],
+    checking:    ['bg-text-2 pulse', 'Checking FoxTrack…', 'Checking the FoxTrack connection.'],
+    unreachable: ['bg-warning', "Can't reach FoxTrack", 'The Bridge could not check the FoxTrack connection. It keeps trying.'],
+    waiting:     ['bg-warning', 'FoxTrack linked, waiting for the first report', 'FoxTrack accepted the token. The chip turns green once a printer report is accepted.'],
 };
 
 function renderFoxTrackChip() {
@@ -2703,6 +2786,8 @@ function onBrandChange() {
     const cfg = brands[brand];
     // Setup instructions are for adding a printer; an edit only changes details.
     ins.innerHTML = cfg.instructions; ins.classList.toggle('hidden', !!editingPrinterId);
+    const keyHint = document.getElementById('klipperKeyHint');
+    if (keyHint) keyHint.classList.toggle('hidden', !editingPrinterId);
     fields.classList.remove('hidden');
     document.getElementById('fieldIp').style.display = cfg.fields.ip ? '' : 'none';
     document.getElementById('fieldSerial').style.display = cfg.fields.serial ? '' : 'none';
@@ -2873,7 +2958,8 @@ function readPrinterForm({ forTest = false } = {}) {
 
 let checkSeq = 0;   // bumped to drop a check still in flight (dialog closed, type changed)
 
-function primaryLabel() { return editingPrinterId ? 'Save' : 'Connect'; }
+function primaryLabel() { return editingPrinterId ? 'Save' : 'Add printer'; }
+function anywayLabel() { return editingPrinterId ? 'Save anyway' : 'Add anyway'; }
 
 // The result panel under the buttons. null hides it; { pending: text } shows a
 // spinner line; otherwise { ok, code, message, hint } from the server.
@@ -2904,7 +2990,7 @@ function resetCheckUi() {
     const sa = document.getElementById('saveAnywayBtn');
     if (sa) sa.classList.add('hidden');
     const btn = document.getElementById('connectBtn');
-    if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; }
+    if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; } { const anyway = document.getElementById('saveAnywayBtn'); if (anyway) anyway.textContent = anywayLabel(); }
     const tb = document.getElementById('testBtn');
     if (tb) { tb.textContent = 'Test connection'; tb.disabled = false; }
 }
@@ -3013,7 +3099,7 @@ async function savePrinter({ name, payload }) {
         await pollStatus();
     } catch (e) {
         showAddPrinterError((editing ? "Couldn't save the printer: " : "Couldn't add the printer: ") + e.message);
-        if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; }
+        if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; } { const anyway = document.getElementById('saveAnywayBtn'); if (anyway) anyway.textContent = anywayLabel(); }
     }
 }
 
@@ -4002,13 +4088,17 @@ function cardInnerHTML(printer, live) {
         + ((isCloud || noExtras) ? '' : '<button ' + dis + 'onclick="openSkipObjects(\'' + enc + '\')" class="skip-btn btn-outline' + ((status === 'printing' || status === 'paused') ? '' : ' hidden') + '">Skip objects</button>')
         + (noExtras ? '' : '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '" aria-pressed="' + lightOn + '">' + lightHtml + '</button>')
         + (printer.plug ? plugButtonHTML(enc, plug, status) : '')
-        + (hasConsole ? '<button onclick="toggleTemps(\'' + enc + '\')" class="btn-outline"><i class="fas fa-thermometer mr-1"></i>Temps</button>' : '')
+        // Temps, Fan, Speed and GCode are the tuning controls: advanced mode only,
+        // so a plain card stays short.
+        + ((hasConsole && advancedMode) ? '<button onclick="toggleTemps(\'' + enc + '\')" class="btn-outline"><i class="fas fa-thermometer mr-1"></i>Temps</button>' : '')
         + camControls
         + ((isCloud || noExtras) ? '' :
-            '<button onclick="toggleFan(\'' + enc + '\')" class="btn-outline"><i class="fas fa-fan mr-1"></i>Fan</button>'
+            (advancedMode ? '<button onclick="toggleFan(\'' + enc + '\')" class="btn-outline"><i class="fas fa-fan mr-1"></i>Fan</button>' : '')
             + (isBambu
-                ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'
-                  + (advancedMode ? '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>GCode</button>' : '')
+                ? (advancedMode
+                    ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'
+                      + '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>GCode</button>'
+                    : '')
                 : '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline' + ((status === 'printing' || status === 'paused') ? ' hidden' : '') + '">Start print</button>'))
         + '</div>'
         + amsPanel
@@ -4122,8 +4212,10 @@ async function pollRelayHealth() {
     if (!wrap) return;
     try {
         const data = await apiFetch('/api/relay-health');
-        const problem = data && data.problem;
+        // Without a token there is no FoxTrack connection to be wrong about.
+        const problem = configEverLoaded && !foxtrackLinked() ? null : (data && data.problem);
         relayProblem = !!problem;
+        relayDelivered = !!(data && data.delivered);
         refreshFoxTrackUi();
         if (!problem) { wrap.classList.add('hidden'); return; }
         document.getElementById('relayHealthMsg').textContent = problem.message || '';
@@ -4478,6 +4570,7 @@ async function restoreFromFile(file) {
         body = n === 1
             ? fill('Replace your printers and settings with this backup? It has 1 printer: {0}. Your current settings are saved next to config.json first.', names[0] || 'unnamed')
             : fill('Replace your printers and settings with this backup? It has {0} printers: {1}. Your current settings are saved next to config.json first.', n, names.length ? names.join(', ') : 'unnamed');
+        if (savedCount > n) body += ' ' + fill('You have {0} printers saved now; the ones not in the backup are removed.', savedCount);
     }
     const ok = await confirmDialog({
         title: 'Restore from backup?',
@@ -4658,6 +4751,7 @@ async function loadAISettings() {
     if (model) model.value = aiSettings.model || '';
     if (baseUrl) baseUrl.value = aiSettings.base_url || '';
     setSwitch('aiEnabledToggle', !!aiSettings.enabled);
+    syncAIOffHint();
     setSwitch('aiCameraToggle', !!aiSettings.allow_camera);
     setSwitch('aiWatchToggle', !!aiSettings.watch_failures);
     const watchEvery = document.getElementById('aiWatchEveryMin');
@@ -4679,7 +4773,12 @@ function getSwitch(id) {
     const el = document.getElementById(id);
     return !!el && el.getAttribute('aria-checked') === 'true';
 }
-function toggleAIEnabled() { setSwitch('aiEnabledToggle', !getSwitch('aiEnabledToggle')); }
+function toggleAIEnabled() { setSwitch('aiEnabledToggle', !getSwitch('aiEnabledToggle')); syncAIOffHint(); }
+// The off state is said in words, not only by the switch.
+function syncAIOffHint() {
+    const hint = document.getElementById('aiOffHint');
+    if (hint) hint.classList.toggle('hidden', getSwitch('aiEnabledToggle'));
+}
 function toggleAICamera() { setSwitch('aiCameraToggle', !getSwitch('aiCameraToggle')); updateAIWatchState(); }
 function toggleAIWatch() { setSwitch('aiWatchToggle', !getSwitch('aiWatchToggle')); updateAIWatchState(); }
 
@@ -4783,6 +4882,7 @@ async function saveAISettings() {
             ? 'A key is saved. Leave blank to keep it.'
             : 'No key saved for this provider.';
         if (status) status.textContent = aiSettings.configured ? 'Saved. The assistant is ready.' : 'Saved. Fill in a provider and a model to switch it on.';
+        toast('Saved');
         updateAssistantAvailability();
     } catch (e) {
         if (status) status.textContent = '';
@@ -4981,7 +5081,7 @@ function routeFromHash() {
     const [view, tab] = location.hash.slice(1).split('/');
     if (!['history', 'settings'].includes(view)) return;
     if (view === currentView && (!tab || tab === settingsTab)) return; // already there (popstate drew it)
-    if (tab) settingsTab = tab;
+    if (tab) { settingsTab = tab; settingsTabChosen = true; }
     try { history.replaceState({ bridgeView: view }, ''); } catch (_) {}
     showView(view, { fromHistory: true, noTransition: true });
 }

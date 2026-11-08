@@ -84,7 +84,7 @@ func probeUnreachableAt(what, addr string, err error, hint string) probeResult {
 func handleTest(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	body, err := io.ReadAll(r.Body)
@@ -94,7 +94,7 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 		err = json.Unmarshal(body, &req)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	json.Unmarshal(body, &keys) // the body just parsed as an object

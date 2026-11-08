@@ -169,12 +169,12 @@ func handlePlugTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var g config.Plug
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&g); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	if normalizePlug(&g) == nil {
@@ -266,7 +266,7 @@ func handleVirtualPrinter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	configMutex.RLock()

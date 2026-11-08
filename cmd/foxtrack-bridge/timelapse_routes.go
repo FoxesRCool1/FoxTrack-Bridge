@@ -260,15 +260,15 @@ func handleTimelapse(w http.ResponseWriter, r *http.Request) {
 			Printers    *[]string `json:"printers"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if v := req.IntervalSec; v != nil && *v != 0 && (*v < timelapse.MinInterval || *v > timelapse.MaxInterval) {
-			http.Error(w, "The picture interval must be between 5 and 3600 seconds.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "The picture interval must be between 5 and 3600 seconds.")
 			return
 		}
 		if v := req.KeepDays; v != nil && (*v < 0 || *v > timelapse.MaxKeepDays) {
-			http.Error(w, "Keep days must be between 0 (keep them all) and 3650.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "Keep days must be between 0 (keep them all) and 3650.")
 			return
 		}
 		err := mutateConfig(func(c *config.Config) error {
@@ -300,7 +300,7 @@ func handleTimelapse(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 		if errors.Is(err, errNoSuchPrinters) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err != nil {
@@ -309,7 +309,7 @@ func handleTimelapse(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(buildTimelapseView())
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -318,7 +318,7 @@ func handleTimelapse(w http.ResponseWriter, r *http.Request) {
 func handleTimelapseFile(w http.ResponseWriter, r *http.Request) {
 	id := pathTail(r, "/api/timelapse/file/")
 	if !timelapse.ValidID(id) {
-		http.Error(w, "That is not a timelapse ID.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "That is not a timelapse ID.")
 		return
 	}
 	rec := timelapseRecorder()
@@ -355,17 +355,17 @@ func handleTimelapseFile(w http.ResponseWriter, r *http.Request) {
 		jsonHeaders(w)
 		w.Write([]byte(`{"status":"ok"}`))
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
 func timelapseError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, timelapse.ErrBadID):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, timelapse.ErrNotFound):
-		http.Error(w, err.Error(), http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, err.Error())
 	default:
-		http.Error(w, "The timelapse could not be read: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "The timelapse could not be read: "+err.Error())
 	}
 }

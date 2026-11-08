@@ -97,7 +97,7 @@ var relayHTTPClient = &http.Client{Timeout: 10 * time.Second}
 // records them for the dashboard instead of burning three attempts and
 // dropping the payload in silence.
 type RelayProblem struct {
-	Kind    string `json:"kind"`    // "plan_limit" | "printer_limit" | "unauthorized" | "unknown_printer"
+	Kind    string `json:"kind"`    // "plan_limit" | "printer_limit" | "unauthorized" | "unknown_printer" | "rejected"
 	Message string `json:"message"` // shown to the user as-is
 	Printer string `json:"printer"` // the printer whose send was refused
 	Since   string `json:"since"`   // RFC 3339, when this problem was first seen
@@ -120,13 +120,68 @@ var (
 	relayProblems  = map[string]*RelayProblem{} // accountWide, or "printer:"+serial
 )
 
-// problemKey is where a problem of this kind lives: a printer limit and an
-// unknown printer belong to one printer, the rest to the account.
+// problemKey is where a problem of this kind lives: a printer limit, an
+// unknown printer and a refused report belong to one printer, the rest to the
+// account.
 func problemKey(kind, serial string) string {
-	if kind == "printer_limit" || kind == "unknown_printer" {
+	if kind == "printer_limit" || kind == "unknown_printer" || kind == "rejected" {
 		return "printer:" + serial
 	}
 	return accountWide
+}
+
+// relayDelivered is set once the current project has accepted one relay
+// report since the Bridge started; the dashboard says "connected" only then.
+var relayDelivered bool // guarded by relayProblemMu
+
+func markDelivered() {
+	relayProblemMu.Lock()
+	relayDelivered = true
+	relayProblemMu.Unlock()
+}
+
+// ResetRelayHealth forgets every recorded problem and the delivered flag: the
+// FoxTrack token changed or was removed, so what the old token was told no
+// longer describes this connection.
+func ResetRelayHealth() {
+	relayProblemMu.Lock()
+	relayProblems = map[string]*RelayProblem{}
+	relayDelivered = false
+	relayProblemMu.Unlock()
+}
+
+// RelayDelivered reports whether FoxTrack has accepted at least one printer
+// report since the Bridge started.
+func RelayDelivered() bool {
+	relayProblemMu.Lock()
+	defer relayProblemMu.Unlock()
+	return relayDelivered
+}
+
+// HeaderName returns name as FoxTrack's edge functions will read it from the
+// X-Printer-Name header: trimmed, at most 128 characters, encoded as Latin-1
+// because Deno decodes header bytes that way (UTF-8 "é" would arrive as "Ã©").
+// A character outside Latin-1 (emoji, CJK) becomes "?" and a control
+// character a space; the exact name travels in the body (RelayPrint.PrinterName).
+func HeaderName(name string) string {
+	name = strings.TrimSpace(name)
+	out := make([]byte, 0, len(name))
+	n := 0
+	for _, r := range name {
+		if n == 128 {
+			break
+		}
+		n++
+		switch {
+		case r < 0x20 || r == 0x7F:
+			out = append(out, ' ')
+		case r <= 0xFF:
+			out = append(out, byte(r))
+		default:
+			out = append(out, '?')
+		}
+	}
+	return string(out)
 }
 
 // errNotRetryable marks a rejection the retry queue must drop rather than
@@ -284,6 +339,21 @@ func notePermanentReject(endpoint string, status int, body []byte, serial, print
 		}
 		msg = strings.TrimPrefix(msg, "plan_limit: ")
 		setRelayProblem("plan_limit", msg, serial, printer)
+		return msg
+
+	case status >= 400 && status < 500 && status != 404 && status != 429:
+		// Any other 4xx is a report FoxTrack will keep refusing (a header it
+		// rejects, a body it cannot read): say so on the dashboard instead
+		// of retrying three times and dropping it in silence.
+		detail := strings.TrimSpace(payload.Error)
+		if detail == "" {
+			detail = strings.TrimSpace(payload.Message)
+		}
+		msg := fmt.Sprintf("FoxTrack refused a report for %s (HTTP %d)", printer, status)
+		if detail != "" {
+			msg += ": " + detail
+		}
+		setRelayProblem("rejected", msg, serial, printer)
 		return msg
 	}
 
@@ -453,6 +523,9 @@ type RelayAmsSlot struct {
 }
 
 type RelayPrint struct {
+	// PrinterName is the printer's exact name. The X-Printer-Name header can
+	// only carry Latin-1 (HeaderName), so FoxTrack reads the real name here.
+	PrinterName        string         `json:"printer_name,omitempty"`
 	GcodeState         string         `json:"gcode_state"`
 	SubTaskName        string         `json:"subtask_name"`
 	McPercent          int            `json:"mc_percent"`
@@ -753,6 +826,10 @@ func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayP
 	if p.Print.Alarms != nil { // nil = this report says nothing about alarms
 		p.Print.Alarms = CleanAlarms(p.Print.Alarms)
 	}
+	if p.Print.PrinterName == "" {
+		// The exact UTF-8 name; the header carries a Latin-1 copy (HeaderName).
+		p.Print.PrinterName = strings.TrimSpace(printerName)
+	}
 	body, err := json.Marshal(p)
 	if err != nil {
 		return err
@@ -764,7 +841,7 @@ func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayP
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("X-Printer-Serial", printerSerial)
-	req.Header.Set("X-Printer-Name", printerName)
+	req.Header.Set("X-Printer-Name", HeaderName(printerName))
 	if p.LegacyID != "" {
 		req.Header.Set("X-Printer-Legacy-Id", p.LegacyID)
 	}
@@ -782,6 +859,7 @@ func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayP
 	}
 	if isCurrentProject(webhookURL) {
 		clearRelayProblem(printerSerial)
+		markDelivered()
 	}
 	log.Printf("[relay] Sent relay payload for %s (%d%%)", printerName, p.Print.McPercent)
 	return nil
@@ -807,7 +885,7 @@ func SendSnapshot(apiKey, snapshotURL, serial, name string, jpegBytes []byte) er
 	req.Header.Set("Content-Type", "image/jpeg")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("X-Printer-Serial", serial)
-	req.Header.Set("X-Printer-Name", name)
+	req.Header.Set("X-Printer-Name", HeaderName(name))
 	resp, err := relayHTTPClient.Do(req)
 	if err != nil {
 		return err

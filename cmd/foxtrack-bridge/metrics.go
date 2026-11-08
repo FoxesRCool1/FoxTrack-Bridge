@@ -47,7 +47,7 @@ func handleMetricsSettings(w http.ResponseWriter, r *http.Request) {
 			Enabled bool `json:"enabled"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
-			http.Error(w, "That request was not valid JSON.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "That request was not valid JSON.")
 			return
 		}
 		if err := mutateConfig(func(c *config.Config) error {
@@ -59,17 +59,17 @@ func handleMetricsSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]bool{"enabled": req.Enabled})
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
 func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "HEAD" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !metricsEnabled() {
-		http.Error(w, "Metrics are turned off. Turn them on in Settings, under Prometheus.", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Metrics are turned off. Turn them on in Settings, under Prometheus.")
 		return
 	}
 	configMutex.RLock()

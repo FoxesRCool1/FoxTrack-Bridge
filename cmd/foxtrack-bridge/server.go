@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"foxtrack-bridge/backup"
 	"foxtrack-bridge/config"
@@ -200,7 +201,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -258,6 +259,16 @@ func mqttPrinter(p config.Printer, cfg *config.Config) mqttpkg.Printer {
 
 // jsonHeaders sets the response content type for JSON API endpoints. The
 // dashboard is served same-origin, so no CORS headers are sent.
+// writeErr is how every API handler reports an error: the status and a JSON
+// body {"error": msg}, msg written for the person who will read it. The
+// dashboard's apiFetch and other clients then need to parse one shape only.
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
 func jsonHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 }
@@ -299,14 +310,14 @@ func isFoxTrackWebOrigin(origin string) bool {
 // be written to the config file, so the dashboard doesn't show it as saved.
 func writeSaveFailed(w http.ResponseWriter, err error) {
 	log.Printf("ERROR: failed to save config: %v", err)
-	http.Error(w, "The change is active, but the config file could not be written ("+err.Error()+"). It will be lost when the Bridge restarts.", http.StatusInternalServerError)
+	writeErr(w, http.StatusInternalServerError, "The change is active, but the config file could not be written ("+err.Error()+"). It will be lost when the Bridge restarts.")
 }
 
 // writeSaveRefused answers a change that was not applied because the config
 // file could not be written, so nothing changed in memory either.
 func writeSaveRefused(w http.ResponseWriter, err error) {
 	log.Printf("ERROR: failed to save config: %v", err)
-	http.Error(w, "The settings could not be written to the config file, so nothing was changed ("+err.Error()+").", http.StatusInternalServerError)
+	writeErr(w, http.StatusInternalServerError, "The settings could not be written to the config file, so nothing was changed ("+err.Error()+").")
 }
 
 // maxRequestBody caps every request body. Nothing the dashboard or FoxTrack
@@ -326,7 +337,7 @@ func guardWrites(next http.Handler) http.Handler {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		}
 		if !hostAllowed(r.Host) {
-			http.Error(w, "unknown host name; set FOXTRACK_BRIDGE_ALLOWED_HOSTS to allow it", http.StatusForbidden)
+			writeErr(w, http.StatusForbidden, "unknown host name; set FOXTRACK_BRIDGE_ALLOWED_HOSTS to allow it")
 			return
 		}
 		switch r.Method {
@@ -334,14 +345,14 @@ func guardWrites(next http.Handler) http.Handler {
 			// A scan floods the network, so another site may not start one
 			// with an <img> tag.
 			if r.URL.Path == "/api/discover" && !writeAllowed(r) {
-				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				writeErr(w, http.StatusForbidden, "cross-site request refused")
 				return
 			}
 			next.ServeHTTP(w, r)
 			return
 		}
 		if !writeAllowed(r) {
-			http.Error(w, "cross-site request refused", http.StatusForbidden)
+			writeErr(w, http.StatusForbidden, "cross-site request refused")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -547,10 +558,13 @@ func handleRelayHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]any{"problem": webhook.RelayHealth()})
+	json.NewEncoder(w).Encode(map[string]any{
+		"problem":   webhook.RelayHealth(),
+		"delivered": webhook.RelayDelivered(), // a report was accepted since start
+	})
 }
 
 // handleFoxTrackCheck tries the saved bridge token once against FoxTrack, so
@@ -561,7 +575,7 @@ func handleRelayHealth(w http.ResponseWriter, r *http.Request) {
 func handleFoxTrackCheck(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	configMutex.RLock()
@@ -606,7 +620,7 @@ func handleVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]string{"version": version.AppVersion})
@@ -618,7 +632,7 @@ func handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -641,7 +655,7 @@ func handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -663,7 +677,7 @@ func handleUpdateRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -694,19 +708,19 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	// Parse /api/control/{name}/{command}
 	parts := strings.Split(pathTail(r, "/api/control/"), "/")
 	if len(parts) != 2 {
-		http.Error(w, "usage: /api/control/{printer_name}/{command}", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "usage: /api/control/{printer_name}/{command}")
 		return
 	}
 	printerName, err := url.PathUnescape(parts[0])
 	if err != nil {
-		http.Error(w, "invalid printer name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid printer name")
 		return
 	}
 	command := parts[1]
@@ -841,13 +855,13 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 	configMutex.RUnlock()
 
 	if !ok {
-		http.Error(w, "printer not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "printer not found")
 		return
 	}
 
 	if !isBambuPrinterConfig(found) {
 		if err := lanCtrl.ProxyCamera(w, r, found.Name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			writeErr(w, http.StatusBadGateway, err.Error())
 		}
 		return
 	}
@@ -857,11 +871,11 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 		ip = mqttpkg.CloudIP(found.Serial)
 	}
 	if found.IsCloud() && ip == "" {
-		http.Error(w, "camera needs the printer's LAN address: it is learned from the printer's first cloud report, or set it when adding the printer", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "camera needs the printer's LAN address: it is learned from the printer's first cloud report, or set it when adding the printer")
 		return
 	}
 	if found.IsCloud() && found.LANCode == "" {
-		http.Error(w, "camera needs the printer's LAN access code, which the Bambu account did not report", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "camera needs the printer's LAN access code, which the Bambu account did not report")
 		return
 	}
 	if useRTSP(found) {
@@ -912,7 +926,7 @@ func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) 
 	)
 	if err != nil {
 		log.Printf("[camera/%s] connect: %v", printerName, err)
-		http.Error(w, "camera unavailable", http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, "camera unavailable")
 		return
 	}
 	defer conn.Close()
@@ -928,7 +942,7 @@ func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) 
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := conn.Write(auth); err != nil {
 		log.Printf("[camera/%s] auth write: %v", printerName, err)
-		http.Error(w, "camera unavailable", http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, "camera unavailable")
 		return
 	}
 	reader := bufio.NewReader(conn)
@@ -961,7 +975,7 @@ func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) 
 	frame, err := readJPEG()
 	if err != nil {
 		log.Printf("[camera/%s] no picture from the printer: %v", printerName, err)
-		http.Error(w, bambuCameraNoFrames, http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, bambuCameraNoFrames)
 		return
 	}
 
@@ -1210,6 +1224,22 @@ func rejectNewlyIntroducedDuplicateNames(oldPrinters, newPrinters []config.Print
 // Matched via errors.Is in handleConfig to pick the right HTTP status.
 var errBlankPrinterName = errors.New("every printer must have a name")
 
+// maxPrinterNameRunes is FoxTrack's limit for the printer name header; a
+// longer name would be refused by every report, so it is refused here first.
+const maxPrinterNameRunes = 128
+
+var errPrinterNameTooLong = errors.New("Printer names are limited to 128 characters")
+
+// rejectLongNames refuses a printer list with a name FoxTrack would not accept.
+func rejectLongNames(printers []config.Printer) error {
+	for _, p := range printers {
+		if utf8.RuneCountInString(strings.TrimSpace(p.Name)) > maxPrinterNameRunes {
+			return errPrinterNameTooLong
+		}
+	}
+	return nil
+}
+
 // rejectNewlyBlankNames checks a full-replace printer list against the previous
 // one and rejects only a nameless entry that the payload itself introduces. A
 // blank name already on disk is grandfathered through for the same reason a
@@ -1279,8 +1309,14 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 	// "keep it", so a Settings save can never wipe the provider key.
 	if newCfg.AI == nil {
 		newCfg.AI = old.AI
-	} else if newCfg.AI.APIKey == "" && old.AI != nil {
-		newCfg.AI.APIKey = old.AI.APIKey
+	} else if newCfg.AI.APIKey == "" && old.AI != nil && old.AI.APIKey != "" {
+		// A kept key only survives while it still goes to the same provider
+		// (the same rule /api/ai/settings applies).
+		if sameAIProvider(newCfg.AI, old.AI) {
+			newCfg.AI.APIKey = old.AI.APIKey
+		} else {
+			log.Printf("[assistant] provider endpoint changed with no new key; the saved API key was not carried over")
+		}
 	}
 	oldByID := make(map[string]config.Printer, len(old.Printers))
 	oldByName := make(map[string]config.Printer, len(old.Printers))
@@ -1296,22 +1332,19 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 		prev, ok := config.Printer{}, false
 		if p.ID != "" {
 			prev, ok = oldByID[p.ID]
-		}
-		if !ok {
+		} else {
+			// Only an ID-less payload may match by name: a new printer that
+			// reuses an old name must not inherit the old printer's secrets.
+			// The match adopts the stored ID, so FoxTrack keeps knowing it.
 			prev, ok = oldByName[p.Name]
+			if ok {
+				p.ID = prev.ID
+			}
 		}
 		if !ok {
 			continue
 		}
-		if p.LANCode == "" {
-			p.LANCode = prev.LANCode
-		}
-		if p.APIKey == "" {
-			p.APIKey = prev.APIKey
-		}
-		if p.HomeAssistantToken == "" {
-			p.HomeAssistantToken = prev.HomeAssistantToken
-		}
+		keepPrinterSecrets(p, prev)
 		keepPlugSecrets(p.Plug, prev.Plug)
 		// PreviousNames has no redacted-view counterpart, so a client echoing
 		// back the config it was given always omits it. Treat "absent" as "keep"
@@ -1320,6 +1353,65 @@ func applyStoredSecrets(newCfg, old *config.Config) {
 			p.PreviousNames = append([]string(nil), prev.PreviousNames...)
 		}
 	}
+}
+
+// keepPrinterSecrets fills p's blank secrets from prev, but only where the
+// secret would still go to the machine it was saved for: a printer repointed
+// at another address must not carry the old machine's key or token along
+// (and a stale key would only produce confusing auth failures). The LAN code
+// belongs to the physical printer, so it follows the serial, not the IP.
+func keepPrinterSecrets(p *config.Printer, prev config.Printer) {
+	dropped := false
+	if p.LANCode == "" && prev.LANCode != "" {
+		if strings.EqualFold(strings.TrimSpace(p.Serial), strings.TrimSpace(prev.Serial)) {
+			p.LANCode = prev.LANCode
+		} else {
+			dropped = true
+		}
+	}
+	if p.APIKey == "" && prev.APIKey != "" {
+		if sameHost(p.MoonrakerURL, prev.MoonrakerURL) && sameHost(p.PrusaLinkURL, prev.PrusaLinkURL) && sameHost(p.OctoPrintURL, prev.OctoPrintURL) {
+			p.APIKey = prev.APIKey
+		} else {
+			dropped = true
+		}
+	}
+	if p.HomeAssistantToken == "" && prev.HomeAssistantToken != "" {
+		if sameHost(p.HomeAssistantURL, prev.HomeAssistantURL) {
+			p.HomeAssistantToken = prev.HomeAssistantToken
+		} else {
+			dropped = true
+		}
+	}
+	if dropped {
+		log.Printf("[config] %s: address changed with no new key; the saved key was not carried over", p.Name)
+	}
+}
+
+// sameHost reports whether two addresses name the same machine (scheme and
+// host, port included; the path may differ). Unparseable values compare as
+// trimmed text.
+func sameHost(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == b {
+		return true
+	}
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil || ua.Host == "" || ub.Host == "" {
+		return false
+	}
+	return strings.EqualFold(ua.Scheme, ub.Scheme) && strings.EqualFold(ua.Host, ub.Host)
+}
+
+// sameAIProvider reports whether two assistant settings point at the same
+// provider endpoint, so a kept key never goes to a server it was not saved for.
+func sameAIProvider(a, b *config.AI) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	trim := func(s string) string { return strings.TrimRight(strings.TrimSpace(s), "/") }
+	return a.Preset == b.Preset && trim(a.BaseURL) == trim(b.BaseURL)
 }
 
 // errRefuseClearPrinters is returned when a POST /api/config body would replace a
@@ -1348,6 +1440,10 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 	}
 	var meta struct {
 		ConfirmClearPrinters bool `json:"confirm_clear_printers"`
+		// ClearFoxTrackToken unlinks FoxTrack: a blank token otherwise means
+		// "keep the stored one", so the dashboard needs an explicit way to
+		// remove it.
+		ClearFoxTrackToken bool `json:"clear_foxtrack_token"`
 	}
 	_ = json.Unmarshal(body, &meta) // best-effort; defaults to false
 
@@ -1372,11 +1468,10 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 	case len(newCfg.Printers) == 0 && old != nil && len(old.Printers) > 0 && !meta.ConfirmClearPrinters:
 		return nil, errRefuseClearPrinters
 	default:
-		// Full replace: entries missing an ID (genuinely new printers added
-		// client-side before this save) get one minted now. Entries that
-		// already carry an ID (a rename/edit of an existing printer) keep it
-		// untouched: the client must be able to echo back the ID it has.
-		assignMissingIDs(newCfg.Printers)
+		// Full replace. Entries that carry an ID (a rename/edit of an existing
+		// printer) keep it untouched: the client must be able to echo back the
+		// ID it has. Entries without one are matched by name in
+		// applyStoredSecrets and get a fresh ID below only when nothing matched.
 		if old != nil {
 			if err := rejectNewlyIntroducedDuplicateNames(old.Printers, newCfg.Printers); err != nil {
 				return nil, err
@@ -1385,8 +1480,17 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 				return nil, err
 			}
 		}
+		if err := rejectLongNames(newCfg.Printers); err != nil {
+			return nil, err
+		}
 	}
 	applyStoredSecrets(&newCfg, old)
+	if printersPresent {
+		assignMissingIDs(newCfg.Printers) // genuinely new printers get their ID now
+	}
+	if meta.ClearFoxTrackToken {
+		newCfg.APIKey, newCfg.FoxTrack2APIKey = "", ""
+	}
 	config.KeepFeatureBlocks(&newCfg, old)
 	return &newCfg, nil
 }
@@ -1403,7 +1507,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		configMutex.Lock()
@@ -1412,9 +1516,9 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			configMutex.Unlock()
 			if errors.Is(err, errRefuseClearPrinters) || errors.Is(err, errDuplicatePrinterName) {
-				http.Error(w, err.Error(), http.StatusConflict)
+				writeErr(w, http.StatusConflict, err.Error())
 			} else {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				writeErr(w, http.StatusBadRequest, err.Error())
 			}
 			return
 		}
@@ -1424,6 +1528,8 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		syncPrinterConnections(oldCfg, snapshot)
 		saveErr := config.SaveConfig(snapshot)
 		if oldCfg == nil || oldCfg.FoxTrack2APIKey != snapshot.FoxTrack2APIKey {
+			// A new or removed token: the old token's refusals no longer apply.
+			webhook.ResetRelayHealth()
 			wakeBridgeCommands()
 		}
 		// On purpose: the change stays active and the user is told it was not
@@ -1434,7 +1540,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -1454,7 +1560,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		var p config.Printer
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if p.IsCloud() {
@@ -1517,7 +1623,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "printer": redactPrinter(p)})
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -1543,16 +1649,16 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		}
 		var pb patchBody
 		if err := json.NewDecoder(r.Body).Decode(&pb); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 		if pb.CameraHidden == nil {
-			http.Error(w, "camera_hidden is required", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "camera_hidden is required")
 			return
 		}
 		token := strings.TrimPrefix(r.URL.Path, "/api/printers/")
 		if token == "" {
-			http.Error(w, "missing printer id or name", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "missing printer id or name")
 			return
 		}
 		configMutex.Lock()
@@ -1576,7 +1682,7 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		}
 		if matched == nil {
 			configMutex.Unlock()
-			http.Error(w, "printer not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "printer not found")
 			return
 		}
 		matched.CameraHidden = *pb.CameraHidden
@@ -1585,19 +1691,19 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		configMutex.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if err := config.SaveConfig(cfg); err != nil {
-			http.Error(w, "failed to save config", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
 		json.NewEncoder(w).Encode(redactPrinter(snapshot))
 		return
 	}
 	if r.Method != "DELETE" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	token := strings.TrimPrefix(r.URL.Path, "/api/printers/")
 	if token == "" {
-		http.Error(w, "missing printer id or name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "missing printer id or name")
 		return
 	}
 
@@ -1627,7 +1733,7 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		// compaction above is a no-op in that case) and say so, rather than
 		// reporting a delete that never happened.
 		configMutex.Unlock()
-		http.Error(w, "printer not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "printer not found")
 		return
 	}
 	configStore.Printers = printers
@@ -1730,6 +1836,9 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 		name := strings.TrimSpace(*edit.Name)
 		if name == "" {
 			return nil, -1, errBlankPrinterName
+		}
+		if utf8.RuneCountInString(name) > maxPrinterNameRunes {
+			return nil, -1, errPrinterNameTooLong
 		}
 		if name != p.Name {
 			others := make([]config.Printer, 0, len(cfg.Printers))
@@ -1854,6 +1963,20 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 			p.WebcamURL = strings.TrimSpace(*edit.WebcamURL)
 		}
 	}
+	// A secret that was not typed again is kept only while it still goes to
+	// the same machine (keepPrinterSecrets): repointing a printer at a new
+	// address with a blank key must not send the old key there.
+	blank := func(s *string) bool { return s == nil || strings.TrimSpace(*s) == "" }
+	if blank(edit.LANCode) {
+		p.LANCode = ""
+	}
+	if blank(edit.APIKey) {
+		p.APIKey = ""
+	}
+	if blank(edit.HomeAssistantToken) {
+		p.HomeAssistantToken = ""
+	}
+	keepPrinterSecrets(p, old.Printers[idx])
 	return cfg, idx, nil
 }
 
@@ -2075,7 +2198,7 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	records, err := history.Load()
@@ -2107,7 +2230,7 @@ func handleHistoryByPrinter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	name := pathTail(r, "/api/history/")
@@ -2116,7 +2239,7 @@ func handleHistoryByPrinter(w http.ResponseWriter, r *http.Request) {
 		name = decoded
 	}
 	if name == "" {
-		http.Error(w, "missing printer name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "missing printer name")
 		return
 	}
 	records, err := printerHistory(name)
@@ -2138,16 +2261,16 @@ func handleHistoryNote(w http.ResponseWriter, r *http.Request) {
 		Note        string  `json:"note"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if body.PrinterName == "" || body.StartTime <= 0 {
-		http.Error(w, "printer_name and a positive start_time are required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "printer_name and a positive start_time are required")
 		return
 	}
 	note, err := history.SetNote(body.PrinterName, int64(body.StartTime), body.Note)
 	if errors.Is(err, history.ErrNotFound) {
-		http.Error(w, "no such history record", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "no such history record")
 		return
 	}
 	if err != nil {

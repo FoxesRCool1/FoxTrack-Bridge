@@ -53,7 +53,7 @@ func aiSettings() config.AI {
 func requireJSON(w http.ResponseWriter, r *http.Request) bool {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		writeErr(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
 		return false
 	}
 	return true
@@ -107,16 +107,16 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 			WatchEveryMin *int    `json:"watch_every_min"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		req.Preset = strings.TrimSpace(req.Preset)
 		if req.Preset != "" && !ai.ValidPreset(req.Preset) {
-			http.Error(w, "unknown AI provider "+req.Preset, http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "unknown AI provider "+req.Preset)
 			return
 		}
 		if req.WatchEveryMin != nil && *req.WatchEveryMin != 0 && (*req.WatchEveryMin < 2 || *req.WatchEveryMin > 60) {
-			http.Error(w, "Check every 2 to 60 minutes.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "Check every 2 to 60 minutes.")
 			return
 		}
 
@@ -161,7 +161,7 @@ func handleAISettings(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(view)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -176,7 +176,7 @@ func handleAIModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !requireJSON(w, r) {
@@ -189,7 +189,7 @@ func handleAIModels(w http.ResponseWriter, r *http.Request) {
 		APIKey  string `json:"api_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -232,7 +232,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !requireJSON(w, r) {
@@ -255,7 +255,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		} `json:"messages"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -275,7 +275,7 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if latest == "" {
-		http.Error(w, "no message to answer", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "no message to answer")
 		return
 	}
 

@@ -103,7 +103,7 @@ func TestOfflineAfterTwoFailedPolls(t *testing.T) {
 		t.Fatal("a good poll in between restarts the count")
 	}
 
-	p := mqttpkg.OfflinePayload(configpkg.KindKlipper, "Klipper", nil).Print
+	p := mqttpkg.OfflinePayload(nil, configpkg.KindKlipper, "Klipper", nil).Print
 	if p.GcodeState != "OFFLINE" || p.Alarms != nil || p.McRemainingTime != -1 {
 		t.Errorf("OFFLINE payload = %+v", p)
 	}

@@ -339,12 +339,23 @@ func TestResolveConfigImport_KeepsFoxTrackKeysTheFileLacks(t *testing.T) {
 	if got.APIKey != "ft1-current" || got.FoxTrack2APIKey != "ft2-current" {
 		t.Fatalf("keys = %q %q, want the current ones kept", got.APIKey, got.FoxTrack2APIKey)
 	}
+	// A linked install stays on its current token: an older file must not roll
+	// it back to one that may since have been revoked.
+	got, err = resolveConfigImport(old, []byte(`{"printers":[{"name":"Solo","ip":"10.0.0.2"}],"foxtrack2_api_key":"ft2-file"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FoxTrack2APIKey != "ft2-current" {
+		t.Fatalf("FoxTrack2APIKey = %q, want the current token kept", got.FoxTrack2APIKey)
+	}
+	// With nothing stored, the file's token is taken.
+	old.APIKey, old.FoxTrack2APIKey = "", ""
 	got, err = resolveConfigImport(old, []byte(`{"printers":[{"name":"Solo","ip":"10.0.0.2"}],"foxtrack2_api_key":"ft2-file"}`), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.FoxTrack2APIKey != "ft2-file" {
-		t.Fatalf("FoxTrack2APIKey = %q, want the file's key", got.FoxTrack2APIKey)
+		t.Fatalf("FoxTrack2APIKey = %q, want the file's key when none is stored", got.FoxTrack2APIKey)
 	}
 }
 

@@ -95,7 +95,7 @@ func handleMaintenance(w http.ResponseWriter, r *http.Request) {
 		printers, tasks := maintenanceSnapshot()
 		recs, err := history.Load()
 		if err != nil {
-			http.Error(w, "The print history could not be read.", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "The print history could not be read.")
 			return
 		}
 		views := maintenance.Evaluate(tasks, printers, recs)
@@ -123,7 +123,7 @@ func handleMaintenance(w http.ResponseWriter, r *http.Request) {
 		}
 		postMaintenance(w, r)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -141,13 +141,18 @@ func postMaintenance(w http.ResponseWriter, r *http.Request) {
 		Presets       bool    `json:"presets"` // add every suggested task the printer lacks
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "The request could not be read.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "The request could not be read.")
 		return
 	}
-	bad := func(msg string) { http.Error(w, msg, http.StatusBadRequest) }
+	bad := func(msg string) { writeErr(w, http.StatusBadRequest, msg) }
+	if strings.TrimSpace(req.PrinterID) == "" {
+		bad("Choose a printer from the list.")
+		return
+	}
 	printer, ok := printerByID(req.PrinterID)
 	if !ok {
-		bad("Choose a printer from the list.")
+		// Unknown printer is 404 everywhere in the API.
+		writeErr(w, http.StatusNotFound, "Choose a printer from the list.")
 		return
 	}
 	now := time.Now().Unix()
@@ -289,13 +294,13 @@ func handleMaintenanceTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !found {
-			http.Error(w, gone, http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, gone)
 			return
 		}
 		printers, _ := maintenanceSnapshot()
 		views := maintenance.Evaluate([]config.MaintenanceTask{done}, printers, nil) // nothing has printed since now
 		if len(views) == 0 {
-			http.Error(w, gone, http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, gone)
 			return
 		}
 		json.NewEncoder(w).Encode(views[0])
@@ -317,11 +322,11 @@ func handleMaintenanceTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !found {
-			http.Error(w, gone, http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, gone)
 			return
 		}
 		json.NewEncoder(w).Encode(removed)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }

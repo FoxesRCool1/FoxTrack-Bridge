@@ -224,8 +224,9 @@ type Controller struct {
 	snapInFlightMu sync.Mutex
 	relayLastT     map[string]int64
 	relayHeld      map[string]bool
-	pollFails      map[string]int  // consecutive failed polls; guarded by relayLastTMu
-	offlineSent    map[string]bool // FoxTrack was told the printer is unreachable; guarded by relayLastTMu
+	pollFails      map[string]int                  // consecutive failed polls; guarded by relayLastTMu
+	offlineSent    map[string]bool                 // FoxTrack was told the printer is unreachable; guarded by relayLastTMu
+	lastRelay      map[string]webhook.RelayPayload // last good report per printer, for the OFFLINE one; guarded by relayLastTMu
 	relayLastTMu   sync.Mutex
 	relayQMu       sync.Mutex
 	relayBusy      map[string]bool
@@ -245,6 +246,7 @@ func NewController() *Controller {
 		relayHeld:    map[string]bool{},
 		pollFails:    map[string]int{},
 		offlineSent:  map[string]bool{},
+		lastRelay:    map[string]webhook.RelayPayload{},
 		relayBusy:    map[string]bool{},
 		relayPending: map[string]*relayJob{},
 		uploaded:     map[string]string{},
@@ -383,20 +385,27 @@ func (c *Controller) SyncPrinters(printers []configpkg.Printer, foxAPIKey, fox2A
 		c.AddOrUpdatePrinter(p, foxAPIKey, fox2APIKey)
 	}
 
-	var gone []string
+	type removed struct{ name, key string }
+	var gone []removed
 	c.mu.Lock()
 	for name, stop := range c.cancelers {
 		if !keep[name] {
 			close(stop)
 			delete(c.cancelers, name)
+			key := "name:" + name // sessionKey, inline: c.mu is held
+			if p, ok := c.printers[name]; ok && p.ID != "" {
+				key = "id:" + p.ID
+			}
 			delete(c.printers, name)
 			delete(c.states, name)
-			gone = append(gone, name)
+			gone = append(gone, removed{name, key})
 		}
 	}
 	c.mu.Unlock()
-	for _, name := range gone {
+	for _, g := range gone {
+		name := g.name
 		c.forgetBookkeeping(name)
+		forgetSession(name, g.key)
 	}
 }
 
@@ -422,6 +431,7 @@ func (c *Controller) AddOrUpdatePrinter(p configpkg.Printer, foxAPIKey, fox2APIK
 }
 
 func (c *Controller) RemovePrinter(name string) {
+	key := c.sessionKey(name) // before the printer is gone, so an ID-keyed session is found
 	c.mu.Lock()
 	if stop, ok := c.cancelers[name]; ok {
 		close(stop)
@@ -431,6 +441,7 @@ func (c *Controller) RemovePrinter(name string) {
 	delete(c.states, name)
 	c.mu.Unlock()
 	c.forgetBookkeeping(name)
+	forgetSession(name, key)
 }
 
 // forgetBookkeeping drops a removed printer's print session and relay pacing,
@@ -444,6 +455,7 @@ func (c *Controller) forgetBookkeeping(name string) {
 	delete(c.relayHeld, name)
 	delete(c.pollFails, name)
 	delete(c.offlineSent, name)
+	delete(c.lastRelay, name)
 	c.relayLastTMu.Unlock()
 	c.snapLastTMu.Lock()
 	delete(c.snapLastT, name)
@@ -672,16 +684,26 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 			}
 			if err == nil {
 				if c.shouldRelay(p.Name, prev, &t, time.Now().Unix()) {
+					c.relayLastTMu.Lock()
+					c.lastRelay[p.Name] = relayPayload
+					c.relayLastTMu.Unlock()
 					c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey, payload: relayPayload, serial: serial, legacy: legacy})
 				}
 			} else if c.noteFailedPoll(p.Name, time.Now().Unix()) {
-				// The Bridge is fine and the printer is not: say so once.
+				// The Bridge is fine and the printer is not: say so once, keeping
+				// the last known print (progress, file, spools) in the report.
 				model := ""
 				if prev != nil {
 					model = prev.PrinterModel
 				}
+				var last *webhook.RelayPayload
+				c.relayLastTMu.Lock()
+				if lp, ok := c.lastRelay[p.Name]; ok {
+					last = &lp
+				}
+				c.relayLastTMu.Unlock()
 				c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey,
-					payload: mqttpkg.OfflinePayload(p.Kind(), model, t.Plug), serial: serial, legacy: legacy})
+					payload: mqttpkg.OfflinePayload(last, p.Kind(), model, t.Plug), serial: serial, legacy: legacy})
 			}
 
 			if fox2APIKey != "" && (t.Status == "printing" || t.Status == "paused") && snapshotURL(p) != "" {

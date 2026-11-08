@@ -65,6 +65,9 @@ func exportableConfig(cfg *config.Config) *config.Config {
 	if out.AI != nil {
 		out.AI.APIKey = ""
 	}
+	if out.VirtualPrinter != nil {
+		out.VirtualPrinter.APIKey = ""
+	}
 	if out.Notifications != nil {
 		for i := range out.Notifications.Channels {
 			ch := &out.Notifications.Channels[i]
@@ -97,8 +100,9 @@ func keepImportedSecrets(cfg, old *config.Config) {
 			if !ok || prev.Kind != ch.Kind {
 				continue
 			}
-			sameURL := strings.TrimSpace(prev.URL) == strings.TrimSpace(ch.URL)
-			if ch.Token == "" && (sameURL || (ch.Kind != "ntfy" && ch.Kind != "gotify")) {
+			// Kinds without a URL have it blank on both sides, so this holds
+			// their token; a changed URL must be given its token again.
+			if ch.Token == "" && strings.TrimSpace(prev.URL) == strings.TrimSpace(ch.URL) {
 				ch.Token = prev.Token
 			}
 			if ch.SMTP != nil && prev.SMTP != nil && ch.SMTP.Password == "" &&
@@ -115,7 +119,7 @@ func keepImportedSecrets(cfg, old *config.Config) {
 
 func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	configMutex.RLock()
@@ -128,7 +132,7 @@ func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	configMutex.RUnlock()
 	inner, err := json.Marshal(cfg)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	now := time.Now()
@@ -140,7 +144,7 @@ func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		Config:     inner,
 	}, "", "  ")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -197,7 +201,6 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 	if len(cfg.Printers) == 0 && old != nil && len(old.Printers) > 0 && !confirmClear {
 		return nil, errRefuseClearPrinters
 	}
-	assignMissingIDs(cfg.Printers)
 	if err := rejectNewlyIntroducedDuplicateNames(nil, cfg.Printers); err != nil {
 		return nil, err
 	}
@@ -218,6 +221,15 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 		// POST /api/config), printers matched by ID, else by name.
 		applyStoredSecrets(cfg, old)
 		keepImportedSecrets(cfg, old)
+		// A token already linked to FoxTrack stays linked: an older file must
+		// not roll the account back to a token that may since have been revoked.
+		if old.FoxTrack2APIKey != "" {
+			cfg.FoxTrack2APIKey = old.FoxTrack2APIKey
+		}
+		if old.APIKey != "" {
+			cfg.APIKey = old.APIKey
+		}
+		keepAbsentFeatureBlocks(cfg, old)
 		cfg.Security = old.Security
 		cfg.BambuCloud = old.BambuCloud
 		cfg.AI = mergeImportedAI(cfg.AI, old.AI)
@@ -227,8 +239,39 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 			cfg.AI.APIKey = ""
 		}
 	}
+	// After the secrets pass: a file from before printer IDs matches the stored
+	// printers by name and takes their IDs; only the rest get a new one.
+	assignMissingIDs(cfg.Printers)
 	mergeVirtualPrinter(cfg, old, cfg.VirtualPrinter != nil)
 	return cfg, nil
+}
+
+// keepAbsentFeatureBlocks keeps the current notifications, Spoolman, costs,
+// maintenance, MQTT export, metrics and timelapse settings when the file has
+// no such block: a backup from before a feature existed must not switch it
+// off. A block the file does carry replaces the current one.
+func keepAbsentFeatureBlocks(cfg, old *config.Config) {
+	if cfg.Notifications == nil {
+		cfg.Notifications = old.Notifications
+	}
+	if cfg.Spoolman == nil {
+		cfg.Spoolman = old.Spoolman
+	}
+	if cfg.Costs == nil {
+		cfg.Costs = old.Costs
+	}
+	if cfg.Maintenance == nil {
+		cfg.Maintenance = old.Maintenance
+	}
+	if cfg.MQTTExport == nil {
+		cfg.MQTTExport = old.MQTTExport
+	}
+	if cfg.Metrics == nil {
+		cfg.Metrics = old.Metrics
+	}
+	if cfg.Timelapse == nil {
+		cfg.Timelapse = old.Timelapse
+	}
 }
 
 // mergeImportedAI keeps the stored provider key only when the imported
@@ -294,7 +337,7 @@ func pruneBeforeImportFiles(dir string, keep int) {
 func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !requireJSON(w, r) {
@@ -302,7 +345,7 @@ func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	confirmClear := r.URL.Query().Get("confirm_clear_printers") == "true"
@@ -314,9 +357,9 @@ func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		configMutex.Unlock()
 		switch {
 		case errors.Is(err, errRefuseClearPrinters), errors.Is(err, errDuplicatePrinterName):
-			http.Error(w, err.Error(), http.StatusConflict)
+			writeErr(w, http.StatusConflict, err.Error())
 		default:
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
@@ -327,7 +370,7 @@ func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	backupName, err := saveBeforeImport(prev)
 	if err != nil {
 		configMutex.Unlock()
-		http.Error(w, "Could not save a copy of the current settings first, so nothing was changed ("+err.Error()+").", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Could not save a copy of the current settings first, so nothing was changed ("+err.Error()+").")
 		return
 	}
 	snapshot := newCfg.Clone()
