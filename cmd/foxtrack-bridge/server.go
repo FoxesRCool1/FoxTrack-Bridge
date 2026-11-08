@@ -2057,6 +2057,9 @@ func syncPrinterConnections(oldCfg, cfg *config.Config) {
 func printerIsBambu(name string) bool {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
+	if configStore == nil {
+		return false
+	}
 	for _, p := range configStore.Printers {
 		if p.Name == name {
 			return isBambuPrinterConfig(p)

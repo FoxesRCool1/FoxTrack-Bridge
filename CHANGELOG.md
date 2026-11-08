@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+**FoxTrack**
+
+- Klipper, PrusaLink, OctoPrint and Home Assistant printers now report to
+  FoxTrack under a fixed ID instead of their name, so renaming one no longer
+  makes a second printer in FoxTrack.
+- FoxTrack now says "printer not reachable" when the Bridge is running but a
+  printer is not.
+- The time left on a print shows as unknown, not a guess, when the printer
+  gives none.
+- A smart plug report no longer clears a printer's alarms in FoxTrack.
+- Printers drop offline in FoxTrack less often: the Bridge now reports at least
+  every 45 seconds, not every 60.
+- A printer FoxTrack refuses (over your plan's printer limit, for example)
+  stays flagged on the dashboard until that printer is accepted, not until
+  some other printer reports.
+- If FoxTrack does not know a printer, the dashboard says to link it in
+  FoxTrack, instead of treating its history and camera pictures as sent.
+- The current FoxTrack gets each update first, so a slow old connection can no
+  longer hold it up.
+
+**Backups and history**
+
+- Backups no longer hold any password, token or key: FoxTrack tokens, printer
+  access codes, plug, notification and MQTT secrets are all left out. Restoring
+  on the same Bridge keeps the ones it already has.
+- Backup and restore from another device need a dashboard password. Without
+  one, only the computer the Bridge runs on can use them.
+- History keeps the newest 5000 prints and one day of temperature readings per
+  print, so the file stops growing.
+- Restarting the Bridge in the middle of a print keeps the print's real start
+  time in History.
+
+**Fixes**
+
+- A FoxTrack command that arrived before the settings were loaded could crash
+  the Bridge.
+
 ## v2.6.1
 
 **Printing**

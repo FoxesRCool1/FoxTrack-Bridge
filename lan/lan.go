@@ -30,6 +30,7 @@ type printSession struct {
 	BedTemp     float64
 	TempSamples []history.TempSample
 	lastSampleT int64
+	lastSeen    int64 // unix time of the last good poll during the print
 	// lostSince is the first failed poll of the current outage, 0 while
 	// polls succeed. lastProgress and lastFilamentMM are the last values a
 	// successful poll saw, so an outage that outlives pollGrace still
@@ -67,6 +68,7 @@ func (c *Controller) updateSession(name string, t *mqttpkg.TelemetryData, pollEr
 // applyPoll is the session bookkeeping behind updateSession. pollErr is set when
 // the poll failed; t is then a "disconnected" placeholder and is not trusted.
 func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr error, now int64) *sessionEnd {
+	key := c.sessionKey(name) // before sessionMu: it reads the printer list
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
 	sess := c.sessions[name]
@@ -82,6 +84,7 @@ func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr er
 			return nil
 		}
 		delete(c.sessions, name)
+		forgetSession(name, key)
 		return endOf(name, sess, "cancelled", sess.lastProgress, sess.lastFilamentMM, now)
 	}
 
@@ -96,16 +99,22 @@ func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr er
 
 	if sess == nil {
 		if t.Status == "printing" {
-			c.sessions[name] = &printSession{
+			ns := &printSession{
 				StartTime:      now,
 				FileName:       t.FileName,
 				NozzleTemp:     t.NozzleTemp,
 				BedTemp:        t.BedTemp,
 				TempSamples:    []history.TempSample{{T: 0, NozzleTemp: t.NozzleTemp, BedTemp: t.BedTemp}},
 				lastSampleT:    now,
+				lastSeen:       now,
 				lastProgress:   t.Progress,
 				lastFilamentMM: t.FilamentUsedMM,
 			}
+			// The Bridge restarted in the middle of this print: take the saved
+			// session back, so it keeps its real start time.
+			ns.restoreIfSame(name, key, t, now)
+			c.sessions[name] = ns
+			saveSession(name, key, ns)
 		}
 		return ended
 	}
@@ -114,10 +123,13 @@ func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr er
 		// Ongoing print. A pause is part of it (mqttpkg.InPrint), so it
 		// neither ends the session nor starts a new one on resume.
 		sess.lostSince = 0
+		sess.lastSeen = now
 		sess.lastProgress = t.Progress
 		sess.lastFilamentMM = max(t.FilamentUsedMM, sess.lastFilamentMM)
+		changed := false
 		if sess.FileName == "" && t.FileName != "" {
 			sess.FileName = t.FileName
+			changed = true
 		}
 		if t.Status == "printing" && now-sess.lastSampleT >= 60 {
 			sess.TempSamples = append(sess.TempSamples, history.TempSample{
@@ -126,12 +138,17 @@ func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr er
 				BedTemp:    t.BedTemp,
 			})
 			sess.lastSampleT = now
+			changed = true
+		}
+		if changed { // about once a minute
+			saveSession(name, key, sess)
 		}
 		return nil
 	}
 
 	// A real non-print status: the print ended.
 	delete(c.sessions, name)
+	forgetSession(name, key)
 	result := t.Status
 	if result != "finished" && result != "error" {
 		result = "cancelled"
@@ -165,7 +182,7 @@ func endOf(name string, sess *printSession, result string, percent int, filament
 }
 
 // recordEnd writes an ended print to the local history and tells FoxTrack.
-func (c *Controller) recordEnd(name, fox2APIKey string, end *sessionEnd) {
+func (c *Controller) recordEnd(name, serial, fox2APIKey string, end *sessionEnd) {
 	rec := end.rec
 	// PrintEnergy hands the reading over once: take it for both.
 	energy := mqttpkg.PrintEnergy(name)
@@ -179,7 +196,7 @@ func (c *Controller) recordEnd(name, fox2APIKey string, end *sessionEnd) {
 	webhook.SendHistory(fox2APIKey, webhook.HistoryURLV2, webhook.HistoryPayload{
 		Type:           "print_complete",
 		PrinterName:    name,
-		Serial:         name,
+		Serial:         serial,
 		FileName:       rec.FileName,
 		NozzleTemp:     rec.NozzleTemp,
 		BedTemp:        rec.BedTemp,
@@ -207,6 +224,8 @@ type Controller struct {
 	snapInFlightMu sync.Mutex
 	relayLastT     map[string]int64
 	relayHeld      map[string]bool
+	pollFails      map[string]int  // consecutive failed polls; guarded by relayLastTMu
+	offlineSent    map[string]bool // FoxTrack was told the printer is unreachable; guarded by relayLastTMu
 	relayLastTMu   sync.Mutex
 	relayQMu       sync.Mutex
 	relayBusy      map[string]bool
@@ -224,6 +243,8 @@ func NewController() *Controller {
 		snapInFlight: map[string]bool{},
 		relayLastT:   map[string]int64{},
 		relayHeld:    map[string]bool{},
+		pollFails:    map[string]int{},
+		offlineSent:  map[string]bool{},
 		relayBusy:    map[string]bool{},
 		relayPending: map[string]*relayJob{},
 		uploaded:     map[string]string{},
@@ -234,6 +255,10 @@ func NewController() *Controller {
 type relayJob struct {
 	foxAPIKey, fox2APIKey string
 	payload               webhook.RelayPayload
+	// serial is how the current FoxTrack project keys the printer (its config
+	// ID, see config.Printer.RelayIdentity) and legacy the earlier names for
+	// X-Printer-Legacy-Id. Blank serial: the printer's name, as before IDs.
+	serial, legacy string
 }
 
 // sendRelay is webhook.SendRelay; tests swap it.
@@ -255,14 +280,25 @@ func (c *Controller) queueRelay(name string, job relayJob) {
 
 	go func() {
 		for {
-			if job.foxAPIKey != "" {
-				if err := sendRelay(job.foxAPIKey, webhook.URL, name, name, job.payload); err != nil {
-					log.Printf("[%s] webhook error: %v", name, err)
+			// The current project first: a dead legacy host (10 s timeout) must
+			// never delay it. The legacy project keeps the printer's name as its
+			// key and has no re-keying, so it gets no legacy id.
+			if job.fox2APIKey != "" {
+				serial := job.serial
+				if serial == "" {
+					serial = name
+				}
+				payload := job.payload
+				payload.LegacyID = job.legacy
+				if err := sendRelay(job.fox2APIKey, webhook.RelayURLV2, serial, name, payload); err != nil {
+					log.Printf("[%s] webhook error (v2): %v", name, err)
 				}
 			}
-			if job.fox2APIKey != "" {
-				if err := sendRelay(job.fox2APIKey, webhook.RelayURLV2, name, name, job.payload); err != nil {
-					log.Printf("[%s] webhook error (v2): %v", name, err)
+			if job.foxAPIKey != "" {
+				payload := job.payload
+				payload.LegacyID = ""
+				if err := sendRelay(job.foxAPIKey, webhook.URL, name, name, payload); err != nil {
+					log.Printf("[%s] webhook error: %v", name, err)
 				}
 			}
 			c.relayQMu.Lock()
@@ -284,23 +320,47 @@ func (c *Controller) queueRelay(name string, job relayJob) {
 // disables its controls, so the floor must sit comfortably under that.
 const relayHeartbeatSec = pace.HeartbeatSec
 
+// offlinePolls is how many failed polls in a row make a printer unreachable
+// for FoxTrack (about 10 s: a failed poll is retried after 5 s).
+const offlinePolls = 2
+
+// noteFailedPoll counts a failed poll and reports true once, at the
+// offlinePolls-th in a row: the caller then sends the OFFLINE report. That
+// counts as a status change for the pace, so the next send is measured from it.
+func (c *Controller) noteFailedPoll(name string, now int64) bool {
+	c.relayLastTMu.Lock()
+	defer c.relayLastTMu.Unlock()
+	c.pollFails[name]++
+	if c.pollFails[name] < offlinePolls || c.offlineSent[name] {
+		return false
+	}
+	c.offlineSent[name] = true
+	c.relayLastT[name] = now
+	c.relayHeld[name] = false
+	return true
+}
+
 // shouldRelay reports whether this poll should push telemetry to FoxTrack, and
 // records the send when it says yes.
 //
 // A change-only gate is not enough: an idle Klipper printer settles at ambient
 // and then reports the same numbers for minutes at a time, so it used to fall
 // silent and show as offline on the website while the bridge was perfectly
-// healthy, taking its pause/stop buttons with it. mqtt.go already applies this
-// same one-a-minute heartbeat to Bambu printers.
+// healthy, taking its pause/stop buttons with it. mqtt.go applies the same
+// heartbeat (pace.HeartbeatSec) to Bambu printers.
 //
 // Status, file, error and light changes go out at once; progress and
-// temperatures follow at the pace FoxTrack asked for (pace.Decide).
+// temperatures follow at the pace FoxTrack asked for (pace.Decide). So does
+// the first good poll after an OFFLINE report.
 func (c *Controller) shouldRelay(name string, prev, curr *mqttpkg.TelemetryData, now int64) bool {
 	c.relayLastTMu.Lock()
 	defer c.relayLastTMu.Unlock()
 
+	wasOffline := c.offlineSent[name]
+	delete(c.offlineSent, name)
+	delete(c.pollFails, name) // only a good poll gets here
 	send, held := pace.Decide(
-		mqttpkg.UrgentChange(prev, curr),
+		wasOffline || mqttpkg.UrgentChange(prev, curr),
 		mqttpkg.ShouldSendWebhook(prev, curr),
 		c.relayHeld[name],
 		now-c.relayLastT[name],
@@ -382,6 +442,8 @@ func (c *Controller) forgetBookkeeping(name string) {
 	c.relayLastTMu.Lock()
 	delete(c.relayLastT, name)
 	delete(c.relayHeld, name)
+	delete(c.pollFails, name)
+	delete(c.offlineSent, name)
 	c.relayLastTMu.Unlock()
 	c.snapLastTMu.Lock()
 	delete(c.snapLastT, name)
@@ -413,6 +475,11 @@ func (c *Controller) RenamePrinter(oldName, newName string) {
 		c.relayHeld[newName] = v
 		delete(c.relayHeld, oldName)
 	}
+	if v, ok := c.offlineSent[oldName]; ok {
+		c.offlineSent[newName] = v
+		delete(c.offlineSent, oldName)
+	}
+	delete(c.pollFails, oldName)
 	c.relayLastTMu.Unlock()
 	c.snapLastTMu.Lock()
 	if v, ok := c.snapLastT[oldName]; ok {
@@ -564,6 +631,7 @@ func (c *Controller) storeState(name string, stop <-chan struct{}, t *mqttpkg.Te
 func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string, stop <-chan struct{}) {
 	timer := time.NewTimer(0) // fire immediately on first iteration
 	defer timer.Stop()
+	serial, legacy := p.RelayIdentity() // how FoxTrack keys this printer
 
 	for {
 		select {
@@ -600,10 +668,20 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 			}
 
 			if end := c.updateSession(p.Name, &t, err, time.Now().Unix()); end != nil {
-				go c.recordEnd(p.Name, fox2APIKey, end)
+				go c.recordEnd(p.Name, serial, fox2APIKey, end)
 			}
-			if err == nil && c.shouldRelay(p.Name, prev, &t, time.Now().Unix()) {
-				c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey, payload: relayPayload})
+			if err == nil {
+				if c.shouldRelay(p.Name, prev, &t, time.Now().Unix()) {
+					c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey, payload: relayPayload, serial: serial, legacy: legacy})
+				}
+			} else if c.noteFailedPoll(p.Name, time.Now().Unix()) {
+				// The Bridge is fine and the printer is not: say so once.
+				model := ""
+				if prev != nil {
+					model = prev.PrinterModel
+				}
+				c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey,
+					payload: mqttpkg.OfflinePayload(p.Kind(), model, t.Plug), serial: serial, legacy: legacy})
 			}
 
 			if fox2APIKey != "" && (t.Status == "printing" || t.Status == "paused") && snapshotURL(p) != "" {
@@ -638,7 +716,7 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 								log.Printf("[%s] snapshot capture: %v", name, err)
 								return
 							}
-							if err := webhook.SendSnapshot(apiKey, webhook.SnapshotURLV2, name, name, frame); err != nil {
+							if err := webhook.SendSnapshot(apiKey, webhook.SnapshotURLV2, serial, name, frame); err != nil {
 								log.Printf("[%s] snapshot send: %v", name, err)
 							}
 						}()
@@ -853,9 +931,9 @@ func fetchKlipperTelemetry(p configpkg.Printer) (mqttpkg.TelemetryData, webhook.
 			NozzleTargetTemper: floatAny(anyFromMap(extruder, "target")),
 			BedTemper:          floatAny(anyFromMap(bed, "temperature")),
 			BedTargetTemper:    floatAny(anyFromMap(bed, "target")),
-			McRemainingTime:    remaining,
+			McRemainingTime:    mqttpkg.RelayRemaining(state, remaining),
 			ActiveExtruder:     activeExtruderField,
-			Alarms:             alarms,
+			Alarms:             webhook.CleanAlarms(alarms), // a full report: [] means all clear
 			PrinterKind:        "klipper",
 			PrinterModel:       "Klipper",
 			BridgeVersion:      version.AppVersion,

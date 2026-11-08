@@ -96,11 +96,11 @@ remove it and add it again.
 Good to know:
 
 - **Leave the access code or API key blank** to keep the saved one.
-- **Renaming a Bambu Lab printer is safe.** FoxTrack keeps the link and shows the
-  new name.
-- **Renaming a Klipper printer makes FoxTrack see a new device,** because
-  FoxTrack knows Klipper printers by name. See
-  [Move a link to the new device](#move-a-link-to-the-new-device).
+- **Renaming a printer is safe.** FoxTrack keeps the link and shows the new name.
+  A Bambu Lab printer is followed by its serial number, a Klipper, PrusaLink,
+  OctoPrint or Home Assistant printer by a fixed ID the Bridge gives it. (Older
+  Bridges had FoxTrack know those by name, so a rename made a new device. The
+  first report from a newer Bridge moves the old device to the ID.)
 - **Print history in the Bridge** from before a rename stays with the printer.
 - **You cannot rename a printer during a print.** Finish or stop the print first.
   You can change the IP address at any time.

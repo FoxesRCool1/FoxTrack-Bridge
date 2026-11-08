@@ -184,8 +184,31 @@ func transferConfig() *config.Config {
 	}
 }
 
-func TestExportableConfig_LeavesOutAccountSecrets(t *testing.T) {
+// secretConfig is transferConfig with a secret in every place the Bridge keeps
+// one, each with a marker the export must not carry.
+func secretConfig() *config.Config {
 	cfg := transferConfig()
+	cfg.APIKey, cfg.FoxTrack2APIKey = "SECRET-legacy-key", "SECRET-ft2-key"
+	cfg.Printers[0].ID, cfg.Printers[1].ID = "id-monsieur", "id-sherlock"
+	cfg.Printers[0].LANCode = "SECRET-lan-1"
+	cfg.Printers[1].LANCode = "SECRET-lan-2"
+	cfg.Printers = append(cfg.Printers,
+		config.Printer{ID: "id-voron", Name: "Voron", MoonrakerURL: "http://v.local", APIKey: "SECRET-moon",
+			Plug: &config.Plug{Kind: config.PlugTuya, Address: "10.0.0.9", DeviceID: "dev1", LocalKey: "SECRET-tuya", Password: "SECRET-plugpw", Token: "SECRET-plugtoken"}},
+		config.Printer{ID: "id-ha", Name: "HA", HomeAssistantURL: "http://ha.local", HomeAssistantToken: "SECRET-hatoken"},
+	)
+	cfg.Notifications = &config.Notifications{Channels: []config.NotifyChannel{
+		{ID: "n1", Kind: "telegram", Token: "SECRET-bot", Target: "123"},
+		{ID: "n2", Kind: "email", SMTP: &config.SMTP{Host: "smtp.example.com", Username: "me", Password: "SECRET-smtp"}},
+	}}
+	cfg.MQTTExport = &config.MQTTExport{Broker: "tcp://broker:1883", Username: "u", Password: "SECRET-mqtt"}
+	return cfg
+}
+
+// The export holds no password, token or key (the file may be mailed or kept in
+// a cloud folder), and exporting changes nothing in the stored config.
+func TestExportableConfig_HoldsNoSecret(t *testing.T) {
+	cfg := secretConfig()
 	out := exportableConfig(cfg)
 	if out.Security != nil || out.BambuCloud != nil {
 		t.Fatalf("security/bambu_cloud must not be exported")
@@ -193,11 +216,63 @@ func TestExportableConfig_LeavesOutAccountSecrets(t *testing.T) {
 	if out.AI == nil || out.AI.APIKey != "" || out.AI.Model != "m" {
 		t.Fatalf("ai = %+v, want settings without the key", out.AI)
 	}
-	if out.Printers[0].LANCode != "81f1aafd" {
-		t.Fatalf("printer access codes must be exported for a restore")
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cfg.AI.APIKey != "sk-secret" || cfg.Security == nil {
+	for _, leaked := range []string{"SECRET", "sk-secret", "cloud-token", "81f1aafd", "f849c383", "ft-key"} {
+		if strings.Contains(string(data), leaked) {
+			t.Errorf("export holds %q: %s", leaked, data)
+		}
+	}
+	// What is not secret stays, so a restore brings the printers back.
+	if out.Printers[0].Name != "Monsieur" || out.Printers[0].Serial != "01P00C580801716" || out.Printers[2].Plug.DeviceID != "dev1" ||
+		out.Notifications.Channels[0].Target != "123" || out.MQTTExport.Broker != "tcp://broker:1883" {
+		t.Fatalf("export lost settings that are not secret: %s", data)
+	}
+	if cfg.AI.APIKey != "sk-secret" || cfg.Security == nil || cfg.APIKey != "SECRET-legacy-key" ||
+		cfg.Printers[0].LANCode != "SECRET-lan-1" || cfg.Printers[2].Plug.LocalKey != "SECRET-tuya" ||
+		cfg.Notifications.Channels[0].Token != "SECRET-bot" || cfg.MQTTExport.Password != "SECRET-mqtt" {
 		t.Fatalf("export mutated the stored config")
+	}
+}
+
+// Restoring an export onto the install it came from asks for nothing again: the
+// stored secret stays wherever the file has none, matched by printer ID, channel
+// ID and broker. A secret does not follow a changed address.
+func TestResolveConfigImport_KeepsStoredSecretsTheExportLacks(t *testing.T) {
+	old := secretConfig()
+	inner, _ := json.Marshal(exportableConfig(old))
+	file, _ := json.Marshal(configBackup{Format: backupFormat, Version: 1, Config: inner})
+	got, err := resolveConfigImport(old, file, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.APIKey != "SECRET-legacy-key" || got.FoxTrack2APIKey != "SECRET-ft2-key" {
+		t.Errorf("FoxTrack keys = %q %q", got.APIKey, got.FoxTrack2APIKey)
+	}
+	if got.Printers[0].LANCode != "SECRET-lan-1" || got.Printers[1].LANCode != "SECRET-lan-2" ||
+		got.Printers[2].APIKey != "SECRET-moon" || got.Printers[3].HomeAssistantToken != "SECRET-hatoken" {
+		t.Errorf("printer secrets = %+v", got.Printers)
+	}
+	if pl := got.Printers[2].Plug; pl == nil || pl.LocalKey != "SECRET-tuya" || pl.Password != "SECRET-plugpw" || pl.Token != "SECRET-plugtoken" {
+		t.Errorf("plug secrets = %+v", pl)
+	}
+	if got.Notifications.Channels[0].Token != "SECRET-bot" || got.Notifications.Channels[1].SMTP.Password != "SECRET-smtp" {
+		t.Errorf("notification secrets = %+v", got.Notifications.Channels)
+	}
+	if got.MQTTExport.Password != "SECRET-mqtt" {
+		t.Errorf("mqtt password = %q", got.MQTTExport.Password)
+	}
+
+	// A file that points the broker somewhere else must not carry the password along.
+	moved := strings.Replace(string(file), "tcp://broker:1883", "tcp://elsewhere:1883", 1)
+	got, err = resolveConfigImport(old, []byte(moved), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MQTTExport.Password != "" {
+		t.Errorf("mqtt password followed a changed broker: %q", got.MQTTExport.Password)
 	}
 }
 
@@ -306,8 +381,10 @@ func TestConfigExportImportHandlers(t *testing.T) {
 		t.Fatalf("Content-Disposition = %q", cd)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "cloud-token") || strings.Contains(body, "sk-secret") || strings.Contains(body, `"security"`) {
-		t.Fatalf("export leaked an account secret")
+	for _, leaked := range []string{"cloud-token", "sk-secret", `"security"`, "ft-key", "81f1aafd", "f849c383"} {
+		if strings.Contains(body, leaked) {
+			t.Fatalf("export leaked %q", leaked)
+		}
 	}
 
 	// Wrong content type is refused.

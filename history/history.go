@@ -84,6 +84,14 @@ func notifyAppend(r Record) {
 
 var mu sync.Mutex
 
+// The history file is rewritten whole on every append, so it is kept small:
+// the newest MaxRecords prints, and per print the newest MaxTempSamples
+// temperature samples (one a minute, so 24 hours).
+const (
+	MaxRecords     = 5000
+	MaxTempSamples = 1440
+)
+
 // ErrNotFound is returned by SetNote when no record matches the printer and
 // start time.
 var ErrNotFound = errors.New("no history record found")
@@ -146,7 +154,13 @@ func Append(r Record) error {
 		log.Printf("[history] history failed to load (%v); backed up to %s, starting a new file", err, backup)
 		records = []Record{}
 	}
+	if n := len(r.TempSamples); n > MaxTempSamples {
+		r.TempSamples = slices.Clone(r.TempSamples[n-MaxTempSamples:]) // the oldest go
+	}
 	records = append(records, r)
+	if n := len(records); n > MaxRecords {
+		records = slices.Clone(records[n-MaxRecords:]) // the oldest go
+	}
 	if err := save(records); err != nil {
 		return err
 	}

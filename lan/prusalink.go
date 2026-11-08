@@ -227,8 +227,8 @@ func relayFor(t mqttpkg.TelemetryData, kind string, caps []string) webhook.Relay
 		NozzleTargetTemper: t.NozzleTarget,
 		BedTemper:          t.BedTemp,
 		BedTargetTemper:    t.BedTarget,
-		McRemainingTime:    t.TimeRemaining,
-		Alarms:             t.Alarms,
+		McRemainingTime:    mqttpkg.RelayRemaining(t.Status, t.TimeRemaining),
+		Alarms:             webhook.CleanAlarms(t.Alarms), // a full report: [] means all clear
 		Plug:               t.Plug,
 		PrinterKind:        kind,
 		PrinterModel:       t.PrinterModel,

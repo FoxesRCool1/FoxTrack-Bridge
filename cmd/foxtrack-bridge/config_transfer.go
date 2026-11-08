@@ -20,12 +20,15 @@ import (
 
 // Settings backup and restore (Settings, General).
 //
-// The export is a complete copy of the printers and settings, including the
-// printer access codes and plug, notification and MQTT passwords, because a
-// restore without them would mean entering every code again. Three things are
-// left out and are never changed by an import: the dashboard password and API
-// tokens (restoring an old password could lock the user out), the linked Bambu
-// account (its token is tied to this install), and the assistant's provider key.
+// The export is a copy of the printers and settings with every secret blanked:
+// the FoxTrack tokens, printer access codes and API keys, plug, notification and
+// MQTT passwords and tokens, the assistant's provider key. It is a file the user
+// may mail or keep in a cloud folder. A restore keeps the secret already stored
+// for the same printer, channel or broker whenever the file lacks it, so a
+// restore on the same install asks for nothing again. Also left out and never
+// changed by an import: the dashboard password and API tokens (restoring an old
+// password could lock the user out) and the linked Bambu account (its token is
+// tied to this install).
 //
 // An import accepts the export file, or a plain config.json such as one of the
 // daily copies in the backups folder.
@@ -45,17 +48,69 @@ func init() {
 	http.HandleFunc("/api/config/import", handleConfigImport)
 }
 
-// exportableConfig is cfg without the parts an import never restores.
+// exportableConfig is cfg without the parts an import never restores and
+// without any secret. cfg is not changed.
 func exportableConfig(cfg *config.Config) *config.Config {
 	out := cfg.Clone()
 	out.Security = nil
 	out.BambuCloud = nil
+	out.APIKey, out.FoxTrack2APIKey = "", ""
+	for i := range out.Printers {
+		p := &out.Printers[i]
+		p.LANCode, p.APIKey, p.HomeAssistantToken = "", "", ""
+		if p.Plug != nil {
+			p.Plug.LocalKey, p.Plug.Password, p.Plug.Token = "", "", ""
+		}
+	}
 	if out.AI != nil {
-		ai := *out.AI
-		ai.APIKey = ""
-		out.AI = &ai
+		out.AI.APIKey = ""
+	}
+	if out.Notifications != nil {
+		for i := range out.Notifications.Channels {
+			ch := &out.Notifications.Channels[i]
+			ch.Token = ""
+			if ch.SMTP != nil {
+				ch.SMTP.Password = ""
+			}
+		}
+	}
+	if out.MQTTExport != nil {
+		out.MQTTExport.Password = ""
 	}
 	return out
+}
+
+// keepImportedSecrets fills the secrets an imported file lacks from the stored
+// config: the notification tokens and SMTP passwords of the same channel, and
+// the MQTT password of the same broker and user. (Printer, plug and FoxTrack
+// secrets go through applyStoredSecrets.) A secret is only carried over where
+// it would still go to the server it was saved for. cfg is changed, old is not.
+func keepImportedSecrets(cfg, old *config.Config) {
+	if cfg.Notifications != nil && old.Notifications != nil {
+		oldCh := make(map[string]config.NotifyChannel, len(old.Notifications.Channels))
+		for _, ch := range old.Notifications.Channels {
+			oldCh[ch.ID] = ch
+		}
+		for i := range cfg.Notifications.Channels {
+			ch := &cfg.Notifications.Channels[i]
+			prev, ok := oldCh[ch.ID]
+			if !ok || prev.Kind != ch.Kind {
+				continue
+			}
+			sameURL := strings.TrimSpace(prev.URL) == strings.TrimSpace(ch.URL)
+			if ch.Token == "" && (sameURL || (ch.Kind != "ntfy" && ch.Kind != "gotify")) {
+				ch.Token = prev.Token
+			}
+			if ch.SMTP != nil && prev.SMTP != nil && ch.SMTP.Password == "" &&
+				ch.SMTP.Host == prev.SMTP.Host && ch.SMTP.Username == prev.SMTP.Username {
+				ch.SMTP.Password = prev.SMTP.Password
+			}
+		}
+	}
+	if m, o := cfg.MQTTExport, old.MQTTExport; m != nil && o != nil && m.Password == "" &&
+		m.Broker == o.Broker && m.Username == o.Username {
+		m.Password = o.Password
+	}
 }
 
 func handleConfigExport(w http.ResponseWriter, r *http.Request) {
@@ -157,14 +212,12 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 		cfg.Printers[i].Plug = normalizePlug(cfg.Printers[i].Plug)
 	}
 	if old != nil {
-		// An older config.json may predate a FoxTrack key; restoring it must
-		// not unlink FoxTrack (same rule as POST /api/config).
-		if cfg.APIKey == "" {
-			cfg.APIKey = old.APIKey
-		}
-		if cfg.FoxTrack2APIKey == "" {
-			cfg.FoxTrack2APIKey = old.FoxTrack2APIKey
-		}
+		// The export carries no secrets, and an older config.json may predate
+		// a FoxTrack key; restoring either must not unlink FoxTrack or ask for
+		// every code again. A blank secret keeps the stored one (same rule as
+		// POST /api/config), printers matched by ID, else by name.
+		applyStoredSecrets(cfg, old)
+		keepImportedSecrets(cfg, old)
 		cfg.Security = old.Security
 		cfg.BambuCloud = old.BambuCloud
 		cfg.AI = mergeImportedAI(cfg.AI, old.AI)

@@ -80,7 +80,26 @@ func securitySnapshot() *config.Security {
 	return &cp
 }
 
-// requireAuth wraps the whole mux. With no password set it changes nothing.
+// isConfigTransferPath is the settings backup and restore (config_transfer.go).
+func isConfigTransferPath(p string) bool {
+	p = strings.TrimSuffix(p, "/")
+	return p == "/api/config/export" || p == "/api/config/import"
+}
+
+// loopbackClient reports whether the request came from this computer
+// (127.0.0.0/8 or ::1). It goes by the connection, never by a header such as
+// X-Forwarded-For, which any client can set.
+func loopbackClient(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+// requireAuth wraps the whole mux. With no password set it changes nothing,
+// except that backup and restore answer only this computer.
 func requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -93,6 +112,13 @@ func requireAuth(next http.Handler) http.Handler {
 			h.Set("X-Frame-Options", "DENY")
 			h.Set("Content-Security-Policy", "frame-ancestors 'none'")
 			h.Set("Referrer-Policy", "no-referrer")
+		}
+		// A backup is the whole setup, and a restore replaces it. With a
+		// password both need the sign-in like any request (not a public path, so
+		// the check below holds); with none, only this computer may use them.
+		if sec == nil && isConfigTransferPath(r.URL.Path) && !loopbackClient(r) {
+			http.Error(w, "Backup and restore from another device need a dashboard password. Set one in Settings, or use the Bridge on the computer it runs on.", http.StatusForbidden)
+			return
 		}
 		if sec == nil || isPublicPath(r.URL.Path) || authorized(r, sec) {
 			next.ServeHTTP(w, r)

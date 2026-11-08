@@ -666,8 +666,10 @@ func (r *cloudRunner) dropClient() {
 	client := r.client
 	r.client = nil
 	names := make([]string, 0, len(r.printers))
+	listed := make([]Printer, 0, len(r.printers))
 	for _, p := range r.printers {
 		names = append(names, p.Name)
+		listed = append(listed, p)
 	}
 	r.mu.Unlock()
 	if client == nil {
@@ -683,6 +685,23 @@ func (r *cloudRunner) dropClient() {
 	for _, name := range names {
 		markDisconnected(name)
 	}
+	// The Bridge is up and the cloud session is not: tell FoxTrack the printers
+	// are unreachable if the session has not come back by then.
+	for _, p := range listed {
+		time.AfterFunc(offlineGrace, func() { r.reportOfflineIfStill(p) })
+	}
+}
+
+// reportOfflineIfStill reports p unreachable (reportOffline) when it is still a
+// cloud printer here and still disconnected.
+func (r *cloudRunner) reportOfflineIfStill(p Printer) {
+	r.mu.Lock()
+	_, listed := r.printers[p.Serial]
+	r.mu.Unlock()
+	if !listed || r.stopped() || GetPrinterState(p.Name).Status != "disconnected" {
+		return
+	}
+	reportOffline(p, time.Now().Unix())
 }
 
 // handleMessage routes a report to the printer that owns the topic and feeds

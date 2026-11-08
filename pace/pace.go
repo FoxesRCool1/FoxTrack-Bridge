@@ -5,7 +5,7 @@
 // was looking. The bridge-commands reply now says whether someone has a
 // FoxTrack page with printers open ("watched"). While watched, Bridge sends
 // quick updates. Otherwise it sends status changes at once and everything
-// else on a one-minute heartbeat, which is what keeps a printer online on the
+// else on a 45-second heartbeat, which is what keeps a printer online on the
 // website.
 //
 // Until a reply carries the field (an older FoxTrack server, no FoxTrack 2
@@ -21,9 +21,11 @@ import (
 
 const (
 	// HeartbeatSec is how often an unchanged printer still reports. The website
-	// marks a printer offline after 90 s of silence, so this must stay well
-	// under that in every mode.
-	HeartbeatSec = 60
+	// marks a printer offline after 90 s of silence. A Bambu report reaches
+	// Decide only when the printer sends one (a pushall every 30 s at the
+	// least) and the gap is counted in whole seconds, so the real gap can be
+	// this plus up to ~30 s. 45 keeps that worst case under 90 s.
+	HeartbeatSec = 45
 
 	// SnapshotGapLegacySec is the old fixed snapshot pace, kept for Bridge
 	// running against a FoxTrack server that does not send "watched".

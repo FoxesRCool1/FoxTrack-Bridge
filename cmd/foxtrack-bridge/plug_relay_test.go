@@ -64,7 +64,7 @@ func TestRelayQuietPlugs(t *testing.T) {
 	configMutex.Unlock()
 	t.Cleanup(func() {
 		sendPlugRelay = oldSend
-		plugs.Sync(nil)
+		plugs.Stop() // wait for the pollers: they read configStore, restored below
 		plugRelayMu.Lock()
 		delete(plugRelayLast, name)
 		plugRelayMu.Unlock()
