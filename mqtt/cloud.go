@@ -71,6 +71,12 @@ const (
 	cloudNudgeGap    = 5 * time.Minute
 	cloudKeepAlive   = 30 * time.Second
 	cloudRetryGap    = 60 * time.Second
+	// How long a subscribe may go unanswered before it counts as failed.
+	cloudSubscribeWait = 10 * time.Second
+	// How long a stop waits for a connect attempt that is still in flight to
+	// end, so the next runner does not connect beside it under the same
+	// client ID. Short: SetCloudPrinters holds cloudMu meanwhile.
+	cloudStopWait = 2 * time.Second
 )
 
 var (
@@ -133,6 +139,7 @@ type cloudRunner struct {
 	lastPushall map[string]time.Time
 	lastMsg     map[string]time.Time
 	lastNudge   map[string]time.Time
+	subFailed   map[string]time.Time // serial → last failed subscribe on this connection
 	lastRetry   time.Time
 }
 
@@ -147,6 +154,7 @@ func newCloudRunner(sess CloudSession, printers []Printer, onIP func(serial, ip 
 		lastPushall: make(map[string]time.Time),
 		lastMsg:     make(map[string]time.Time),
 		lastNudge:   make(map[string]time.Time),
+		subFailed:   make(map[string]time.Time),
 	}
 	for _, p := range printers {
 		if p.Serial != "" {
@@ -340,6 +348,7 @@ func (r *cloudRunner) setPrinters(printers []Printer, onIP func(serial, ip strin
 			delete(r.lastMsg, serial)
 			delete(r.lastPushall, serial)
 			delete(r.lastNudge, serial)
+			delete(r.subFailed, serial)
 		}
 	}
 	for serial, np := range next {
@@ -375,14 +384,55 @@ func (r *cloudRunner) setPrinters(printers []Printer, onIP func(serial, ip strin
 // subscribeLocked subscribes one serial and asks for a state dump. Caller holds r.mu.
 func (r *cloudRunner) subscribeLocked(client mqtt.Client, serial, name string) {
 	tok := client.Subscribe(cloudReportTopic(serial), 0, r.handleMessage)
-	go func() {
-		if tok.WaitTimeout(10*time.Second) && tok.Error() != nil {
-			log.Printf("[%s] cloud subscribe failed: %v", name, tok.Error())
-			return
-		}
-		log.Printf("[%s] subscribed via Bambu Cloud", name)
-	}()
+	go r.awaitSubscribe(client, tok, serial)
 	r.pushallLocked(client, serial, name)
+}
+
+// subscribeErr waits for the broker's answer to one subscribe. No answer in
+// time and a refusal in the SUBACK (which paho does not report as an error)
+// both count as failed.
+func subscribeErr(tok mqtt.Token, topic string) error {
+	if !tok.WaitTimeout(cloudSubscribeWait) {
+		return errors.New("no answer from Bambu Cloud")
+	}
+	if err := tok.Error(); err != nil {
+		return err
+	}
+	if st, ok := tok.(*mqtt.SubscribeToken); ok {
+		if code, found := st.Result()[topic]; found && code == 0x80 {
+			return errors.New("Bambu Cloud refused the subscription")
+		}
+	}
+	return nil
+}
+
+// awaitSubscribe records the outcome of one subscribe. A printer whose
+// subscribe failed gets no reports, so it must not stay "connected": it is
+// marked disconnected, reported offline after the usual grace, and the
+// subscribe is tried again by nudgeSilent every cloudNudgeGap.
+func (r *cloudRunner) awaitSubscribe(client mqtt.Client, tok mqtt.Token, serial string) {
+	err := subscribeErr(tok, cloudReportTopic(serial))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, listed := r.printers[serial]
+	if !listed || r.client != client {
+		return // the printer was removed or this connection is gone
+	}
+	if err != nil {
+		r.subFailed[serial] = time.Now()
+		markDisconnected(p.Name)
+		time.AfterFunc(offlineGrace, func() { r.reportOfflineIfStill(p) })
+		log.Printf("[%s] cloud subscribe failed: %v. Trying again in %s.", p.Name, err, cloudNudgeGap)
+		return
+	}
+	log.Printf("[%s] subscribed via Bambu Cloud", p.Name)
+	if _, failed := r.subFailed[serial]; failed {
+		delete(r.subFailed, serial)
+		if GetPrinterState(p.Name).Status == "disconnected" {
+			markConnected(p.Name)
+		}
+		r.pushallLocked(client, serial, p.Name)
+	}
 }
 
 // pushallLocked requests a full state dump at most once a minute per printer.
@@ -581,8 +631,17 @@ func (r *cloudRunner) connectAndServe() error {
 		return errCloudTimeout
 	case <-r.stop:
 		// Stopping must not wait out the connect timeout: SetCloudPrinters
-		// holds cloudMu while it waits for this goroutine.
+		// holds cloudMu while it waits for this goroutine. But the attempt in
+		// flight still finishes its handshake with the broker before paho
+		// closes it, so give it a moment to end: otherwise the next runner
+		// can connect beside it under the same client ID.
 		client.Disconnect(0)
+		stopWait := time.NewTimer(cloudStopWait)
+		defer stopWait.Stop()
+		select {
+		case <-tok.Done():
+		case <-stopWait.C:
+		}
 		return nil
 	}
 	if err := tok.Error(); err != nil {
@@ -596,6 +655,7 @@ func (r *cloudRunner) connectAndServe() error {
 
 	r.mu.Lock()
 	r.client = client
+	r.subFailed = make(map[string]time.Time)
 	for serial, p := range r.printers {
 		r.subscribeLocked(client, serial, p.Name)
 		clientMutex.Lock()
@@ -643,6 +703,15 @@ func (r *cloudRunner) nudgeSilent(client mqtt.Client) {
 	now := time.Now()
 	baseline := time.Unix(r.status.ConnectedAt, 0)
 	for serial, p := range r.printers {
+		if failed, ok := r.subFailed[serial]; ok {
+			// Not subscribed: a nudge cannot help. Try the subscribe again.
+			if now.Sub(failed) >= cloudNudgeGap {
+				r.subFailed[serial] = now
+				tok := client.Subscribe(cloudReportTopic(serial), 0, r.handleMessage)
+				go r.awaitSubscribe(client, tok, serial)
+			}
+			continue
+		}
 		last, ok := r.lastMsg[serial]
 		if !ok {
 			last = baseline

@@ -1,86 +1,39 @@
 # Changelog
 
-## Unreleased
+## v2.6.2
 
 **FoxTrack**
 
-- Klipper, PrusaLink, OctoPrint and Home Assistant printers now report to
-  FoxTrack under a fixed ID instead of their name, so renaming one no longer
-  makes a second printer in FoxTrack.
-- FoxTrack now says "printer not reachable" when the Bridge is running but a
-  printer is not.
-- The time left on a print shows as unknown, not a guess, when the printer
-  gives none.
-- A smart plug report no longer clears a printer's alarms in FoxTrack.
-- Printers drop offline in FoxTrack less often: the Bridge now reports at least
-  every 45 seconds, not every 60.
-- A printer FoxTrack refuses (over your plan's printer limit, for example)
-  stays flagged on the dashboard until that printer is accepted, not until
-  some other printer reports.
-- If FoxTrack does not know a printer, the dashboard says to link it in
-  FoxTrack, instead of treating its history and camera pictures as sent.
-- The current FoxTrack gets each update first, so a slow old connection can no
-  longer hold it up.
-- Printer names with accents or other non-English letters no longer arrive
-  garbled in FoxTrack ("Café" showed as "CafÃ©"). The exact name is now in
-  every report too, and names are limited to 128 characters, as FoxTrack
-  requires.
-- A printer that drops off the network keeps its progress, file name and
-  spools in FoxTrack instead of showing 0% and empty slots; only its
-  temperatures are blanked.
-- Any other report FoxTrack refuses is now shown on the dashboard instead of
-  being retried and dropped in silence.
-- The FoxTrack chip in the top bar says "connected" only once FoxTrack has
-  accepted a report. Until then it says what it knows: checking, waiting for
-  the first report, or that FoxTrack cannot be reached.
-- FoxTrack can be unlinked from Settings; the Bridge keeps working on its own.
-- With FoxTrack linked, Settings opens on FoxTrack and keeps it short: the
-  standalone features (notifications, timelapse, maintenance, costs, Home
-  Assistant, Spoolman, Prometheus, assistant, virtual printer) sit under one
-  "More" group. On a fresh install the welcome screen offers the token field
-  straight away.
+- Stopped renamed Klipper, PrusaLink, OctoPrint and Home Assistant printers
+  appearing twice.
+- Added a "printer not reachable" status for when the Bridge runs but a
+  printer does not.
+- Kept progress, file name and spools when a printer drops off the network.
+- Made the top bar chip say "connected" only once a report is accepted.
+- Flagged refused printers and reports on the dashboard.
+- Added "Unlink FoxTrack" to Settings.
+- Shortened Settings when linked, with the standalone features under "More".
 
 **Dashboard**
 
-- Advanced mode now shows or hides all the tuning controls on a printer card
-  (Temps, Fan, Speed, GCode), not just GCode.
-- The add-printer dialog's button says "Add printer" (or "Save" when editing)
-  instead of "Connect". Channels and maintenance tasks are "removed", like
-  printers; tokens are "revoked".
-- Every API error has one shape ({"error": "..."}); an unknown printer is 404
-  everywhere and a feature that is not set up yet is 409.
+- Made "Advanced mode" show or hide Temps, Fan, Speed and GCode on printer
+  cards.
 
 **Backups and history**
 
-- Backups no longer hold any password, token or key: FoxTrack tokens, printer
-  access codes, plug, notification and MQTT secrets are all left out. Restoring
-  on the same Bridge keeps the ones it already has.
-- Backup and restore from another device need a dashboard password. Without
-  one, only the computer the Bridge runs on can use them.
-- History keeps the newest 5000 prints and one day of temperature readings per
-  print, so the file stops growing.
-- Restarting the Bridge in the middle of a print keeps the print's real start
-  time in History.
-- Restoring a backup keeps the FoxTrack token already linked, and keeps the
-  notification, cost, maintenance and other settings a backup from an older
-  version does not carry. The restore dialog says how many saved printers the
-  backup would remove.
-- The virtual printer's API key is no longer in backups.
+- Removed every password, token and key from backups.
+- Required a dashboard password to back up or restore from another device.
+- Limited History to the newest 5000 prints.
+- Kept a print's real start time in History after a Bridge restart.
 
 **Fixes**
 
-- A FoxTrack command that arrived before the settings were loaded could crash
-  the Bridge.
-- A saved key or token no longer follows a printer, channel or the assistant to
-  a new address: repointing a Klipper, PrusaLink, OctoPrint or Home Assistant
-  printer (or a notification URL, or the assistant's provider) with the key
-  field left blank drops the old key instead of sending it to the new host.
-  The edit dialog says so.
-- A new printer that reuses an old printer's name no longer inherits the old
-  printer's access code or key.
-- Removing a printer also removes its saved print session, so a printer added
-  later under the same name starts clean.
-- A smart-plug poller could start while the Bridge was shutting down.
+- Fixed printer names with accents arriving garbled in FoxTrack.
+- Fixed a crash when a FoxTrack command arrived before settings loaded.
+- Fixed a saved key following a printer to a new address.
+- Fixed Bambu Cloud printers showing connected while getting no reports.
+- Fixed a new printer inheriting the access code of an old one with the same
+  name.
 
 ## v2.6.1
 
