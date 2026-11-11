@@ -129,12 +129,86 @@ func TestCloudClientID_StableAndSane(t *testing.T) {
 // other method nil, which these tests never reach.
 type fakeCloudClient struct {
 	mqtt.Client
-	published int
+	published  int
+	subscribed int
+	subTok     mqtt.Token
 }
 
 func (f *fakeCloudClient) Publish(string, byte, bool, interface{}) mqtt.Token {
 	f.published++
 	return nil
+}
+
+func (f *fakeCloudClient) Subscribe(string, byte, mqtt.MessageHandler) mqtt.Token {
+	f.subscribed++
+	return f.subTok
+}
+
+// fakeToken is a finished token with a fixed result.
+type fakeToken struct{ err error }
+
+func (t fakeToken) Wait() bool                     { return true }
+func (t fakeToken) WaitTimeout(time.Duration) bool { return true }
+func (t fakeToken) Error() error                   { return t.err }
+func (t fakeToken) Done() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+
+func TestCloudSubscribe_FailureMarksOfflineAndRetries(t *testing.T) {
+	fake := &fakeCloudClient{subTok: fakeToken{}}
+	r := newCloudRunner(CloudSession{}, []Printer{{Name: "SubP", Serial: "S7"}}, nil)
+	r.client = fake
+	r.status.ConnectedAt = time.Now().Unix()
+	markConnected("SubP")
+	t.Cleanup(func() {
+		r.stopOnce.Do(func() { close(r.stop) }) // the offline-report timer becomes a no-op
+		RemovePrinterState("SubP")
+	})
+
+	r.awaitSubscribe(fake, fakeToken{err: errors.New("refused")}, "S7")
+	if s := GetPrinterState("SubP").Status; s != "disconnected" {
+		t.Fatalf("status after a failed subscribe = %q, want disconnected", s)
+	}
+
+	// Inside the retry gap: no new subscribe, and no nudge to a printer that
+	// is not subscribed.
+	r.nudgeSilent(fake)
+	if fake.subscribed != 0 || fake.published != 0 {
+		t.Fatalf("inside the gap: subscribes = %d, publishes = %d, want 0 and 0", fake.subscribed, fake.published)
+	}
+
+	// Past the gap: one retry, and its success brings the printer back.
+	r.mu.Lock()
+	r.subFailed["S7"] = time.Now().Add(-cloudNudgeGap - time.Second)
+	r.mu.Unlock()
+	r.nudgeSilent(fake)
+	deadline := time.Now().Add(2 * time.Second)
+	for GetPrinterState("SubP").Status != "connected" {
+		if time.Now().After(deadline) {
+			t.Fatal("printer never came back after the subscribe retry succeeded")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.mu.Lock()
+	_, stillFailed := r.subFailed["S7"]
+	r.mu.Unlock()
+	if fake.subscribed != 1 || stillFailed {
+		t.Errorf("subscribes = %d, still failed = %v, want 1 and false", fake.subscribed, stillFailed)
+	}
+}
+
+func TestCloudSubscribe_StaleResultIsIgnored(t *testing.T) {
+	old, current := &fakeCloudClient{}, &fakeCloudClient{}
+	r := newCloudRunner(CloudSession{}, []Printer{{Name: "StaleP", Serial: "S8"}}, nil)
+	r.client = current
+	markConnected("StaleP")
+	t.Cleanup(func() { RemovePrinterState("StaleP") })
+	r.awaitSubscribe(old, fakeToken{err: errors.New("connection lost")}, "S8")
+	if s := GetPrinterState("StaleP").Status; s != "connected" {
+		t.Errorf("status = %q: a failure from an earlier connection must not mark the printer offline", s)
+	}
 }
 
 func TestCloudRename_KeepsStateAndAsksForDump(t *testing.T) {

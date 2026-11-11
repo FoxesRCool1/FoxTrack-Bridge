@@ -26,6 +26,31 @@ type Manager struct {
 	now     func() time.Time
 	read    func(ctx context.Context, g config.Plug) (Reading, error)
 	switchF func(ctx context.Context, g config.Plug, on bool) error
+	loops   sync.WaitGroup // the poll loops that are running; Stop waits for them
+	stopped bool           // set by Stop under mu; no loop starts after it
+}
+
+// start runs a plug's poll loop. Callers hold m.mu.
+func (m *Manager) start(name string, stop <-chan struct{}) {
+	if m.stopped {
+		return // Stop may be in loops.Wait; an Add now would race it
+	}
+	m.loops.Add(1)
+	go func() {
+		defer m.loops.Done()
+		m.loop(name, stop)
+	}()
+}
+
+// Stop ends every poll loop and waits until none is running, so nothing the
+// loops call (the printer status lookup) can run after Stop returns. Sync stops
+// a loop but does not wait for a poll already under way.
+func (m *Manager) Stop() {
+	m.mu.Lock()
+	m.stopped = true
+	m.mu.Unlock()
+	m.Sync(nil)
+	m.loops.Wait()
 }
 
 type entry struct {
@@ -116,13 +141,13 @@ func (m *Manager) Sync(printers []config.Printer) {
 			if e.cfg.Address == p.Plug.Address && e.cfg.Kind == p.Plug.Kind {
 				e.cfg = *p.Plug
 				e.stop = make(chan struct{})
-				go m.loop(p.Name, e.stop)
+				m.start(p.Name, e.stop)
 				continue
 			}
 		}
 		e := &entry{cfg: *p.Plug, stop: make(chan struct{})}
 		m.plugs[p.Name] = e
-		go m.loop(p.Name, e.stop)
+		m.start(p.Name, e.stop)
 	}
 	for name, e := range m.plugs {
 		if !keep[name] {

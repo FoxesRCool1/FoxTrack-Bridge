@@ -85,7 +85,7 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	secs := 5
@@ -680,7 +680,7 @@ func handleNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	json.NewEncoder(w).Encode(struct {

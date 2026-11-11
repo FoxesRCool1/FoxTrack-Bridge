@@ -1,5 +1,40 @@
 # Changelog
 
+## v2.6.2
+
+**FoxTrack**
+
+- Stopped renamed Klipper, PrusaLink, OctoPrint and Home Assistant printers
+  appearing twice.
+- Added a "printer not reachable" status for when the Bridge runs but a
+  printer does not.
+- Kept progress, file name and spools when a printer drops off the network.
+- Made the top bar chip say "connected" only once a report is accepted.
+- Flagged refused printers and reports on the dashboard.
+- Added "Unlink FoxTrack" to Settings.
+- Shortened Settings when linked, with the standalone features under "More".
+
+**Dashboard**
+
+- Made "Advanced mode" show or hide Temps, Fan, Speed and GCode on printer
+  cards.
+
+**Backups and history**
+
+- Removed every password, token and key from backups.
+- Required a dashboard password to back up or restore from another device.
+- Limited History to the newest 5000 prints.
+- Kept a print's real start time in History after a Bridge restart.
+
+**Fixes**
+
+- Fixed printer names with accents arriving garbled in FoxTrack.
+- Fixed a crash when a FoxTrack command arrived before settings loaded.
+- Fixed a saved key following a printer to a new address.
+- Fixed Bambu Cloud printers showing connected while getting no reports.
+- Fixed a new printer inheriting the access code of an old one with the same
+  name.
+
 ## v2.6.1
 
 **Printing**

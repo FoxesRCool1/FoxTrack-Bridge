@@ -334,7 +334,7 @@ function nfEditorHtml(ch) {
         + '<button type="button" class="btn-primary btn-lg" data-act="save">Save</button>'
         + '<button type="button" class="btn-outline btn-lg" data-act="test">Send test</button>'
         + '<button type="button" class="btn-ghost btn-lg" data-act="cancel">' + (ch._draft ? 'Discard' : 'Close') + '</button>'
-        + (ch._draft ? '' : '<button type="button" class="btn-danger btn-lg ml-auto" data-act="delete">Delete</button>')
+        + (ch._draft ? '' : '<button type="button" class="btn-danger btn-lg ml-auto" data-act="delete">Remove</button>')
         + '</div>';
     return h;
 }
@@ -555,7 +555,7 @@ function nfDelete(ch) {
     NF.open = null;
     nfRender();
     const id = ch.id;
-    const bar = undoBar('Deleted', nfTitle(ch), {
+    const bar = undoBar('Removed', nfTitle(ch), {
         ms: 6000,
         onUndo() {
             if (!NF.pending.has(id)) return;
@@ -577,7 +577,7 @@ function nfDelete(ch) {
                     NF.pending.delete(id);
                     NF.chs.forEach(c => { if (c.id === id) c._deleted = false; });
                     nfRender();
-                    toast('Could not delete ' + nfTitle(ch) + ': ' + e.message, 'error');
+                    toast('Could not remove ' + nfTitle(ch) + ': ' + e.message, 'error');
                 } finally { NF.busy = false; }
             })();
         },

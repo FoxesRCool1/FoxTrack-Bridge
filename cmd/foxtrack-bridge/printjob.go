@@ -188,8 +188,18 @@ func (t *printJobTracker) fileInUse(path string) bool {
 	return t.inUse[path] > 0
 }
 
-// findBridgePrinter matches external_id the way executeBridgeCommand does:
-// Bambu by serial, Klipper by name.
+// matchesExternalID is how a FoxTrack command finds its printer: a Bambu
+// printer by serial; any other by its config ID, which FoxTrack now keys it on,
+// or by its name, which older FoxTrack servers still send.
+func matchesExternalID(p config.Printer, bambu bool, externalID string) bool {
+	if bambu {
+		return p.Serial == externalID
+	}
+	return (p.ID != "" && p.ID == externalID) || p.Name == externalID
+}
+
+// findBridgePrinter matches external_id the way executeBridgeCommand does
+// (matchesExternalID).
 func findBridgePrinter(externalID string) (p config.Printer, isBambu bool, mq mqttpkg.Printer, ok bool) {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
@@ -198,7 +208,7 @@ func findBridgePrinter(externalID string) (p config.Printer, isBambu bool, mq mq
 	}
 	for _, cp := range configStore.Printers {
 		bambu := isBambuPrinterConfig(cp)
-		if (bambu && cp.Serial == externalID) || (!bambu && cp.Name == externalID) {
+		if matchesExternalID(cp, bambu, externalID) {
 			return cp, bambu, mqttPrinter(cp, configStore), true
 		}
 	}

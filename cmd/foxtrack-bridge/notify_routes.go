@@ -329,8 +329,9 @@ func fillChannel(in notifyChannelReq, old *config.NotifyChannel) config.NotifyCh
 	if notify.HasSecretURL(ch.Kind) && ch.URL == "" {
 		ch.URL = old.URL
 	}
-	sameURL := ch.URL == old.URL
-	if ch.Token == "" && !in.ClearToken && (sameURL || (ch.Kind != "ntfy" && ch.Kind != "gotify")) {
+	// Kinds without a URL have it blank on both sides, so this holds their
+	// token; a changed URL must be given its token again.
+	if ch.Token == "" && !in.ClearToken && ch.URL == old.URL {
 		ch.Token = old.Token
 	}
 	if ch.SMTP != nil && old.SMTP != nil && ch.SMTP.Password == "" && !in.ClearPassword &&
@@ -433,13 +434,13 @@ func handleNotifications(w http.ResponseWriter, r *http.Request) {
 		}
 		var req notifyReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "That is not valid JSON: "+err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "That is not valid JSON: "+err.Error())
 			return
 		}
 		err := mutateConfig(func(c *config.Config) error { return applyNotifications(c, req) })
 		var bad badNotify
 		if errors.As(err, &bad) {
-			http.Error(w, bad.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, bad.Error())
 			return
 		}
 		if err != nil {
@@ -451,7 +452,7 @@ func handleNotifications(w http.ResponseWriter, r *http.Request) {
 		configMutex.RUnlock()
 		json.NewEncoder(w).Encode(redactNotifications(n))
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -480,7 +481,7 @@ func handleNotificationTest(w http.ResponseWriter, r *http.Request) {
 		return
 	case "POST":
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !requireJSON(w, r) {
@@ -491,7 +492,7 @@ func handleNotificationTest(w http.ResponseWriter, r *http.Request) {
 		Channel   *notifyChannelReq `json:"channel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "That is not valid JSON: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "That is not valid JSON: "+err.Error())
 		return
 	}
 	reply := func(err error) {
@@ -523,7 +524,7 @@ func handleNotificationTest(w http.ResponseWriter, r *http.Request) {
 	case stored != nil:
 		ch = *stored
 	default:
-		http.Error(w, "There is no channel with that ID. Reload the page.", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "There is no channel with that ID. Reload the page.")
 		return
 	}
 	if err := notify.Validate(ch); err != nil {

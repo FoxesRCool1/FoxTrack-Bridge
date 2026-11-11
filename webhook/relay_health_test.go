@@ -12,15 +12,15 @@ import (
 // each other.
 func resetRelayHealth(t *testing.T) {
 	t.Helper()
-	clearRelayProblem()
-	t.Cleanup(clearRelayProblem)
+	clearRelayProblems()
+	t.Cleanup(clearRelayProblems)
 }
 
 func TestNotePermanentReject_PlanLimit(t *testing.T) {
 	resetRelayHealth(t)
 
 	body := []byte(`{"error":"plan_limit","message":"plan_limit: FoxTrack Bridge requires a Pro or Enterprise plan."}`)
-	msg := notePermanentReject(RelayURLV2, http.StatusForbidden, body, "Prusa")
+	msg := notePermanentReject(RelayURLV2, http.StatusForbidden, body, "SER-Prusa", "Prusa")
 	if msg == "" {
 		t.Fatal("expected a plan_limit rejection to be reported")
 	}
@@ -44,7 +44,7 @@ func TestNotePermanentReject_PrinterLimitNamesTheNumbers(t *testing.T) {
 	resetRelayHealth(t)
 
 	body := []byte(`{"error":"printer_limit_reached","currentCount":3,"maxLimit":3,"plan":"starter"}`)
-	msg := notePermanentReject(RelayURLV2, http.StatusForbidden, body, "X1C")
+	msg := notePermanentReject(RelayURLV2, http.StatusForbidden, body, "SER-X1C", "X1C")
 	if farm := planName("enterprise"); farm != "Farm" {
 		t.Errorf("plan enterprise shows as %q; FoxTrack calls it Farm", farm)
 	}
@@ -61,7 +61,7 @@ func TestNotePermanentReject_PrinterLimitNamesTheNumbers(t *testing.T) {
 func TestNotePermanentReject_Unauthorized(t *testing.T) {
 	resetRelayHealth(t)
 
-	if msg := notePermanentReject(HistoryURLV2, http.StatusUnauthorized, nil, "X1C"); msg == "" {
+	if msg := notePermanentReject(HistoryURLV2, http.StatusUnauthorized, nil, "SER-X1C", "X1C"); msg == "" {
 		t.Fatal("a 401 must be reported: retrying a revoked token never succeeds")
 	}
 	if p := RelayHealth(); p == nil || p.Kind != "unauthorized" {
@@ -74,7 +74,7 @@ func TestNotePermanentReject_Unauthorized(t *testing.T) {
 func TestNotePermanentReject_IgnoresTransientFailures(t *testing.T) {
 	resetRelayHealth(t)
 
-	if msg := notePermanentReject(RelayURLV2, http.StatusInternalServerError, nil, "X1C"); msg != "" {
+	if msg := notePermanentReject(RelayURLV2, http.StatusInternalServerError, nil, "SER-X1C", "X1C"); msg != "" {
 		t.Errorf("a 500 must stay retryable, got %q", msg)
 	}
 	if p := RelayHealth(); p != nil {
@@ -87,7 +87,7 @@ func TestNotePermanentReject_IgnoresTransientFailures(t *testing.T) {
 func TestNotePermanentReject_IgnoresLegacyProject(t *testing.T) {
 	resetRelayHealth(t)
 
-	if msg := notePermanentReject(URL, http.StatusUnauthorized, nil, "X1C"); msg != "" {
+	if msg := notePermanentReject(URL, http.StatusUnauthorized, nil, "SER-X1C", "X1C"); msg != "" {
 		t.Errorf("legacy rejections must be ignored, got %q", msg)
 	}
 	if p := RelayHealth(); p != nil {
@@ -135,7 +135,7 @@ func TestSendRelay_PermanentRejectIsNotRetried(t *testing.T) {
 // so the banner disappears once the user upgrades or fixes their token.
 func TestSendRelay_SuccessClearsProblem(t *testing.T) {
 	resetRelayHealth(t)
-	setRelayProblem("plan_limit", "stale", "X1C")
+	setRelayProblem("plan_limit", "stale", "SER", "X1C")
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -221,7 +221,7 @@ func TestNoteBridgeCommandsReply(t *testing.T) {
 		t.Fatalf("after 200: %+v", p)
 	}
 
-	notePermanentReject(RelayURLV2, http.StatusForbidden, []byte(`{"error":"printer_limit_reached","currentCount":5,"maxLimit":5,"plan":"pro"}`), "X1C")
+	notePermanentReject(RelayURLV2, http.StatusForbidden, []byte(`{"error":"printer_limit_reached","currentCount":5,"maxLimit":5,"plan":"pro"}`), "SER-X1C", "X1C")
 	NoteBridgeCommandsReply(http.StatusOK, nil)
 	if p := RelayHealth(); p == nil || p.Kind != "printer_limit" {
 		t.Fatalf("a poll cleared the printer limit: %+v", p)

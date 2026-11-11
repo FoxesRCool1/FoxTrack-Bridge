@@ -119,15 +119,18 @@ func TestMaintenanceRefusesBadInput(t *testing.T) {
 	cfg := maintTestConfig()
 	withBridgeConfig(t, cfg)
 	long := strings.Repeat("x", 81)
+	// An unknown printer is 404, as in the rest of the API.
+	if rec, _ := postMaint(t, `{"printer_id":"zzz","name":"A","interval_hours":10}`); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown printer: status %d, want 404", rec.Code)
+	}
 	for name, body := range map[string]string{
-		"unknown printer": `{"printer_id":"zzz","name":"A","interval_hours":10}`,
-		"no printer":      `{"name":"A","interval_hours":10}`,
-		"empty name":      `{"printer_id":"p1","name":"  ","interval_hours":10}`,
-		"long name":       `{"printer_id":"p1","name":"` + long + `","interval_hours":10}`,
-		"zero interval":   `{"printer_id":"p1","name":"A","interval_hours":0}`,
-		"huge interval":   `{"printer_id":"p1","name":"A","interval_hours":1e9}`,
-		"bad id":          `{"id":"../x","printer_id":"p1","name":"A","interval_hours":5}`,
-		"not json":        `{`,
+		"no printer":    `{"name":"A","interval_hours":10}`,
+		"empty name":    `{"printer_id":"p1","name":"  ","interval_hours":10}`,
+		"long name":     `{"printer_id":"p1","name":"` + long + `","interval_hours":10}`,
+		"zero interval": `{"printer_id":"p1","name":"A","interval_hours":0}`,
+		"huge interval": `{"printer_id":"p1","name":"A","interval_hours":1e9}`,
+		"bad id":        `{"id":"../x","printer_id":"p1","name":"A","interval_hours":5}`,
+		"not json":      `{`,
 	} {
 		if rec, _ := postMaint(t, body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", name, rec.Code)

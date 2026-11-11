@@ -213,7 +213,7 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 0 {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		json.NewEncoder(w).Encode(queueSnapshot())
@@ -221,7 +221,7 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	printerID := parts[0]
 	if _, ok := printerByID(printerID); !ok {
-		http.Error(w, "No such printer.", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "No such printer.")
 		return
 	}
 	switch {
@@ -234,14 +234,14 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 		}
 		name := strings.TrimSpace(req.FileName)
 		if name == "" || utf8.RuneCountInString(name) > 255 {
-			http.Error(w, "Enter the name of a file on the printer.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "Enter the name of a file on the printer.")
 			return
 		}
 		printQueue.Lock()
 		queueLoadLocked()
 		if len(printQueue.byPrinter[printerID]) >= maxQueuePerPrinter {
 			printQueue.Unlock()
-			http.Error(w, "This printer already has 50 files queued.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "This printer already has 50 files queued.")
 			return
 		}
 		printQueue.byPrinter[printerID] = append(printQueue.byPrinter[printerID], queueItem{ID: randomHex(6), FileName: name, AddedAt: time.Now().Unix()})
@@ -269,7 +269,7 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 		}
 		printQueue.Unlock()
 		if !found {
-			http.Error(w, "That file is no longer in the queue.", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "That file is no longer in the queue.")
 			return
 		}
 		if err != nil {
@@ -295,7 +295,7 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 		}
 		if from < 0 {
 			printQueue.Unlock()
-			http.Error(w, "That file is no longer in the queue.", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "That file is no longer in the queue.")
 			return
 		}
 		to := max(0, min(req.To, len(items)-1))
@@ -318,12 +318,12 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, errQueueEmpty) {
 				code = http.StatusNotFound
 			}
-			http.Error(w, err.Error(), code)
+			writeErr(w, code, err.Error())
 			return
 		}
 		log.Printf("[queue] started %q", started.FileName)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	json.NewEncoder(w).Encode(queueSnapshot())

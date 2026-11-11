@@ -192,7 +192,13 @@ var (
 	webhookLastSent    = make(map[string]int64)
 	webhookHeld        = make(map[string]bool)
 	webhookNoKeyLogged = make(map[string]bool)
-	webhookLastSentMu  sync.Mutex
+	// offlineSent marks a printer FoxTrack was told is unreachable (see
+	// reportOffline); the first real report clears it. Guarded by webhookLastSentMu.
+	offlineSent = make(map[string]bool)
+	// lastRelaySent is each printer's last real report, so the OFFLINE one
+	// keeps its progress, file and spools. Guarded by webhookLastSentMu.
+	lastRelaySent     = make(map[string]webhook.RelayPayload)
+	webhookLastSentMu sync.Mutex
 
 	// Relay posts leave on goroutines, so each waits for the printer's previous
 	// post (relayTurn) and FoxTrack, which replaces status per post, never sees
@@ -715,12 +721,17 @@ func RemovePrinterState(name string) {
 	stateMutex.Unlock()
 
 	serialMutex.Lock()
+	serial := printerSerials[name]
 	delete(printerSerials, name)
 	serialMutex.Unlock()
 
 	sessionMu.Lock()
 	delete(activeSessions, name)
 	sessionMu.Unlock()
+	if serial != "" {
+		// The saved session too, so a printer re-added later starts clean.
+		forgetSession(Printer{Name: name, Serial: serial})
+	}
 
 	snapLastTMu.Lock()
 	delete(snapLastT, name)
@@ -736,6 +747,8 @@ func RemovePrinterState(name string) {
 	delete(webhookLastSent, name)
 	delete(webhookHeld, name)
 	delete(webhookNoKeyLogged, name)
+	delete(offlineSent, name)
+	delete(lastRelaySent, name)
 	webhookLastSentMu.Unlock()
 
 	relayOrderMu.Lock()
@@ -773,6 +786,7 @@ func ConnectPrinter(p Printer) {
 			managedPrintersMu.Unlock()
 			close(mc.done)
 		}()
+		var lostAt time.Time // when this outage began
 		for {
 			err := connectAndListen(p, mc.stop)
 
@@ -798,12 +812,20 @@ func ConnectPrinter(p Printer) {
 			// Always update status to disconnected right away so the UI
 			// disables controls instead of showing stale "idle/printing" state.
 			// Error says why in a plain sentence (the card shows it under Offline).
+			if lostAt.IsZero() || GetPrinterState(p.Name).Status != "disconnected" {
+				lostAt = time.Now() // a fresh outage, not another failed retry of one
+			}
 			UpdatePrinterState(p.Name, TelemetryData{
 				Status:    "disconnected",
 				PrinterID: p.Name,
 				Timestamp: time.Now().Unix(),
 				Error:     connectProblem(p.IP, err),
 			})
+			// The Bridge is up and this printer is not: tell FoxTrack once the
+			// outage is more than a blip.
+			if time.Since(lostAt) >= offlineGrace {
+				reportOffline(p, time.Now().Unix())
+			}
 
 			select {
 			case <-mc.stop:
@@ -1213,6 +1235,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		// counts from the real start.
 		sessionMu.Lock()
 		sess := activeSessions[p.Name]
+		firstLook := sess == nil // nothing in memory: the Bridge just started, or no print so far
 		now := time.Now().Unix()
 		reconnected := prev.Status == "connected" || prev.Status == "disconnected"
 		if reconnected && InPrint(status) && sess != nil && !sess.resumes(fileName, now) {
@@ -1220,7 +1243,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			sess = nil
 		}
 		if status == "printing" && (sess == nil || !InPrint(prev.Status) && !reconnected) {
-			activeSessions[p.Name] = &printSession{
+			ns := &printSession{
 				StartTime:   now,
 				FileName:    fileName, // use merged value; pr.SubTaskName may be absent in the state-change message
 				NozzleTemp:  nozzleTemp,
@@ -1231,6 +1254,13 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				lastPercent: progress,
 				Spools:      spoolsAt(amsSlots, extSpool),
 			}
+			if firstLook {
+				// The Bridge restarted in the middle of this print: take the
+				// saved session back, so it keeps its real start and spools.
+				ns.restoreIfSame(p, fileName, progress, now)
+			}
+			activeSessions[p.Name] = ns
+			saveSession(p, ns)
 			sessionMu.Unlock()
 		} else if sess != nil && !InPrint(status) && status != "connected" && status != "disconnected" {
 			// The print ended: seen live, or while the link was down (then the
@@ -1258,6 +1288,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				Filaments:    historyFilaments(filaments),
 			}
 			delete(activeSessions, p.Name)
+			forgetSession(p)
 			sessionMu.Unlock()
 			go func() {
 				// printEnergy hands the reading over once, so take it here
@@ -1293,8 +1324,10 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			}
 			// Ongoing print: sample temps once per minute.
 			if status == "printing" && sess != nil {
+				changed := false
 				if sess.FileName == "" && fileName != "" {
 					sess.FileName = fileName
+					changed = true
 				}
 				if now-sess.lastSampleT >= 60 {
 					sess.TempSamples = append(sess.TempSamples, history.TempSample{
@@ -1303,6 +1336,10 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						BedTemp:    bedTemp,
 					})
 					sess.lastSampleT = now
+					changed = true
+				}
+				if changed { // about once a minute
+					saveSession(p, sess)
 				}
 			}
 			sessionMu.Unlock()
@@ -1317,7 +1354,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		// Pace relay webhooks. Bambu pushes ~1 message/second while printing.
 		// Status, file, error and light changes (and print complete/failed) go
 		// out at once; progress and temperatures follow at the pace FoxTrack
-		// asked for (pace.Decide), with a 60 s heartbeat so the website still
+		// asked for (pace.Decide), with a heartbeat (pace.HeartbeatSec) so the website still
 		// sees the printer as alive.
 		terminal := status != prev.Status && (status == "finished" || status == "error")
 		relayNow := time.Now().Unix()
@@ -1327,8 +1364,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		sendWebhook, held := false, false
 		if status != "connected" && status != "disconnected" {
 			webhookLastSentMu.Lock()
+			// The first real report after an OFFLINE post is urgent: FoxTrack
+			// still shows the printer unreachable.
+			wasOffline := offlineSent[p.Name]
+			delete(offlineSent, p.Name)
 			sendWebhook, held = pace.Decide(
-				terminal || UrgentChange(prev, &t),
+				terminal || wasOffline || UrgentChange(prev, &t),
 				ShouldSendWebhook(prev, &t),
 				webhookHeld[p.Name],
 				relayNow-webhookLastSent[p.Name],
@@ -1342,23 +1383,7 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		}
 
 		if sendWebhook {
-			send := sendRelay // read now, not in the goroutine: tests swap it
-			relayOrderMu.Lock()
-			relaySeq[p.Name]++
-			mySeq, prevTurn, myTurn := relaySeq[p.Name], relayTurn[p.Name], make(chan struct{})
-			relayTurn[p.Name] = myTurn
-			relayOrderMu.Unlock()
-			go func() {
-				defer close(myTurn)
-				if prevTurn != nil {
-					<-prevTurn
-				}
-				relayOrderMu.Lock()
-				superseded := relaySeq[p.Name] != mySeq
-				relayOrderMu.Unlock()
-				if superseded && !terminal {
-					return
-				}
+			queueRelay(p, terminal, func() webhook.RelayPayload {
 				b := lightOn
 				var relayAms []webhook.RelayAmsSlot
 				for _, s := range amsSlots {
@@ -1377,36 +1402,17 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 						NozzleTargetTemper: nozzleTarget,
 						BedTemper:          bedTemp,
 						BedTargetTemper:    bedTarget,
-						McRemainingTime:    timeRemaining,
+						McRemainingTime:    RelayRemaining(status, timeRemaining),
 						LightOn:            &b,
 						Ams:                relayAms,
 						ExternalSpool:      relayExternalSpool(extSpool),
-						Alarms:             t.Alarms,
+						Alarms:             webhook.CleanAlarms(t.Alarms), // a full report: [] means all clear
 						Plug:               t.Plug,
 					},
 				}
 				stampRelayIdentity(&relayPayload.Print, p, t.PrinterModel)
-				if p.APIKey == "" && p.FoxTrack2APIKey == "" {
-					webhookLastSentMu.Lock()
-					logged := webhookNoKeyLogged[p.Name]
-					webhookNoKeyLogged[p.Name] = true
-					webhookLastSentMu.Unlock()
-					if !logged {
-						log.Printf("[%s] not sending to FoxTrack: no API key configured", p.Name)
-					}
-					return
-				}
-				if p.APIKey != "" {
-					if err := send(p.APIKey, webhook.URL, p.Serial, p.Name, relayPayload); err != nil {
-						log.Printf("[%s] webhook error (legacy): %v", p.Name, err)
-					}
-				}
-				if p.FoxTrack2APIKey != "" {
-					if err := send(p.FoxTrack2APIKey, webhook.RelayURLV2, p.Serial, p.Name, relayPayload); err != nil {
-						log.Printf("[%s] webhook error (v2): %v", p.Name, err)
-					}
-				}
-			}()
+				return relayPayload
+			})
 		}
 
 		// A cloud printer with no known IP has nothing to dial: no camera snapshot.
@@ -1511,6 +1517,109 @@ func relayGcodeState(status string) string {
 	default:
 		return status
 	}
+}
+
+// RelayRemaining is the mc_remaining_time to send, in minutes. FoxTrack reads
+// -1 as unknown (it used to guess 15 minutes for a missing field), so a print
+// that is running with no estimate yet sends -1. Outside a print the value is
+// as it is, 0 included.
+func RelayRemaining(status string, minutes int) int {
+	if InPrint(status) && minutes <= 0 {
+		return -1
+	}
+	return minutes
+}
+
+// queueRelay posts one report for p off the caller's goroutine, to the current
+// FoxTrack project first and the legacy one after it, so a dead legacy host
+// never delays the current one. Each post waits for the printer's previous one
+// (relayTurn), so FoxTrack, which replaces status per post, never sees an older
+// snapshot after a newer one. A post a newer one has queued behind is skipped
+// unless terminal. build runs on that goroutine, when it is the post's turn.
+func queueRelay(p Printer, terminal bool, build func() webhook.RelayPayload) {
+	send := sendRelay // read now, not in the goroutine: tests swap it
+	relayOrderMu.Lock()
+	relaySeq[p.Name]++
+	mySeq, prevTurn, myTurn := relaySeq[p.Name], relayTurn[p.Name], make(chan struct{})
+	relayTurn[p.Name] = myTurn
+	relayOrderMu.Unlock()
+	go func() {
+		defer close(myTurn)
+		if prevTurn != nil {
+			<-prevTurn
+		}
+		relayOrderMu.Lock()
+		superseded := relaySeq[p.Name] != mySeq
+		relayOrderMu.Unlock()
+		if superseded && !terminal {
+			return
+		}
+		if p.APIKey == "" && p.FoxTrack2APIKey == "" {
+			webhookLastSentMu.Lock()
+			logged := webhookNoKeyLogged[p.Name]
+			webhookNoKeyLogged[p.Name] = true
+			webhookLastSentMu.Unlock()
+			if !logged {
+				log.Printf("[%s] not sending to FoxTrack: no API key configured", p.Name)
+			}
+			return
+		}
+		payload := build()
+		if payload.Print.GcodeState != "OFFLINE" {
+			webhookLastSentMu.Lock()
+			lastRelaySent[p.Name] = payload
+			webhookLastSentMu.Unlock()
+		}
+		if p.FoxTrack2APIKey != "" {
+			if err := send(p.FoxTrack2APIKey, webhook.RelayURLV2, p.Serial, p.Name, payload); err != nil {
+				log.Printf("[%s] webhook error (v2): %v", p.Name, err)
+			}
+		}
+		if p.APIKey != "" {
+			if err := send(p.APIKey, webhook.URL, p.Serial, p.Name, payload); err != nil {
+				log.Printf("[%s] webhook error (legacy): %v", p.Name, err)
+			}
+		}
+	}()
+}
+
+// offlineGrace is how long a printer stays unreachable before FoxTrack is told.
+// A Bambu link drops and returns within seconds now and then; that is not worth
+// flipping the printer's status in FoxTrack and back.
+const offlineGrace = 15 * time.Second
+
+// reportOffline tells FoxTrack the Bridge is up but p is not reachable: one
+// urgent post per outage, with gcode_state OFFLINE and nothing else the
+// printer would have said (no alarms key, which means no change). The first
+// real report afterwards is urgent too (see makeHandler). It counts as a status
+// change for the pace: the printer's next send is measured from here.
+func reportOffline(p Printer, now int64) {
+	webhookLastSentMu.Lock()
+	if offlineSent[p.Name] {
+		webhookLastSentMu.Unlock()
+		return
+	}
+	offlineSent[p.Name] = true
+	webhookLastSent[p.Name] = now
+	webhookHeld[p.Name] = false
+	webhookLastSentMu.Unlock()
+	queueRelay(p, true, func() webhook.RelayPayload { return offlineRelayPayload(p) })
+}
+
+func offlineRelayPayload(p Printer) webhook.RelayPayload {
+	var last *webhook.RelayPayload
+	webhookLastSentMu.Lock()
+	if lp, ok := lastRelaySent[p.Name]; ok {
+		last = &lp
+	}
+	webhookLastSentMu.Unlock()
+	model := ""
+	if last != nil {
+		model = last.Print.PrinterModel
+	}
+	out := OfflinePayload(last, "bambu", model, plugState(p.Name))
+	stampRelayIdentity(&out.Print, p, model)
+	return out
 }
 
 // hasPrintObject reports whether an MQTT payload carries a "print" object.

@@ -388,7 +388,7 @@ The assistant can only read. It can't change printers, control prints or change 
 <details>
 <summary><b>Back up, restore and move to another machine</b></summary>
 
-**Settings > General > Back up and restore** downloads your printers and settings as one file, and restores them from it. The file holds your printers' access codes, so keep it private. Your dashboard password, API tokens, share links, linked Bambu account and assistant key are not in it. A restore never changes the first four, and keeps the assistant key unless the backup uses a different AI provider. Before a restore, the current settings are saved next to `config.json` as `config.json.before-import-<date>`.
+**Settings > General > Back up and restore** downloads your printers and settings as one file, and restores them from it. The file holds no passwords, tokens or keys: not your FoxTrack tokens, printer access codes, plug, notification or MQTT secrets, dashboard password, API tokens, linked Bambu account or assistant key. Share links are not in it either. A restore never changes the dashboard password, API tokens, share links and Bambu account, and keeps the access codes, tokens and keys already saved for the same printers, channels and broker (the assistant key only when the backup uses the same AI provider). On a new machine, enter them again. With no dashboard password set, backup and restore work only on the computer the Bridge runs on; from another device, set a password first. Before a restore, the current settings are saved next to `config.json` as `config.json.before-import-<date>`.
 
 The Bridge also keeps a daily copy of `config.json` and `history.json` in a `backups` folder next to them, and keeps the last 7 of each. **Restore from file** accepts those copies too.
 

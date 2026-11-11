@@ -247,8 +247,18 @@ func TestApplyPrinterEdit_KlipperFields(t *testing.T) {
 	if got.Printers[3].MoonrakerURL != "http://10.0.0.8:7125" {
 		t.Fatalf("MoonrakerURL = %q, want http://10.0.0.8:7125", got.Printers[3].MoonrakerURL)
 	}
-	if got.Printers[3].APIKey != "mkey" {
-		t.Fatalf("APIKey = %q, want mkey", got.Printers[3].APIKey)
+	// A new address with no new key: the old key must not follow the printer
+	// to a machine it was not saved for.
+	if got.Printers[3].APIKey != "" {
+		t.Fatalf("APIKey = %q, want empty after the address changed", got.Printers[3].APIKey)
+	}
+	// Same machine (path or trailing slash changed only): the key is kept.
+	same, _, err := applyPrinterEdit(old, "k", printerEdit{MoonrakerURL: strp("http://10.0.0.7:7125/"), APIKey: strp("")}, notBusy)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if same.Printers[3].APIKey != "mkey" {
+		t.Fatalf("APIKey = %q, want mkey kept for the same host", same.Printers[3].APIKey)
 	}
 	if got.Printers[3].WebcamURL != "" {
 		t.Fatalf("WebcamURL = %q, want empty", got.Printers[3].WebcamURL)

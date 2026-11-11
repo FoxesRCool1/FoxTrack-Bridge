@@ -82,18 +82,25 @@ func relayQuietPlugs(now time.Time) {
 			continue
 		}
 		payload := plugOnlyPayload(p, pl)
-		id := p.Name
-		if isBambuPrinterConfig(p) {
-			id = p.Serial
-		}
-		if legacyKey != "" {
-			if err := sendPlugRelay(legacyKey, webhook.URL, id, p.Name, payload); err != nil {
-				log.Printf("[%s] plug report (legacy): %v", p.Name, err)
+		// The current project keys a printer on its serial (Bambu) or config ID,
+		// and gets the earlier names to re-key by. The legacy project keeps the
+		// name for a non-Bambu printer and has no re-keying. The current
+		// project goes first, so a dead legacy host never delays it.
+		if v2Key != "" {
+			id, legacyID := p.RelayIdentity()
+			v2Payload := payload
+			v2Payload.LegacyID = legacyID
+			if err := sendPlugRelay(v2Key, webhook.RelayURLV2, id, p.Name, v2Payload); err != nil {
+				log.Printf("[%s] plug report: %v", p.Name, err)
 			}
 		}
-		if v2Key != "" {
-			if err := sendPlugRelay(v2Key, webhook.RelayURLV2, id, p.Name, payload); err != nil {
-				log.Printf("[%s] plug report: %v", p.Name, err)
+		if legacyKey != "" {
+			id := p.Name
+			if isBambuPrinterConfig(p) {
+				id = p.Serial
+			}
+			if err := sendPlugRelay(legacyKey, webhook.URL, id, p.Name, payload); err != nil {
+				log.Printf("[%s] plug report (legacy): %v", p.Name, err)
 			}
 		}
 		plugRelayMu.Lock()
@@ -127,8 +134,12 @@ func plugOnlyPayload(p config.Printer, pl *webhook.RelayPlug) webhook.RelayPaylo
 		model = mqttpkg.ModelFromSerial(p.Serial)
 	}
 	return webhook.RelayPayload{Print: webhook.RelayPrint{
-		GcodeState:         "OFFLINE",
-		Alarms:             []webhook.RelayAlarm{},
+		GcodeState: "OFFLINE",
+		// No Alarms: the key is left out, which FoxTrack reads as no change.
+		// This report says nothing about the printer's alarms, and [] would
+		// clear the ones it reported before its power went. The remaining time
+		// is unknown.
+		McRemainingTime:    -1,
 		Plug:               pl,
 		PrinterKind:        kind,
 		PrinterModel:       model,

@@ -166,8 +166,9 @@ func TestSpoolmanTestAndSpoolsRoutes(t *testing.T) {
 		t.Fatalf("spools: %d %s", rec.Code, rec.Body)
 	}
 	withBridgeConfig(t, &config.Config{})
-	if rec := serveHandler(handleSpoolmanSpools, httptest.NewRequest("GET", "/api/spoolman/spools", nil)); rec.Code != http.StatusBadRequest {
-		t.Fatalf("spools without an address: %d, want 400", rec.Code)
+	// Not configured is 409, as elsewhere in the API: the request is fine, the Bridge is not ready for it.
+	if rec := serveHandler(handleSpoolmanSpools, httptest.NewRequest("GET", "/api/spoolman/spools", nil)); rec.Code != http.StatusConflict {
+		t.Fatalf("spools without an address: %d, want 409", rec.Code)
 	}
 }
 

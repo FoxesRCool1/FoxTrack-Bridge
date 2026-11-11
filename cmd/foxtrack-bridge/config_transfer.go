@@ -20,12 +20,15 @@ import (
 
 // Settings backup and restore (Settings, General).
 //
-// The export is a complete copy of the printers and settings, including the
-// printer access codes and plug, notification and MQTT passwords, because a
-// restore without them would mean entering every code again. Three things are
-// left out and are never changed by an import: the dashboard password and API
-// tokens (restoring an old password could lock the user out), the linked Bambu
-// account (its token is tied to this install), and the assistant's provider key.
+// The export is a copy of the printers and settings with every secret blanked:
+// the FoxTrack tokens, printer access codes and API keys, plug, notification and
+// MQTT passwords and tokens, the assistant's provider key. It is a file the user
+// may mail or keep in a cloud folder. A restore keeps the secret already stored
+// for the same printer, channel or broker whenever the file lacks it, so a
+// restore on the same install asks for nothing again. Also left out and never
+// changed by an import: the dashboard password and API tokens (restoring an old
+// password could lock the user out) and the linked Bambu account (its token is
+// tied to this install).
 //
 // An import accepts the export file, or a plain config.json such as one of the
 // daily copies in the backups folder.
@@ -45,22 +48,78 @@ func init() {
 	http.HandleFunc("/api/config/import", handleConfigImport)
 }
 
-// exportableConfig is cfg without the parts an import never restores.
+// exportableConfig is cfg without the parts an import never restores and
+// without any secret. cfg is not changed.
 func exportableConfig(cfg *config.Config) *config.Config {
 	out := cfg.Clone()
 	out.Security = nil
 	out.BambuCloud = nil
+	out.APIKey, out.FoxTrack2APIKey = "", ""
+	for i := range out.Printers {
+		p := &out.Printers[i]
+		p.LANCode, p.APIKey, p.HomeAssistantToken = "", "", ""
+		if p.Plug != nil {
+			p.Plug.LocalKey, p.Plug.Password, p.Plug.Token = "", "", ""
+		}
+	}
 	if out.AI != nil {
-		ai := *out.AI
-		ai.APIKey = ""
-		out.AI = &ai
+		out.AI.APIKey = ""
+	}
+	if out.VirtualPrinter != nil {
+		out.VirtualPrinter.APIKey = ""
+	}
+	if out.Notifications != nil {
+		for i := range out.Notifications.Channels {
+			ch := &out.Notifications.Channels[i]
+			ch.Token = ""
+			if ch.SMTP != nil {
+				ch.SMTP.Password = ""
+			}
+		}
+	}
+	if out.MQTTExport != nil {
+		out.MQTTExport.Password = ""
 	}
 	return out
 }
 
+// keepImportedSecrets fills the secrets an imported file lacks from the stored
+// config: the notification tokens and SMTP passwords of the same channel, and
+// the MQTT password of the same broker and user. (Printer, plug and FoxTrack
+// secrets go through applyStoredSecrets.) A secret is only carried over where
+// it would still go to the server it was saved for. cfg is changed, old is not.
+func keepImportedSecrets(cfg, old *config.Config) {
+	if cfg.Notifications != nil && old.Notifications != nil {
+		oldCh := make(map[string]config.NotifyChannel, len(old.Notifications.Channels))
+		for _, ch := range old.Notifications.Channels {
+			oldCh[ch.ID] = ch
+		}
+		for i := range cfg.Notifications.Channels {
+			ch := &cfg.Notifications.Channels[i]
+			prev, ok := oldCh[ch.ID]
+			if !ok || prev.Kind != ch.Kind {
+				continue
+			}
+			// Kinds without a URL have it blank on both sides, so this holds
+			// their token; a changed URL must be given its token again.
+			if ch.Token == "" && strings.TrimSpace(prev.URL) == strings.TrimSpace(ch.URL) {
+				ch.Token = prev.Token
+			}
+			if ch.SMTP != nil && prev.SMTP != nil && ch.SMTP.Password == "" &&
+				ch.SMTP.Host == prev.SMTP.Host && ch.SMTP.Username == prev.SMTP.Username {
+				ch.SMTP.Password = prev.SMTP.Password
+			}
+		}
+	}
+	if m, o := cfg.MQTTExport, old.MQTTExport; m != nil && o != nil && m.Password == "" &&
+		m.Broker == o.Broker && m.Username == o.Username {
+		m.Password = o.Password
+	}
+}
+
 func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	configMutex.RLock()
@@ -73,7 +132,7 @@ func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	configMutex.RUnlock()
 	inner, err := json.Marshal(cfg)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	now := time.Now()
@@ -85,7 +144,7 @@ func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		Config:     inner,
 	}, "", "  ")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -142,7 +201,6 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 	if len(cfg.Printers) == 0 && old != nil && len(old.Printers) > 0 && !confirmClear {
 		return nil, errRefuseClearPrinters
 	}
-	assignMissingIDs(cfg.Printers)
 	if err := rejectNewlyIntroducedDuplicateNames(nil, cfg.Printers); err != nil {
 		return nil, err
 	}
@@ -157,14 +215,21 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 		cfg.Printers[i].Plug = normalizePlug(cfg.Printers[i].Plug)
 	}
 	if old != nil {
-		// An older config.json may predate a FoxTrack key; restoring it must
-		// not unlink FoxTrack (same rule as POST /api/config).
-		if cfg.APIKey == "" {
-			cfg.APIKey = old.APIKey
-		}
-		if cfg.FoxTrack2APIKey == "" {
+		// The export carries no secrets, and an older config.json may predate
+		// a FoxTrack key; restoring either must not unlink FoxTrack or ask for
+		// every code again. A blank secret keeps the stored one (same rule as
+		// POST /api/config), printers matched by ID, else by name.
+		applyStoredSecrets(cfg, old)
+		keepImportedSecrets(cfg, old)
+		// A token already linked to FoxTrack stays linked: an older file must
+		// not roll the account back to a token that may since have been revoked.
+		if old.FoxTrack2APIKey != "" {
 			cfg.FoxTrack2APIKey = old.FoxTrack2APIKey
 		}
+		if old.APIKey != "" {
+			cfg.APIKey = old.APIKey
+		}
+		keepAbsentFeatureBlocks(cfg, old)
 		cfg.Security = old.Security
 		cfg.BambuCloud = old.BambuCloud
 		cfg.AI = mergeImportedAI(cfg.AI, old.AI)
@@ -174,8 +239,39 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 			cfg.AI.APIKey = ""
 		}
 	}
+	// After the secrets pass: a file from before printer IDs matches the stored
+	// printers by name and takes their IDs; only the rest get a new one.
+	assignMissingIDs(cfg.Printers)
 	mergeVirtualPrinter(cfg, old, cfg.VirtualPrinter != nil)
 	return cfg, nil
+}
+
+// keepAbsentFeatureBlocks keeps the current notifications, Spoolman, costs,
+// maintenance, MQTT export, metrics and timelapse settings when the file has
+// no such block: a backup from before a feature existed must not switch it
+// off. A block the file does carry replaces the current one.
+func keepAbsentFeatureBlocks(cfg, old *config.Config) {
+	if cfg.Notifications == nil {
+		cfg.Notifications = old.Notifications
+	}
+	if cfg.Spoolman == nil {
+		cfg.Spoolman = old.Spoolman
+	}
+	if cfg.Costs == nil {
+		cfg.Costs = old.Costs
+	}
+	if cfg.Maintenance == nil {
+		cfg.Maintenance = old.Maintenance
+	}
+	if cfg.MQTTExport == nil {
+		cfg.MQTTExport = old.MQTTExport
+	}
+	if cfg.Metrics == nil {
+		cfg.Metrics = old.Metrics
+	}
+	if cfg.Timelapse == nil {
+		cfg.Timelapse = old.Timelapse
+	}
 }
 
 // mergeImportedAI keeps the stored provider key only when the imported
@@ -241,7 +337,7 @@ func pruneBeforeImportFiles(dir string, keep int) {
 func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !requireJSON(w, r) {
@@ -249,7 +345,7 @@ func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	confirmClear := r.URL.Query().Get("confirm_clear_printers") == "true"
@@ -261,9 +357,9 @@ func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		configMutex.Unlock()
 		switch {
 		case errors.Is(err, errRefuseClearPrinters), errors.Is(err, errDuplicatePrinterName):
-			http.Error(w, err.Error(), http.StatusConflict)
+			writeErr(w, http.StatusConflict, err.Error())
 		default:
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
@@ -274,7 +370,7 @@ func handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	backupName, err := saveBeforeImport(prev)
 	if err != nil {
 		configMutex.Unlock()
-		http.Error(w, "Could not save a copy of the current settings first, so nothing was changed ("+err.Error()+").", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Could not save a copy of the current settings first, so nothing was changed ("+err.Error()+").")
 		return
 	}
 	snapshot := newCfg.Clone()

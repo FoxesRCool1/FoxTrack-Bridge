@@ -154,7 +154,7 @@ Saving reconnects only that printer, and only if a connection detail changed. Ot
 
 A printer cannot be renamed during a print, because the running print is tracked under its name and its history record would be lost. The IP address can be changed during a print. Local print history from before a rename stays with the printer.
 
-In FoxTrack, a renamed Bambu printer keeps its link because FoxTrack follows the serial number. A renamed Klipper, PrusaLink or Home Assistant printer shows up in FoxTrack as a new device, because FoxTrack knows those printers by name. Changing a Bambu serial number has the same effect. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays under "Detected on your network, not linked" and shows as offline. A FoxTrack owner or admin can clear it with its Remove button, which appears once the device is offline.`,
+In FoxTrack, a renamed printer keeps its link: a Bambu printer because FoxTrack follows the serial number, a Klipper, PrusaLink, OctoPrint or Home Assistant printer because FoxTrack follows a fixed ID the Bridge gives it. Changing a Bambu serial number makes FoxTrack see a new device. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays under "Detected on your network, not linked" and shows as offline. A FoxTrack owner or admin can clear it with its Remove button, which appears once the device is offline.`,
 	},
 	{
 		ID:       "connection-problems",

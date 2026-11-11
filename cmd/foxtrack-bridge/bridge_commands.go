@@ -300,21 +300,16 @@ func refuseHomeMidPrint(name, command string) error {
 // the bridge's own server.
 //
 // Bambu printers: external_id matches p.Serial (not p.Name)
-// Klipper printers: external_id matches p.Name
+// Other printers: external_id matches p.ID, or p.Name (see matchesExternalID)
 func executeBridgeCommand(cmd bridgeCommand) error {
 	configMutex.RLock()
 	var matchedName string
 	var isBambu bool
-	for _, p := range configStore.Printers {
-		if isBambuPrinterConfig(p) {
-			if p.Serial == cmd.ExternalID {
+	if configStore != nil {
+		for _, p := range configStore.Printers {
+			if bambu := isBambuPrinterConfig(p); matchesExternalID(p, bambu, cmd.ExternalID) {
 				matchedName = p.Name
-				isBambu = true
-				break
-			}
-		} else {
-			if p.Name == cmd.ExternalID {
-				matchedName = p.Name
+				isBambu = bambu
 				break
 			}
 		}

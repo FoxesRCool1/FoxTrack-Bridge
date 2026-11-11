@@ -75,10 +75,10 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 			EnergyPerKWh  *float64            `json:"energy_per_kwh"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "The request could not be read.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "The request could not be read.")
 			return
 		}
-		bad := func(msg string) { http.Error(w, msg, http.StatusBadRequest) }
+		bad := func(msg string) { writeErr(w, http.StatusBadRequest, msg) }
 		var currency string
 		if req.Currency != nil {
 			currency = strings.TrimSpace(*req.Currency)
@@ -142,7 +142,7 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 		configMutex.RUnlock()
 		json.NewEncoder(w).Encode(view)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -156,21 +156,21 @@ func handleCostsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	case "GET":
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	days := 30
 	if s := r.URL.Query().Get("days"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 1 || n > 3650 {
-			http.Error(w, "days must be a number from 1 to 3650.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "days must be a number from 1 to 3650.")
 			return
 		}
 		days = n
 	}
 	recs, err := history.Load()
 	if err != nil {
-		http.Error(w, "The print history could not be read.", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "The print history could not be read.")
 		return
 	}
 	configMutex.RLock()

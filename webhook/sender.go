@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,62 +92,211 @@ var relayHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // RelayProblem describes a rejection FoxTrack will keep returning until the
 // user does something about it: a revoked or mistyped token, a workspace that
-// lost the Bridge feature, or a printer count over the plan's limit. Retrying
-// cannot clear any of them, so the bridge records them for the dashboard
-// instead of burning three attempts and dropping the payload in silence.
+// lost the Bridge feature, a printer count over the plan's limit, or a printer
+// FoxTrack does not know. Retrying cannot clear any of them, so the bridge
+// records them for the dashboard instead of burning three attempts and
+// dropping the payload in silence.
 type RelayProblem struct {
-	Kind    string `json:"kind"`    // "plan_limit" | "printer_limit" | "unauthorized"
+	Kind    string `json:"kind"`    // "plan_limit" | "printer_limit" | "unauthorized" | "unknown_printer" | "rejected"
 	Message string `json:"message"` // shown to the user as-is
 	Printer string `json:"printer"` // the printer whose send was refused
 	Since   string `json:"since"`   // RFC 3339, when this problem was first seen
+
+	seen time.Time // last time FoxTrack refused it; not sent to the dashboard
 }
+
+// Problems are kept per printer, so one printer's refusal does not vanish when
+// another printer posts well. A token or plan refusal holds for the whole
+// account and is kept under accountWide.
+const accountWide = "*"
+
+// printerProblemTTL drops a printer's own problem once the printer stops asking
+// (it was removed): a printer that is still refused is refused again at every
+// heartbeat, which keeps its entry fresh.
+const printerProblemTTL = 15 * time.Minute
 
 var (
 	relayProblemMu sync.Mutex
-	relayProblem   *RelayProblem
+	relayProblems  = map[string]*RelayProblem{} // accountWide, or "printer:"+serial
 )
+
+// problemKey is where a problem of this kind lives: a printer limit, an
+// unknown printer and a refused report belong to one printer, the rest to the
+// account.
+func problemKey(kind, serial string) string {
+	if kind == "printer_limit" || kind == "unknown_printer" || kind == "rejected" {
+		return "printer:" + serial
+	}
+	return accountWide
+}
+
+// relayDelivered is set once the current project has accepted one relay
+// report since the Bridge started; the dashboard says "connected" only then.
+var relayDelivered bool // guarded by relayProblemMu
+
+func markDelivered() {
+	relayProblemMu.Lock()
+	relayDelivered = true
+	relayProblemMu.Unlock()
+}
+
+// ResetRelayHealth forgets every recorded problem and the delivered flag: the
+// FoxTrack token changed or was removed, so what the old token was told no
+// longer describes this connection.
+func ResetRelayHealth() {
+	relayProblemMu.Lock()
+	relayProblems = map[string]*RelayProblem{}
+	relayDelivered = false
+	relayProblemMu.Unlock()
+}
+
+// RelayDelivered reports whether FoxTrack has accepted at least one printer
+// report since the Bridge started.
+func RelayDelivered() bool {
+	relayProblemMu.Lock()
+	defer relayProblemMu.Unlock()
+	return relayDelivered
+}
+
+// HeaderName returns name as FoxTrack's edge functions will read it from the
+// X-Printer-Name header: trimmed, at most 128 characters, encoded as Latin-1
+// because Deno decodes header bytes that way (UTF-8 "é" would arrive as "Ã©").
+// A character outside Latin-1 (emoji, CJK) becomes "?" and a control
+// character a space; the exact name travels in the body (RelayPrint.PrinterName).
+func HeaderName(name string) string {
+	name = strings.TrimSpace(name)
+	out := make([]byte, 0, len(name))
+	n := 0
+	for _, r := range name {
+		if n == 128 {
+			break
+		}
+		n++
+		switch {
+		case r < 0x20 || r == 0x7F:
+			out = append(out, ' ')
+		case r <= 0xFF:
+			out = append(out, byte(r))
+		default:
+			out = append(out, '?')
+		}
+	}
+	return string(out)
+}
 
 // errNotRetryable marks a rejection the retry queue must drop rather than
 // re-send, because the next attempt gets the same answer.
 var errNotRetryable = errors.New("not retryable")
 
-// RelayHealth returns the current unrecoverable relay problem, or nil when the
-// most recent send to the current FoxTrack project succeeded.
+// forgottenTokens holds FoxTrack tokens that were removed or replaced while
+// queued retries were still waiting for them. A retry for a forgotten token is
+// dropped instead of re-sent with the old token; first sends are unaffected.
+var (
+	forgottenTokensMu sync.Mutex
+	forgottenTokens   = map[string]bool{}
+)
+
+// ForgetToken records token as no longer in use, so queued retries for it are
+// dropped. An empty string is a no-op.
+func ForgetToken(token string) {
+	if token == "" {
+		return
+	}
+	forgottenTokensMu.Lock()
+	forgottenTokens[token] = true
+	forgottenTokensMu.Unlock()
+}
+
+// UseToken removes token from the forgotten set, so a token pasted again later
+// works. An empty string is a no-op.
+func UseToken(token string) {
+	if token == "" {
+		return
+	}
+	forgottenTokensMu.Lock()
+	delete(forgottenTokens, token)
+	forgottenTokensMu.Unlock()
+}
+
+func tokenForgotten(token string) bool {
+	forgottenTokensMu.Lock()
+	defer forgottenTokensMu.Unlock()
+	return forgottenTokens[token]
+}
+
+// RelayHealth returns the current unrecoverable relay problems as one: the
+// account-wide problem when there is one, else every refused printer together
+// (names joined, earliest Since). It is nil when nothing is refused.
 func RelayHealth() *RelayProblem {
 	relayProblemMu.Lock()
 	defer relayProblemMu.Unlock()
-	if relayProblem == nil {
+	now := time.Now()
+	for k, p := range relayProblems {
+		if k != accountWide && now.Sub(p.seen) > printerProblemTTL {
+			delete(relayProblems, k)
+		}
+	}
+	if p := relayProblems[accountWide]; p != nil {
+		cp := *p
+		return &cp
+	}
+	keys := make([]string, 0, len(relayProblems))
+	for k := range relayProblems {
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
 		return nil
 	}
-	p := *relayProblem
-	return &p
+	sort.Strings(keys)
+	out := *relayProblems[keys[0]]
+	for _, k := range keys[1:] {
+		p := relayProblems[k]
+		if !strings.Contains(out.Message, p.Message) {
+			out.Message += " " + p.Message
+		}
+		if !strings.Contains(out.Printer, p.Printer) {
+			out.Printer += ", " + p.Printer
+		}
+		if p.Since < out.Since {
+			out.Since = p.Since
+		}
+	}
+	return &out
 }
 
 // setRelayProblem records a problem, keeping the original Since so the
 // dashboard can say how long the relay has been refused.
-func setRelayProblem(kind, message, printer string) {
+func setRelayProblem(kind, message, serial, printer string) {
 	relayProblemMu.Lock()
 	defer relayProblemMu.Unlock()
-	if relayProblem != nil && relayProblem.Kind == kind {
-		relayProblem.Message = message
-		relayProblem.Printer = printer
+	key := problemKey(kind, serial)
+	if p := relayProblems[key]; p != nil && p.Kind == kind {
+		p.Message = message
+		p.Printer = printer
+		p.seen = time.Now()
 		return
 	}
-	relayProblem = &RelayProblem{
+	relayProblems[key] = &RelayProblem{
 		Kind:    kind,
 		Message: message,
 		Printer: printer,
 		Since:   time.Now().UTC().Format(time.RFC3339),
+		seen:    time.Now(),
 	}
 	log.Printf("[relay-health] %s: %s", kind, message)
 }
 
-func clearRelayProblem() {
+// clearRelayProblem is called when the printer with this serial posted well:
+// the account is fine, so account-wide problems end, and so does this
+// printer's own. Other printers' problems stay.
+func clearRelayProblem(serial string) {
 	relayProblemMu.Lock()
 	defer relayProblemMu.Unlock()
-	if relayProblem != nil {
-		log.Printf("[relay-health] cleared (%s resolved)", relayProblem.Kind)
-		relayProblem = nil
+	for _, k := range []string{accountWide, "printer:" + serial} {
+		if p := relayProblems[k]; p != nil {
+			log.Printf("[relay-health] cleared (%s resolved)", p.Kind)
+			delete(relayProblems, k)
+		}
 	}
 }
 
@@ -156,7 +306,7 @@ func clearRelayProblem() {
 // limit is the relay's alone and stays until the relay clears it.
 func NoteBridgeCommandsReply(status int, body []byte) {
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		notePermanentReject(BridgeCommandsURLV2, status, body, "")
+		notePermanentReject(BridgeCommandsURLV2, status, body, "", "")
 		return
 	}
 	if status < 200 || status >= 300 {
@@ -164,9 +314,9 @@ func NoteBridgeCommandsReply(status int, body []byte) {
 	}
 	relayProblemMu.Lock()
 	defer relayProblemMu.Unlock()
-	if relayProblem != nil && (relayProblem.Kind == "unauthorized" || relayProblem.Kind == "plan_limit") {
-		log.Printf("[relay-health] cleared (%s resolved)", relayProblem.Kind)
-		relayProblem = nil
+	if p := relayProblems[accountWide]; p != nil {
+		log.Printf("[relay-health] cleared (%s resolved)", p.Kind)
+		delete(relayProblems, accountWide)
 	}
 }
 
@@ -190,7 +340,7 @@ var currentProjectURLs = []string{RelayURLV2, SnapshotURLV2, HistoryURLV2, Bridg
 // notePermanentReject inspects a non-2xx response. When the status means the
 // user must act, it records the problem and returns a message; otherwise it
 // returns "" and the caller retries as usual.
-func notePermanentReject(endpoint string, status int, body []byte, printer string) string {
+func notePermanentReject(endpoint string, status int, body []byte, serial, printer string) string {
 	if !isCurrentProject(endpoint) {
 		return ""
 	}
@@ -207,13 +357,13 @@ func notePermanentReject(endpoint string, status int, body []byte, printer strin
 	switch {
 	case status == 401:
 		msg := "FoxTrack did not accept this Bridge token. Generate a new one in FoxTrack under Settings > Integrations > FoxTrack Bridge, then paste it into Settings here."
-		setRelayProblem("unauthorized", msg, printer)
+		setRelayProblem("unauthorized", msg, serial, printer)
 		return msg
 
 	case status == 403 && payload.Error == "printer_limit_reached":
 		msg := fmt.Sprintf("Your FoxTrack plan (%s) allows %s printers and you already have %d. New printers will not appear until you upgrade or remove one.",
 			planName(payload.Plan), formatLimit(payload.MaxLimit), payload.CurrentCount)
-		setRelayProblem("printer_limit", msg, printer)
+		setRelayProblem("printer_limit", msg, serial, printer)
 		return msg
 
 	case status == 403:
@@ -224,11 +374,45 @@ func notePermanentReject(endpoint string, status int, body []byte, printer strin
 			msg = "FoxTrack Bridge needs the Pro or Farm plan. Nothing is sent to FoxTrack until this workspace upgrades."
 		}
 		msg = strings.TrimPrefix(msg, "plan_limit: ")
-		setRelayProblem("plan_limit", msg, printer)
+		setRelayProblem("plan_limit", msg, serial, printer)
+		return msg
+
+	case status >= 400 && status < 500 && status != 404 && status != 429:
+		// Any other 4xx is a report FoxTrack will keep refusing (a header it
+		// rejects, a body it cannot read): say so on the dashboard instead
+		// of retrying three times and dropping it in silence.
+		detail := strings.TrimSpace(payload.Error)
+		if detail == "" {
+			detail = strings.TrimSpace(payload.Message)
+		}
+		msg := fmt.Sprintf("FoxTrack refused a report for %s (HTTP %d)", printer, status)
+		if detail != "" {
+			msg += ": " + detail
+		}
+		setRelayProblem("rejected", msg, serial, printer)
 		return msg
 	}
 
 	return ""
+}
+
+// noteSkipped reads a 2xx answer from the history or snapshot endpoint.
+// FoxTrack answers 202 {"ok":false,"skipped":"unknown printer"} when it has no
+// device for the printer: the data was dropped, and sending it again changes
+// nothing until the printer is linked in FoxTrack. It returns a message when
+// the answer says that, "" otherwise.
+func noteSkipped(endpoint string, body []byte, serial, printer string) string {
+	if !isCurrentProject(endpoint) {
+		return ""
+	}
+	var reply struct {
+		Skipped string `json:"skipped"`
+	}
+	if json.Unmarshal(body, &reply) != nil || reply.Skipped == "" {
+		return ""
+	}
+	setRelayProblem("unknown_printer", "FoxTrack does not know this printer; link it in FoxTrack", serial, printer)
+	return fmt.Sprintf("warning: FoxTrack skipped it (%s); it does not know this printer, link it in FoxTrack", reply.Skipped)
 }
 
 // planName is the plan as FoxTrack shows it: the plan value "enterprise" is
@@ -321,6 +505,10 @@ func scheduleRelayRetry(item retryItem) {
 // runRelayRetry retries a failed relay call. Items older than 5 minutes are
 // discarded, and so are items a newer delivered payload has replaced.
 func runRelayRetry(item retryItem) {
+	if tokenForgotten(item.apiKey) {
+		log.Printf("[relay] retry dropped: the FoxTrack token was removed or replaced")
+		return
+	}
 	if time.Since(item.createdAt) > 5*time.Minute {
 		log.Printf("[relay-retry] dropping stale payload for %s (created %s ago)", item.name, time.Since(item.createdAt).Round(time.Second))
 		return
@@ -348,6 +536,12 @@ func runRelayRetry(item retryItem) {
 // RelayPayload mirrors the Bambu relay payload shape.
 type RelayPayload struct {
 	Print RelayPrint `json:"print"`
+
+	// LegacyID is what FoxTrack knew a non-Bambu printer by before it was keyed
+	// on its stable ID: its name, then any earlier names, comma separated.
+	// Sent as X-Printer-Legacy-Id so FoxTrack can re-key the printer it already
+	// has. Never in the body; blank for Bambu printers.
+	LegacyID string `json:"-"`
 }
 
 // RelayAmsSlot carries per-tray AMS state in the relay payload.
@@ -369,6 +563,9 @@ type RelayAmsSlot struct {
 }
 
 type RelayPrint struct {
+	// PrinterName is the printer's exact name. The X-Printer-Name header can
+	// only carry Latin-1 (HeaderName), so FoxTrack reads the real name here.
+	PrinterName        string         `json:"printer_name,omitempty"`
 	GcodeState         string         `json:"gcode_state"`
 	SubTaskName        string         `json:"subtask_name"`
 	McPercent          int            `json:"mc_percent"`
@@ -376,17 +573,19 @@ type RelayPrint struct {
 	NozzleTargetTemper float64        `json:"nozzle_target_temper"`
 	BedTemper          float64        `json:"bed_temper"`
 	BedTargetTemper    float64        `json:"bed_target_temper"`
-	McRemainingTime    int            `json:"mc_remaining_time,omitempty"` // minutes
+	McRemainingTime    int            `json:"mc_remaining_time"` // minutes; -1 when the printer gave no value, 0 is a real 0
 	ActiveExtruder     string         `json:"active_extruder,omitempty"`
 	LightOn            *bool          `json:"light_on,omitempty"`       // nil when not reported (Klipper)
 	Ams                []RelayAmsSlot `json:"ams,omitempty"`            // nil for Klipper or printers without AMS
 	ExternalSpool      *RelayAmsSlot  `json:"external_spool,omitempty"` // Bambu external spool (slot 254); nil until reported
 
-	// Alarms is what the printer reports as wrong right now. Sent on EVERY
-	// push, for every printer kind, as [] when there is none: FoxTrack clears
-	// an open alarm the moment a push leaves it out, so a missing key would
-	// clear and reopen them. doSendRelay turns nil into [].
-	Alarms []RelayAlarm `json:"alarms"`
+	// Alarms is what the printer reports as wrong right now. A full printer
+	// report sends it as [] when there is none (build it with CleanAlarms,
+	// never nil): FoxTrack clears the open alarms on []. A report that does not
+	// speak for the printer (the plug-only report, OFFLINE) leaves it nil, and
+	// MarshalJSON then leaves the key out, which FoxTrack reads as no change.
+	// (omitempty would drop [] as well, so this field has its own marshaller.)
+	Alarms []RelayAlarm `json:"-"`
 	// Plug is the smart plug the printer is on, when one is set in the Bridge.
 	// Left out for a printer without one.
 	Plug *RelayPlug `json:"plug,omitempty"`
@@ -396,6 +595,19 @@ type RelayPrint struct {
 	PrinterModel       string   `json:"printer_model,omitempty"`       // "Bambu Lab P1S", "Klipper"
 	BridgeVersion      string   `json:"bridge_version,omitempty"`      // version.AppVersion
 	BridgeCapabilities []string `json:"bridge_capabilities,omitempty"` // ["print_file", "set_filament"]; empty over Bambu Cloud
+}
+
+// MarshalJSON writes the alarms key when Alarms is non-nil (an empty list means
+// all clear) and leaves it out when Alarms is nil (no change).
+func (r RelayPrint) MarshalJSON() ([]byte, error) {
+	type plain RelayPrint // no methods, so no recursion
+	if r.Alarms == nil {
+		return json.Marshal(plain(r))
+	}
+	return json.Marshal(struct {
+		plain
+		Alarms []RelayAlarm `json:"alarms"`
+	}{plain(r), r.Alarms})
 }
 
 // RelayAlarm is one open alarm, in the shape FoxTrack's printer_alarms
@@ -583,6 +795,10 @@ func scheduleHistoryRetry(item historyRetryItem) {
 }
 
 func runHistoryRetry(item historyRetryItem) {
+	if tokenForgotten(item.apiKey) {
+		log.Printf("[history] retry dropped: the FoxTrack token was removed or replaced")
+		return
+	}
 	if time.Since(item.createdAt) > historyMaxAge {
 		log.Printf("[history-retry] giving up on payload for %s (created %s ago)",
 			item.payload.PrinterName, time.Since(item.createdAt).Round(time.Second))
@@ -618,10 +834,13 @@ func doSendHistory(apiKey, historyURL string, p HistoryPayload) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if msg := notePermanentReject(historyURL, resp.StatusCode, readCappedBody(resp.Body), p.PrinterName); msg != "" {
+		if msg := notePermanentReject(historyURL, resp.StatusCode, readCappedBody(resp.Body), p.Serial, p.PrinterName); msg != "" {
 			return fmt.Errorf("%w: %s", errNotRetryable, msg)
 		}
 		return fmt.Errorf("FoxTrack history endpoint returned HTTP %d", resp.StatusCode)
+	}
+	if msg := noteSkipped(historyURL, readCappedBody(resp.Body), p.Serial, p.PrinterName); msg != "" {
+		return fmt.Errorf("%w: %s", errNotRetryable, msg)
 	}
 	log.Printf("[history] sent %s for %s (%s)", p.Result, p.PrinterName, p.FileName)
 	return nil
@@ -648,7 +867,13 @@ func SendHistory(apiKey, historyURL string, p HistoryPayload) {
 
 // doSendRelay performs the actual HTTP POST for a relay payload.
 func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayPayload) error {
-	p.Print.Alarms = CleanAlarms(p.Print.Alarms)
+	if p.Print.Alarms != nil { // nil = this report says nothing about alarms
+		p.Print.Alarms = CleanAlarms(p.Print.Alarms)
+	}
+	if p.Print.PrinterName == "" {
+		// The exact UTF-8 name; the header carries a Latin-1 copy (HeaderName).
+		p.Print.PrinterName = strings.TrimSpace(printerName)
+	}
 	body, err := json.Marshal(p)
 	if err != nil {
 		return err
@@ -660,7 +885,10 @@ func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayP
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("X-Printer-Serial", printerSerial)
-	req.Header.Set("X-Printer-Name", printerName)
+	req.Header.Set("X-Printer-Name", HeaderName(printerName))
+	if p.LegacyID != "" {
+		req.Header.Set("X-Printer-Legacy-Id", p.LegacyID)
+	}
 
 	resp, err := relayHTTPClient.Do(req)
 	if err != nil {
@@ -668,13 +896,14 @@ func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayP
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if msg := notePermanentReject(webhookURL, resp.StatusCode, readCappedBody(resp.Body), printerName); msg != "" {
+		if msg := notePermanentReject(webhookURL, resp.StatusCode, readCappedBody(resp.Body), printerSerial, printerName); msg != "" {
 			return fmt.Errorf("%w: %s", errNotRetryable, msg)
 		}
 		return fmt.Errorf("FoxTrack relay webhook returned HTTP %d", resp.StatusCode)
 	}
 	if isCurrentProject(webhookURL) {
-		clearRelayProblem()
+		clearRelayProblem(printerSerial)
+		markDelivered()
 	}
 	log.Printf("[relay] Sent relay payload for %s (%d%%)", printerName, p.Print.McPercent)
 	return nil
@@ -700,17 +929,20 @@ func SendSnapshot(apiKey, snapshotURL, serial, name string, jpegBytes []byte) er
 	req.Header.Set("Content-Type", "image/jpeg")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("X-Printer-Serial", serial)
-	req.Header.Set("X-Printer-Name", name)
+	req.Header.Set("X-Printer-Name", HeaderName(name))
 	resp, err := relayHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if msg := notePermanentReject(snapshotURL, resp.StatusCode, readCappedBody(resp.Body), name); msg != "" {
+		if msg := notePermanentReject(snapshotURL, resp.StatusCode, readCappedBody(resp.Body), serial, name); msg != "" {
 			return fmt.Errorf("%w: %s", errNotRetryable, msg)
 		}
 		return fmt.Errorf("snapshot endpoint returned HTTP %d", resp.StatusCode)
+	}
+	if msg := noteSkipped(snapshotURL, readCappedBody(resp.Body), serial, name); msg != "" {
+		return fmt.Errorf("%w: %s", errNotRetryable, msg)
 	}
 	log.Printf("[snapshot] sent frame for %s (%d bytes)", name, len(jpegBytes))
 	return nil

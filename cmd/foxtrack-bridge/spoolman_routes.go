@@ -72,10 +72,10 @@ func handleSpoolman(w http.ResponseWriter, r *http.Request) {
 			Slots   map[string]*int `json:"slots"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "The request could not be read.", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "The request could not be read.")
 			return
 		}
-		bad := func(msg string) { http.Error(w, msg, http.StatusBadRequest) }
+		bad := func(msg string) { writeErr(w, http.StatusBadRequest, msg) }
 		var url string
 		if req.URL != nil {
 			url = strings.TrimSpace(*req.URL)
@@ -144,7 +144,7 @@ func handleSpoolman(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(spoolmanViewNow())
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -175,7 +175,7 @@ func handleSpoolmanTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !requireJSON(w, r) {
@@ -185,7 +185,7 @@ func handleSpoolmanTest(w http.ResponseWriter, r *http.Request) {
 		URL string `json:"url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "The request could not be read.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "The request could not be read.")
 		return
 	}
 	reply := func(ok bool, msg string) {
@@ -220,20 +220,20 @@ func handleSpoolmanSpools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	v := spoolmanViewNow()
 	c, err := spoolman.NewClient(v.URL)
 	if err != nil {
-		http.Error(w, "Save your Spoolman address first.", http.StatusBadRequest)
+		writeErr(w, http.StatusConflict, "Save your Spoolman address first.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	spools, err := c.Spools(ctx)
 	if err != nil {
-		http.Error(w, "Can't read the spools from Spoolman. "+err.Error(), http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, "Can't read the spools from Spoolman. "+err.Error())
 		return
 	}
 	if spools == nil {

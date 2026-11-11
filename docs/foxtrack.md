@@ -95,12 +95,15 @@ remove it and add it again.
 
 Good to know:
 
-- **Leave the access code or API key blank** to keep the saved one.
-- **Renaming a Bambu Lab printer is safe.** FoxTrack keeps the link and shows the
-  new name.
-- **Renaming a Klipper printer makes FoxTrack see a new device,** because
-  FoxTrack knows Klipper printers by name. See
-  [Move a link to the new device](#move-a-link-to-the-new-device).
+- **Leave the access code or API key blank** to keep the saved one. If you
+  change a Klipper, PrusaLink, OctoPrint or Home Assistant printer's address,
+  enter its API key or token again: the saved one is only kept for the same
+  address.
+- **Renaming a printer is safe.** FoxTrack keeps the link and shows the new name.
+  A Bambu Lab printer is followed by its serial number, a Klipper, PrusaLink,
+  OctoPrint or Home Assistant printer by a fixed ID the Bridge gives it. (Older
+  Bridges had FoxTrack know those by name, so a rename made a new device. The
+  first report from a newer Bridge moves the old device to the ID.)
 - **Print history in the Bridge** from before a rename stays with the printer.
 - **You cannot rename a printer during a print.** Finish or stop the print first.
   You can change the IP address at any time.
@@ -254,3 +257,11 @@ Your FoxTrack plan limits how many Bridge printers a workspace can have (5 on
 Pro, unlimited on Farm). Printers you renamed or removed still count while
 their old device is in FoxTrack. In FoxTrack, open **Printers**, find the old
 device under **Detected on your network, not linked**, and click **Remove**.
+
+### A print that finished while the Bridge was off is missing
+
+The Bridge only sees what happens while it runs. A print that ends while the
+computer is off or the Bridge is restarting is not recorded in history and
+sends no finished-print message; the printer's own screen or Bambu Handy still
+has it. A print that is still running when the Bridge comes back is picked up
+again with its real start time.

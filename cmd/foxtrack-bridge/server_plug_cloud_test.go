@@ -51,7 +51,7 @@ func TestPlugCommand_BambuCloudPrinter(t *testing.T) {
 	configStore = &config.Config{Printers: printers}
 	configMutex.Unlock()
 	t.Cleanup(func() {
-		plugs.Sync(nil)
+		plugs.Stop() // wait for the pollers: they read configStore, restored below
 		configMutex.Lock()
 		configStore = oldCfg
 		configMutex.Unlock()

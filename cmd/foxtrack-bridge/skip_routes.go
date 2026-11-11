@@ -89,36 +89,36 @@ func handleObjects(w http.ResponseWriter, r *http.Request) {
 	tail := pathTail(r, "/api/objects/")
 	parts := strings.Split(tail, "/")
 	if len(parts) == 0 || parts[0] == "" {
-		http.Error(w, "Not found.", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Not found.")
 		return
 	}
 	id, err := url.PathUnescape(parts[0])
 	if err != nil {
-		http.Error(w, "Not found.", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Not found.")
 		return
 	}
 
 	p, ok := printerByID(id)
 	if !ok {
-		http.Error(w, "Printer not found.", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Printer not found.")
 		return
 	}
 
 	switch r.Method {
 	case "GET":
 		if len(parts) != 1 || parts[0] == "" {
-			http.Error(w, "Not found.", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Not found.")
 			return
 		}
 		handleSkipList(w, r, p)
 	case "POST":
 		if len(parts) != 2 || parts[1] != "skip" {
-			http.Error(w, "Not found.", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Not found.")
 			return
 		}
 		handleSkipRun(w, r, p)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -138,13 +138,13 @@ func handleSkipList(w http.ResponseWriter, r *http.Request, p config.Printer) {
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			http.Error(w, "The printer took too long to answer. Try again.", http.StatusGatewayTimeout)
+			writeErr(w, http.StatusGatewayTimeout, "The printer took too long to answer. Try again.")
 			return
 		}
 		if errors.Is(err, context.Canceled) {
 			return
 		}
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeSkip(w, true, "", list)
@@ -160,7 +160,7 @@ func handleSkipRun(w http.ResponseWriter, r *http.Request, p config.Printer) {
 		IDs []string `json:"ids"`
 	}
 	if err := json.NewDecoder(body).Decode(&req); err != nil {
-		http.Error(w, "That request was not valid.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "That request was not valid.")
 		return
 	}
 	var ids []string
@@ -171,15 +171,15 @@ func handleSkipRun(w http.ResponseWriter, r *http.Request, p config.Printer) {
 		}
 	}
 	if len(ids) == 0 {
-		http.Error(w, "Pick at least one object to skip.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Pick at least one object to skip.")
 		return
 	}
 	if len(ids) > 200 {
-		http.Error(w, "Too many objects in one request.", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Too many objects in one request.")
 		return
 	}
 	if !printingNow(p) {
-		http.Error(w, "Objects can be skipped only while a print is running or paused.", http.StatusConflict)
+		writeErr(w, http.StatusConflict, "Objects can be skipped only while a print is running or paused.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), skipRequestTimeout)
@@ -188,14 +188,14 @@ func handleSkipRun(w http.ResponseWriter, r *http.Request, p config.Printer) {
 	if err != nil {
 		var unsupported *mqttpkg.SkipUnsupported
 		if errors.As(err, &unsupported) {
-			http.Error(w, unsupported.Reason, http.StatusConflict)
+			writeErr(w, http.StatusConflict, unsupported.Reason)
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			http.Error(w, "The printer took too long to answer. Try again.", http.StatusGatewayTimeout)
+			writeErr(w, http.StatusGatewayTimeout, "The printer took too long to answer. Try again.")
 			return
 		}
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeSkip(w, true, "", list)

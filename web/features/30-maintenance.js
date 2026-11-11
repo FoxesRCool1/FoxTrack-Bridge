@@ -48,7 +48,7 @@ function mtTaskHtml(t) {
         + '<span class="mt-acts">'
         + '<button type="button" class="btn-outline btn-xs" data-mt-act="done" aria-label="Mark ' + label + ' as done">Done</button>'
         + '<button type="button" class="mt-icon" data-mt-act="edit" aria-label="Edit ' + label + '"><i class="fas fa-pencil"></i></button>'
-        + '<button type="button" class="mt-icon" data-mt-act="delete" aria-label="Delete ' + label + '"><i class="fas fa-times"></i></button>'
+        + '<button type="button" class="mt-icon" data-mt-act="delete" aria-label="Remove ' + label + '"><i class="fas fa-times"></i></button>'
         + '</span></div></div>';
 }
 
@@ -146,7 +146,7 @@ function mtDelete(id) {
     mt.pending.set(id, f.t);
     f.p.tasks.splice(f.p.tasks.indexOf(f.t), 1);
     mtRenderPrinter(f.p.id);
-    undoBar('Deleted', f.t.name, {
+    undoBar('Removed', f.t.name, {
         ms: 10000,
         onUndo() {
             // The task is still on the server; no request needed.
