@@ -1532,6 +1532,22 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 			webhook.ResetRelayHealth()
 			wakeBridgeCommands()
 		}
+		if oldCfg != nil {
+			// Tell the retry queues about a change of either token: a removed or
+			// replaced token's queued retries must stop, a re-pasted one resumes.
+			if oldCfg.APIKey != "" && oldCfg.APIKey != snapshot.APIKey {
+				webhook.ForgetToken(oldCfg.APIKey)
+			}
+			if snapshot.APIKey != "" {
+				webhook.UseToken(snapshot.APIKey)
+			}
+			if oldCfg.FoxTrack2APIKey != "" && oldCfg.FoxTrack2APIKey != snapshot.FoxTrack2APIKey {
+				webhook.ForgetToken(oldCfg.FoxTrack2APIKey)
+			}
+			if snapshot.FoxTrack2APIKey != "" {
+				webhook.UseToken(snapshot.FoxTrack2APIKey)
+			}
+		}
 		// On purpose: the change stays active and the user is told it was not
 		// written (a read-only config.json must not block every setting).
 		if saveErr != nil {

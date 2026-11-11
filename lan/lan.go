@@ -491,6 +491,10 @@ func (c *Controller) RenamePrinter(oldName, newName string) {
 		c.offlineSent[newName] = v
 		delete(c.offlineSent, oldName)
 	}
+	if v, ok := c.lastRelay[oldName]; ok {
+		c.lastRelay[newName] = v
+		delete(c.lastRelay, oldName)
+	}
 	delete(c.pollFails, oldName)
 	c.relayLastTMu.Unlock()
 	c.snapLastTMu.Lock()

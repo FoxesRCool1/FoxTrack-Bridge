@@ -95,7 +95,10 @@ remove it and add it again.
 
 Good to know:
 
-- **Leave the access code or API key blank** to keep the saved one.
+- **Leave the access code or API key blank** to keep the saved one. If you
+  change a Klipper, PrusaLink, OctoPrint or Home Assistant printer's address,
+  enter its API key or token again: the saved one is only kept for the same
+  address.
 - **Renaming a printer is safe.** FoxTrack keeps the link and shows the new name.
   A Bambu Lab printer is followed by its serial number, a Klipper, PrusaLink,
   OctoPrint or Home Assistant printer by a fixed ID the Bridge gives it. (Older

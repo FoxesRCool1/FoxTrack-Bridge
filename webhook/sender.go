@@ -188,6 +188,42 @@ func HeaderName(name string) string {
 // re-send, because the next attempt gets the same answer.
 var errNotRetryable = errors.New("not retryable")
 
+// forgottenTokens holds FoxTrack tokens that were removed or replaced while
+// queued retries were still waiting for them. A retry for a forgotten token is
+// dropped instead of re-sent with the old token; first sends are unaffected.
+var (
+	forgottenTokensMu sync.Mutex
+	forgottenTokens   = map[string]bool{}
+)
+
+// ForgetToken records token as no longer in use, so queued retries for it are
+// dropped. An empty string is a no-op.
+func ForgetToken(token string) {
+	if token == "" {
+		return
+	}
+	forgottenTokensMu.Lock()
+	forgottenTokens[token] = true
+	forgottenTokensMu.Unlock()
+}
+
+// UseToken removes token from the forgotten set, so a token pasted again later
+// works. An empty string is a no-op.
+func UseToken(token string) {
+	if token == "" {
+		return
+	}
+	forgottenTokensMu.Lock()
+	delete(forgottenTokens, token)
+	forgottenTokensMu.Unlock()
+}
+
+func tokenForgotten(token string) bool {
+	forgottenTokensMu.Lock()
+	defer forgottenTokensMu.Unlock()
+	return forgottenTokens[token]
+}
+
 // RelayHealth returns the current unrecoverable relay problems as one: the
 // account-wide problem when there is one, else every refused printer together
 // (names joined, earliest Since). It is nil when nothing is refused.
@@ -469,6 +505,10 @@ func scheduleRelayRetry(item retryItem) {
 // runRelayRetry retries a failed relay call. Items older than 5 minutes are
 // discarded, and so are items a newer delivered payload has replaced.
 func runRelayRetry(item retryItem) {
+	if tokenForgotten(item.apiKey) {
+		log.Printf("[relay] retry dropped: the FoxTrack token was removed or replaced")
+		return
+	}
 	if time.Since(item.createdAt) > 5*time.Minute {
 		log.Printf("[relay-retry] dropping stale payload for %s (created %s ago)", item.name, time.Since(item.createdAt).Round(time.Second))
 		return
@@ -755,6 +795,10 @@ func scheduleHistoryRetry(item historyRetryItem) {
 }
 
 func runHistoryRetry(item historyRetryItem) {
+	if tokenForgotten(item.apiKey) {
+		log.Printf("[history] retry dropped: the FoxTrack token was removed or replaced")
+		return
+	}
 	if time.Since(item.createdAt) > historyMaxAge {
 		log.Printf("[history-retry] giving up on payload for %s (created %s ago)",
 			item.payload.PrinterName, time.Since(item.createdAt).Round(time.Second))
