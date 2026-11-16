@@ -88,6 +88,9 @@ func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr er
 		return endOf(name, sess, "cancelled", sess.lastProgress, sess.lastFilamentMM, now)
 	}
 
+	first := !c.swept[name] // the first good poll of this run
+	c.swept[name] = true
+
 	// Print A ended and print B started while the printer was unreachable:
 	// close A with what was last seen, then start B below.
 	var ended *sessionEnd
@@ -115,6 +118,8 @@ func (c *Controller) applyPoll(name string, t *mqttpkg.TelemetryData, pollErr er
 			ns.restoreIfSame(name, key, t, now)
 			c.sessions[name] = ns
 			saveSession(name, key, ns)
+		} else if first && mqttpkg.Settled(t.Status) {
+			forgetSession(name, key) // the print ended while the Bridge was down: its saved copy would be adopted by a reprint of the same file
 		}
 		return ended
 	}
@@ -218,6 +223,8 @@ type Controller struct {
 	cancelers      map[string]chan struct{}
 	sessionMu      sync.Mutex
 	sessions       map[string]*printSession
+	swept          map[string]bool   // printers whose saved session was checked once this run; guarded by sessionMu
+	movedFrom      map[string]string // old name -> saved-session key of a session RenamePrinter just moved; guarded by sessionMu
 	snapLastT      map[string]int64
 	snapLastTMu    sync.Mutex
 	snapInFlight   map[string]bool
@@ -240,6 +247,8 @@ func NewController() *Controller {
 		printers:     map[string]configpkg.Printer{},
 		cancelers:    map[string]chan struct{}{},
 		sessions:     map[string]*printSession{},
+		swept:        map[string]bool{},
+		movedFrom:    map[string]string{},
 		snapLastT:    map[string]int64{},
 		snapInFlight: map[string]bool{},
 		relayLastT:   map[string]int64{},
@@ -326,20 +335,42 @@ const relayHeartbeatSec = pace.HeartbeatSec
 // for FoxTrack (about 10 s: a failed poll is retried after 5 s).
 const offlinePolls = 2
 
-// noteFailedPoll counts a failed poll and reports true once, at the
-// offlinePolls-th in a row: the caller then sends the OFFLINE report. That
+// noteFailedPoll counts a failed poll and reports true at the offlinePolls-th
+// in a row, then again every pace.HeartbeatSec while the printer stays down:
+// the website treats a device not heard from for 90 s as unreachable, and a
+// post that failed all its retries would otherwise never be resent. Each report
 // counts as a status change for the pace, so the next send is measured from it.
 func (c *Controller) noteFailedPoll(name string, now int64) bool {
 	c.relayLastTMu.Lock()
 	defer c.relayLastTMu.Unlock()
 	c.pollFails[name]++
-	if c.pollFails[name] < offlinePolls || c.offlineSent[name] {
+	if c.pollFails[name] < offlinePolls {
 		return false
+	}
+	if c.offlineSent[name] && now-c.relayLastT[name] < pace.HeartbeatSec {
+		return false // already told; repeat each heartbeat
 	}
 	c.offlineSent[name] = true
 	c.relayLastT[name] = now
 	c.relayHeld[name] = false
 	return true
+}
+
+// lastReport is the baseline of an OFFLINE report: the printer's last real
+// report, or, after a Bridge restart, the file and progress of its saved print
+// session. nil when there is neither.
+func (c *Controller) lastReport(name string) *webhook.RelayPayload {
+	c.relayLastTMu.Lock()
+	lp, ok := c.lastRelay[name]
+	c.relayLastTMu.Unlock()
+	if ok {
+		return &lp
+	}
+	var sv savedSession
+	if history.LoadSession(c.sessionKey(name), &sv) {
+		return &webhook.RelayPayload{Print: webhook.RelayPrint{SubTaskName: sv.FileName, McPercent: sv.LastProgress}}
+	}
+	return nil
 }
 
 // shouldRelay reports whether this poll should push telemetry to FoxTrack, and
@@ -441,7 +472,13 @@ func (c *Controller) RemovePrinter(name string) {
 	delete(c.states, name)
 	c.mu.Unlock()
 	c.forgetBookkeeping(name)
-	forgetSession(name, key)
+	c.sessionMu.Lock()
+	kept := c.movedFrom[name] == key && key != "name:"+name // a rename just moved the session saved under this ID key
+	delete(c.movedFrom, name)
+	c.sessionMu.Unlock()
+	if !kept {
+		forgetSession(name, key)
+	}
 }
 
 // forgetBookkeeping drops a removed printer's print session and relay pacing,
@@ -449,6 +486,7 @@ func (c *Controller) RemovePrinter(name string) {
 func (c *Controller) forgetBookkeeping(name string) {
 	c.sessionMu.Lock()
 	delete(c.sessions, name)
+	delete(c.swept, name)
 	c.sessionMu.Unlock()
 	c.relayLastTMu.Lock()
 	delete(c.relayLastT, name)
@@ -465,18 +503,21 @@ func (c *Controller) forgetBookkeeping(name string) {
 	c.relayQMu.Unlock()
 }
 
-// RenamePrinter moves a printer's print session and relay pacing from oldName
-// to newName, so renaming a printer mid-print keeps the print going instead of
-// ending it as cancelled. Call it before RemovePrinter(oldName).
+// RenamePrinter moves a printer's print session, its saved session and its
+// relay pacing from oldName to newName, so renaming a printer mid-print keeps
+// the print going instead of ending it as cancelled. Call it before
+// RemovePrinter(oldName), which then leaves the moved saved session in place.
 func (c *Controller) RenamePrinter(oldName, newName string) {
 	if oldName == newName {
 		return
 	}
+	key := c.sessionKey(oldName) // before sessionMu: it reads the printer list
 	c.sessionMu.Lock()
 	if s, ok := c.sessions[oldName]; ok {
 		c.sessions[newName] = s
 		delete(c.sessions, oldName)
 	}
+	c.movedFrom[oldName] = key // even right after a restart with nothing in memory yet
 	c.sessionMu.Unlock()
 	c.relayLastTMu.Lock()
 	if v, ok := c.relayLastT[oldName]; ok {
@@ -694,18 +735,14 @@ func (c *Controller) pollLoop(p configpkg.Printer, foxAPIKey, fox2APIKey string,
 					c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey, payload: relayPayload, serial: serial, legacy: legacy})
 				}
 			} else if c.noteFailedPoll(p.Name, time.Now().Unix()) {
-				// The Bridge is fine and the printer is not: say so once, keeping
-				// the last known print (progress, file, spools) in the report.
+				// The Bridge is fine and the printer is not: say so, repeating
+				// every heartbeat while it stays down, keeping the last known
+				// print (progress, file, spools) in the report.
 				model := ""
 				if prev != nil {
 					model = prev.PrinterModel
 				}
-				var last *webhook.RelayPayload
-				c.relayLastTMu.Lock()
-				if lp, ok := c.lastRelay[p.Name]; ok {
-					last = &lp
-				}
-				c.relayLastTMu.Unlock()
+				last := c.lastReport(p.Name)
 				c.queueRelay(p.Name, relayJob{foxAPIKey: foxAPIKey, fox2APIKey: fox2APIKey,
 					payload: mqttpkg.OfflinePayload(last, p.Kind(), model, t.Plug), serial: serial, legacy: legacy})
 			}

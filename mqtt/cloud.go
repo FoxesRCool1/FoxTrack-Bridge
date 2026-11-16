@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"foxtrack-bridge/pace"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/eclipse/paho.mqtt.golang/packets"
 )
@@ -761,16 +763,25 @@ func (r *cloudRunner) dropClient() {
 	}
 }
 
-// reportOfflineIfStill reports p unreachable (reportOffline) when it is still a
-// cloud printer here and still disconnected.
+// offlineRepeat is how often a cloud printer that stays unreachable is
+// reported again. A var so a test can shorten it.
+var offlineRepeat = time.Duration(pace.HeartbeatSec) * time.Second
+
+// reportOfflineIfStill reports p unreachable (reportOffline) when it is still
+// a cloud printer here and still disconnected, then looks again after
+// offlineRepeat. It ends when the printer is removed, the session is back
+// (the printer is no longer disconnected) or the runner stopped.
+// reportOffline itself drops a report that is too close to the last one, so
+// two overlapping chains do not double-post.
 func (r *cloudRunner) reportOfflineIfStill(p Printer) {
 	r.mu.Lock()
-	_, listed := r.printers[p.Serial]
+	cur, listed := r.printers[p.Serial] // current name and keys: the printer may have been renamed or edited
 	r.mu.Unlock()
-	if !listed || r.stopped() || GetPrinterState(p.Name).Status != "disconnected" {
+	if !listed || r.stopped() || GetPrinterState(cur.Name).Status != "disconnected" {
 		return
 	}
-	reportOffline(p, time.Now().Unix())
+	reportOffline(cur, time.Now().Unix())
+	time.AfterFunc(offlineRepeat, func() { r.reportOfflineIfStill(cur) })
 }
 
 // handleMessage routes a report to the printer that owns the topic and feeds

@@ -38,17 +38,17 @@ func post(t *testing.T, serial string, p RelayPayload) (http.Header, map[string]
 	return hdr, body
 }
 
-// A Klipper printer is keyed on its config ID; the name it used to be keyed on
-// goes in X-Printer-Legacy-Id (current name first) so FoxTrack can re-key.
+// A Klipper printer is keyed on its config ID; its current name goes in
+// X-Printer-Legacy-Id so FoxTrack can re-key the printer it already has.
 func TestSendRelay_KlipperIdentityHeaders(t *testing.T) {
-	hdr, _ := post(t, "a1b2c3d4e5f60718", RelayPayload{LegacyID: "Shop Klipper,Old Name"})
+	hdr, _ := post(t, "a1b2c3d4e5f60718", RelayPayload{LegacyID: "Shop Klipper"})
 	if got := hdr.Get("X-Printer-Serial"); got != "a1b2c3d4e5f60718" {
 		t.Errorf("X-Printer-Serial = %q, want the printer ID", got)
 	}
 	if got := hdr.Get("X-Printer-Name"); got != "Shop Klipper" {
 		t.Errorf("X-Printer-Name = %q", got)
 	}
-	if got := hdr.Get("X-Printer-Legacy-Id"); got != "Shop Klipper,Old Name" {
+	if got := hdr.Get("X-Printer-Legacy-Id"); got != "Shop Klipper" {
 		t.Errorf("X-Printer-Legacy-Id = %q", got)
 	}
 

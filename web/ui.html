@@ -1731,9 +1731,7 @@ function showSettingsTab(tab) {
         }
     }
     document.querySelectorAll('[data-settings-tab]').forEach(el => el.classList.toggle('hidden', el.dataset.settingsTab !== tab));
-    document.querySelectorAll('[data-set-tab]').forEach(el => {
-        if (el.dataset.setTab === tab) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
-    });
+    renderSettingsNav();
 }
 
 function toggleAdvancedMode() {
@@ -1876,6 +1874,7 @@ async function loadConfig() {
         setBridgeStatus(false);
         const tokenField = document.getElementById('foxtrack2ApiKey');
         if (tokenField) tokenField.disabled = false; // a token can still be saved; the server keeps the rest
+        updateSecretPlaceholder('foxtrack2ApiKey', false, '', 'Paste the token (starts with ftb_)');
     }
     refreshFoxTrackUi();
     renderSettingsNav();
@@ -1980,13 +1979,15 @@ async function unlinkFoxTrack() {
     try {
         await apiFetch('/api/config', { method:'POST', body:JSON.stringify({ clear_foxtrack_token: true }) });
     } catch (e) { toast("Could not unlink FoxTrack: " + e.message, 'error'); return; }
+    foxtrackCheckSeq++;   // a check started before the unlink must not rewrite the line
     foxtrackCheckState = null;
     relayProblem = false;
     relayDelivered = false;
     setFoxTrackStatus('', '', '');
     await loadConfig();
     renderSettingsNav();
-    toast('FoxTrack unlinked');
+    if (foxtrackLinked()) toast('FoxTrack is still linked. Reload the page.', 'error');
+    else toast('FoxTrack unlinked');
 }
 
 // ── Bambu Cloud account ───────────────────────────────────────────────────────
@@ -2593,6 +2594,7 @@ function mirrorWelcomeFtStatus() {
     if (!wrap) return;
     let s = lastFtStatus;
     if (!s.text && foxtrackMode() === 'attention') s = { dotCls: 'bg-warning', textCls: 'text-warning', text: 'FoxTrack is not accepting this Bridge right now. Paste a new token to try again.' };
+    if (!s.text && foxtrackMode() === 'unreachable') s = { dotCls: 'bg-warning', textCls: 'text-warning', text: "Token saved. Can't reach FoxTrack right now." };
     wrap.classList.toggle('hidden', !s.text);
     wrap.classList.toggle('flex', !!s.text);
     document.getElementById('wFtDot').className = 'h-1.5 w-1.5 shrink-0 rounded-full ' + s.dotCls;
@@ -2642,7 +2644,9 @@ function foxtrackLinked() { return foxtrackTokenSet || legacyKeySet; }
 // printer report has been accepted. Anything less is said as what it is.
 function foxtrackMode() {
     if (!foxtrackLinked()) return 'standalone';
-    if (relayProblem || (foxtrackCheckState && foxtrackCheckState !== 'ok' && foxtrackCheckState !== 'unknown')) return 'attention';
+    if (relayProblem) return 'attention';
+    if (foxtrackCheckState === 'offline') return 'unreachable';
+    if (foxtrackCheckState && foxtrackCheckState !== 'ok' && foxtrackCheckState !== 'unknown') return 'attention';
     if (foxtrackCheckState === null) return 'checking';
     if (foxtrackCheckState === 'unknown') return 'unreachable';
     if (!relayDelivered) return 'waiting';

@@ -87,9 +87,15 @@ func isConfigTransferPath(p string) bool {
 }
 
 // loopbackClient reports whether the request came from this computer
-// (127.0.0.0/8 or ::1). It goes by the connection, never by a header such as
-// X-Forwarded-For, which any client can set.
+// (127.0.0.0/8 or ::1). It goes by the connection and never trusts a forwarding
+// header, which any client can set. A forwarding header does make it answer no:
+// a reverse proxy on this computer makes every remote visitor look local.
 func loopbackClient(r *http.Request) bool {
+	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Forwarded"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr

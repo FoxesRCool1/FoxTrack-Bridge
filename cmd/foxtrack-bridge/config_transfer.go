@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,7 +23,8 @@ import (
 //
 // The export is a copy of the printers and settings with every secret blanked:
 // the FoxTrack tokens, printer access codes and API keys, plug, notification and
-// MQTT passwords and tokens, the assistant's provider key. It is a file the user
+// MQTT passwords and tokens, the assistant's provider key, webhook URLs and
+// logins inside printer addresses. It is a file the user
 // may mail or keep in a cloud folder. A restore keeps the secret already stored
 // for the same printer, channel or broker whenever the file lacks it, so a
 // restore on the same install asks for nothing again. Also left out and never
@@ -58,6 +60,9 @@ func exportableConfig(cfg *config.Config) *config.Config {
 	for i := range out.Printers {
 		p := &out.Printers[i]
 		p.LANCode, p.APIKey, p.HomeAssistantToken = "", "", ""
+		for _, u := range printerURLs(p) {
+			*u = stripURLLogin(*u)
+		}
 		if p.Plug != nil {
 			p.Plug.LocalKey, p.Plug.Password, p.Plug.Token = "", "", ""
 		}
@@ -72,6 +77,9 @@ func exportableConfig(cfg *config.Config) *config.Config {
 		for i := range out.Notifications.Channels {
 			ch := &out.Notifications.Channels[i]
 			ch.Token = ""
+			if notifyURLIsSecret(ch.Kind) {
+				ch.URL = ""
+			}
 			if ch.SMTP != nil {
 				ch.SMTP.Password = ""
 			}
@@ -81,6 +89,54 @@ func exportableConfig(cfg *config.Config) *config.Config {
 		out.MQTTExport.Password = ""
 	}
 	return out
+}
+
+// notifyURLIsSecret reports whether a channel's URL is itself the credential:
+// anyone who has it can post to the channel.
+func notifyURLIsSecret(kind string) bool {
+	switch kind {
+	case "discord", "slack", "ntfy", "webhook":
+		return true
+	}
+	return false
+}
+
+// printerURLs is every address on a printer that can carry a user:pass@ login.
+func printerURLs(p *config.Printer) []*string {
+	return []*string{&p.MoonrakerURL, &p.WebcamURL, &p.PrusaLinkURL, &p.HomeAssistantURL, &p.OctoPrintURL}
+}
+
+// stripURLLogin removes user:pass@ from raw. Anything else comes back unchanged.
+func stripURLLogin(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
+}
+
+// keepPrinterURLLogins gives an imported printer address back the login the
+// export removed, when it is the same address as the stored one. It runs before
+// applyStoredSecrets, which keeps a printer's key only while its address is
+// unchanged. Printers match by ID, else by name. cfg is changed, old is not.
+func keepPrinterURLLogins(cfg, old *config.Config) {
+	for i := range cfg.Printers {
+		p := &cfg.Printers[i]
+		for j := range old.Printers {
+			o := &old.Printers[j]
+			if (p.ID != "" && p.ID != o.ID) || (p.ID == "" && p.Name != o.Name) {
+				continue
+			}
+			was := printerURLs(o)
+			for k, u := range printerURLs(p) {
+				if stripURLLogin(*was[k]) == *u {
+					*u = *was[k]
+				}
+			}
+			break
+		}
+	}
 }
 
 // keepImportedSecrets fills the secrets an imported file lacks from the stored
@@ -99,6 +155,9 @@ func keepImportedSecrets(cfg, old *config.Config) {
 			prev, ok := oldCh[ch.ID]
 			if !ok || prev.Kind != ch.Kind {
 				continue
+			}
+			if ch.URL == "" && notifyURLIsSecret(ch.Kind) {
+				ch.URL = prev.URL // the export left it out
 			}
 			// Kinds without a URL have it blank on both sides, so this holds
 			// their token; a changed URL must be given its token again.
@@ -219,6 +278,7 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 		// a FoxTrack key; restoring either must not unlink FoxTrack or ask for
 		// every code again. A blank secret keeps the stored one (same rule as
 		// POST /api/config), printers matched by ID, else by name.
+		keepPrinterURLLogins(cfg, old)
 		applyStoredSecrets(cfg, old)
 		keepImportedSecrets(cfg, old)
 		// A token already linked to FoxTrack stays linked: an older file must

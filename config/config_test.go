@@ -160,3 +160,19 @@ func TestKindLabel(t *testing.T) {
 		}
 	}
 }
+
+// The legacy ID is the printer's current name only, and blank when the name is
+// too long for FoxTrack's header limit.
+func TestRelayIdentityLegacyIsCurrentName(t *testing.T) {
+	if s, l := (Printer{ID: "abc", Name: "New", PreviousNames: []string{"Old"}}).RelayIdentity(); s != "abc" || l != "New" {
+		t.Errorf("RelayIdentity = %q, %q, want %q, %q", s, l, "abc", "New")
+	}
+	long := strings.Repeat("a", 129)
+	if s, l := (Printer{ID: "abc", Name: long}).RelayIdentity(); s != "abc" || l != "" {
+		t.Errorf("a 129-byte name: RelayIdentity = %q, %q, want %q, %q", s, l, "abc", "")
+	}
+	exact := strings.Repeat("a", 128)
+	if s, l := (Printer{ID: "abc", Name: exact}).RelayIdentity(); s != "abc" || l != exact {
+		t.Errorf("a 128-byte name: RelayIdentity = %q, %q, want the name kept", s, l)
+	}
+}

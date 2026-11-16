@@ -1601,22 +1601,23 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		p.Name = strings.TrimSpace(p.Name)
 		p.Plug = normalizePlug(p.Plug)
 		if p.Name == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": errBlankPrinterName.Error()})
+			writeErr(w, http.StatusBadRequest, errBlankPrinterName.Error())
+			return
+		}
+		if err := rejectLongNames([]config.Printer{p}); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
 		configMutex.Lock()
 		if hasDuplicateName(configStore.Printers, p) {
 			configMutex.Unlock()
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("a printer named %q already exists; printer names must be unique", p.Name)})
+			writeErr(w, http.StatusConflict, fmt.Sprintf("a printer named %q already exists; printer names must be unique", p.Name))
 			return
 		}
 		if owner, ok := previousNameOwner(configStore.Printers, p.Name); ok {
 			configMutex.Unlock()
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("%q is an old name of printer %q, and its print history is filed under that name; choose another name", p.Name, owner)})
+			writeErr(w, http.StatusConflict, fmt.Sprintf("%q is an old name of printer %q, and its print history is filed under that name; choose another name", p.Name, owner))
 			return
 		}
 		// Server-generated only: a client-supplied id is never trusted on

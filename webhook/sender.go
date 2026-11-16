@@ -288,7 +288,8 @@ func setRelayProblem(kind, message, serial, printer string) {
 
 // clearRelayProblem is called when the printer with this serial posted well:
 // the account is fine, so account-wide problems end, and so does this
-// printer's own. Other printers' problems stay.
+// printer's own. Other printers' problems stay. serial may be a snapshot key
+// ("snapshot:"+serial): each path clears only its own printer problem.
 func clearRelayProblem(serial string) {
 	relayProblemMu.Lock()
 	defer relayProblemMu.Unlock()
@@ -377,7 +378,7 @@ func notePermanentReject(endpoint string, status int, body []byte, serial, print
 		setRelayProblem("plan_limit", msg, serial, printer)
 		return msg
 
-	case status >= 400 && status < 500 && status != 404 && status != 429:
+	case status >= 400 && status < 500 && status != 404 && status != 429 && status != 408 && status != 425:
 		// Any other 4xx is a report FoxTrack will keep refusing (a header it
 		// rejects, a body it cannot read): say so on the dashboard instead
 		// of retrying three times and dropping it in silence.
@@ -538,9 +539,10 @@ type RelayPayload struct {
 	Print RelayPrint `json:"print"`
 
 	// LegacyID is what FoxTrack knew a non-Bambu printer by before it was keyed
-	// on its stable ID: its name, then any earlier names, comma separated.
-	// Sent as X-Printer-Legacy-Id so FoxTrack can re-key the printer it already
-	// has. Never in the body; blank for Bambu printers.
+	// on its stable ID: its name. Sent as X-Printer-Legacy-Id so FoxTrack can
+	// re-key the printer it already has (it matches the whole header exactly
+	// and refuses one over 128 bytes). Never in the body; blank for Bambu
+	// printers and for a name over 128 bytes.
 	LegacyID string `json:"-"`
 }
 
@@ -935,14 +937,21 @@ func SendSnapshot(apiKey, snapshotURL, serial, name string, jpegBytes []byte) er
 		return err
 	}
 	defer resp.Body.Close()
+	// Snapshot refusals are stored under the snapshot's own key so a successful
+	// relay post (which clears "printer:"+serial) cannot clear a refusal the
+	// snapshot endpoint recorded for the same printer.
+	snapKey := "snapshot:" + serial
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if msg := notePermanentReject(snapshotURL, resp.StatusCode, readCappedBody(resp.Body), serial, name); msg != "" {
+		if msg := notePermanentReject(snapshotURL, resp.StatusCode, readCappedBody(resp.Body), snapKey, name); msg != "" {
 			return fmt.Errorf("%w: %s", errNotRetryable, msg)
 		}
 		return fmt.Errorf("snapshot endpoint returned HTTP %d", resp.StatusCode)
 	}
 	if msg := noteSkipped(snapshotURL, readCappedBody(resp.Body), serial, name); msg != "" {
 		return fmt.Errorf("%w: %s", errNotRetryable, msg)
+	}
+	if isCurrentProject(snapshotURL) {
+		clearRelayProblem(snapKey)
 	}
 	log.Printf("[snapshot] sent frame for %s (%d bytes)", name, len(jpegBytes))
 	return nil

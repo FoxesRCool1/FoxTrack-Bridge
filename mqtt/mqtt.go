@@ -285,6 +285,12 @@ func Settled(status string) bool {
 var (
 	activeSessions = make(map[string]*printSession)
 	sessionMu      sync.Mutex
+	// sweptSessions: printers whose saved session was checked once this run
+	// (see makeHandler). movedSessions: printers whose session RenameSession
+	// moved and whose RemovePrinterState has not run yet. Both guarded by
+	// sessionMu.
+	sweptSessions = make(map[string]bool)
+	movedSessions = make(map[string]bool)
 )
 
 // copyTelemetry returns a deep copy of s so callers never hold live pointers
@@ -701,14 +707,30 @@ func DisconnectPrinter(name string) {
 }
 
 // RenameSession moves a print in progress to the printer's new name, so a
-// rename mid-print still records the print. Call before RemovePrinterState(old).
+// rename mid-print still records the print. The saved session and the last
+// report's baseline follow the printer to its new name. Call before
+// RemovePrinterState(old).
 func RenameSession(oldName, newName string) {
 	sessionMu.Lock()
-	defer sessionMu.Unlock()
 	if s, ok := activeSessions[oldName]; ok && oldName != newName {
 		activeSessions[newName] = s
 		delete(activeSessions, oldName)
 	}
+	if oldName != newName {
+		// The saved copy is keyed by serial, so RemovePrinterState(oldName)
+		// must leave it, even right after a restart with nothing in memory yet.
+		movedSessions[oldName] = true
+	}
+	sessionMu.Unlock()
+
+	webhookLastSentMu.Lock()
+	if oldName != newName {
+		if lp, ok := lastRelaySent[oldName]; ok {
+			lastRelaySent[newName] = lp
+			delete(lastRelaySent, oldName)
+		}
+	}
+	webhookLastSentMu.Unlock()
 }
 
 // RemovePrinterState deletes all per-printer state this package keeps for the
@@ -727,9 +749,13 @@ func RemovePrinterState(name string) {
 
 	sessionMu.Lock()
 	delete(activeSessions, name)
+	moved := movedSessions[name]
+	delete(movedSessions, name)
+	delete(sweptSessions, name)
 	sessionMu.Unlock()
-	if serial != "" {
-		// The saved session too, so a printer re-added later starts clean.
+	if serial != "" && !moved {
+		// The saved session too, so a printer re-added later starts clean;
+		// a session a rename just moved keeps its saved copy.
 		forgetSession(Printer{Name: name, Serial: serial})
 	}
 
@@ -1237,6 +1263,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		sess := activeSessions[p.Name]
 		firstLook := sess == nil // nothing in memory: the Bridge just started, or no print so far
 		now := time.Now().Unix()
+		if !sweptSessions[p.Name] && status != "connected" && status != "disconnected" {
+			sweptSessions[p.Name] = true // the first real report of this run
+			if sess == nil && Settled(status) {
+				forgetSession(p) // the print ended while the Bridge was down; a reprint of the same file would adopt its saved copy
+			}
+		}
 		reconnected := prev.Status == "connected" || prev.Status == "disconnected"
 		if reconnected && InPrint(status) && sess != nil && !sess.resumes(fileName, now) {
 			delete(activeSessions, p.Name) // a different print, or gone too long: start over
@@ -1588,14 +1620,17 @@ func queueRelay(p Printer, terminal bool, build func() webhook.RelayPayload) {
 // flipping the printer's status in FoxTrack and back.
 const offlineGrace = 15 * time.Second
 
-// reportOffline tells FoxTrack the Bridge is up but p is not reachable: one
-// urgent post per outage, with gcode_state OFFLINE and nothing else the
-// printer would have said (no alarms key, which means no change). The first
-// real report afterwards is urgent too (see makeHandler). It counts as a status
+// reportOffline tells FoxTrack the Bridge is up but p is not reachable: an
+// urgent post when the outage starts, and another every pace.HeartbeatSec
+// while it lasts (the website treats a device it has not heard from for 90 s
+// as unreachable, and a post that failed all its retries would otherwise
+// never be resent), with gcode_state OFFLINE and nothing else the printer
+// would have said (no alarms key, which means no change). The first real
+// report afterwards is urgent too (see makeHandler). It counts as a status
 // change for the pace: the printer's next send is measured from here.
 func reportOffline(p Printer, now int64) {
 	webhookLastSentMu.Lock()
-	if offlineSent[p.Name] {
+	if offlineSent[p.Name] && now-webhookLastSent[p.Name] < pace.HeartbeatSec {
 		webhookLastSentMu.Unlock()
 		return
 	}
@@ -1613,6 +1648,12 @@ func offlineRelayPayload(p Printer) webhook.RelayPayload {
 		last = &lp
 	}
 	webhookLastSentMu.Unlock()
+	if last == nil { // after a restart: the saved print session still names the file and progress
+		var sv savedSession
+		if history.LoadSession(sessionKey(p), &sv) {
+			last = &webhook.RelayPayload{Print: webhook.RelayPrint{SubTaskName: sv.FileName, McPercent: sv.LastPercent}}
+		}
+	}
 	model := ""
 	if last != nil {
 		model = last.Print.PrinterModel

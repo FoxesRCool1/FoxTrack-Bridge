@@ -227,3 +227,42 @@ func TestNoteBridgeCommandsReply(t *testing.T) {
 		t.Fatalf("a poll cleared the printer limit: %+v", p)
 	}
 }
+
+// 408 (Request Timeout) and 425 (Too Early) are transient like 429: the caller
+// retries as usual and no problem is recorded.
+func TestNotePermanentReject_TransientStatuses(t *testing.T) {
+	resetRelayHealth(t)
+
+	for _, status := range []int{http.StatusRequestTimeout, http.StatusTooEarly} {
+		if msg := notePermanentReject(RelayURLV2, status, nil, "SER-X1C", "X1C"); msg != "" {
+			t.Errorf("HTTP %d must stay retryable, got %q", status, msg)
+		}
+		if p := RelayHealth(); p != nil {
+			t.Errorf("HTTP %d must not raise a problem banner, got %+v", status, p)
+		}
+	}
+
+	if msg := notePermanentReject(RelayURLV2, http.StatusBadRequest, nil, "SER-X1C", "X1C"); msg == "" {
+		t.Fatal("a 400 must be reported")
+	}
+	if p := RelayHealth(); p == nil || p.Kind != "rejected" {
+		t.Fatalf("expected a rejected problem, got %+v", p)
+	}
+}
+
+// A successful relay post must not clear a refusal the snapshot endpoint
+// recorded for the same printer: snapshot refusals live under the snapshot's
+// own key.
+func TestRelayProblems_RelaySuccessKeepsSnapshotRefusal(t *testing.T) {
+	resetRelayHealth(t)
+
+	notePermanentReject(SnapshotURLV2, http.StatusRequestEntityTooLarge, nil, "snapshot:SER-A", "A")
+	clearRelayProblem("SER-A") // a relay post for A succeeded
+	if p := RelayHealth(); p == nil || p.Kind != "rejected" || p.Printer != "A" {
+		t.Fatalf("a relay success must keep the snapshot refusal, got %+v", p)
+	}
+	clearRelayProblem("snapshot:SER-A") // the snapshot posted well
+	if p := RelayHealth(); p != nil {
+		t.Fatalf("a snapshot success must clear its own refusal, got %+v", p)
+	}
+}
