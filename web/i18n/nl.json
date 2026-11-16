@@ -338,7 +338,6 @@
  "FoxTrack already sends {0} to {1} (in FoxTrack: Settings, Account, Alerts). Turn each one on in one place only, or it arrives twice.": "FoxTrack stuurt al {0} naar {1} (in FoxTrack: Instellingen, Account, Meldingen). Zet elke melding maar op één plek aan, anders komt hij twee keer binnen.",
  "FoxTrack can send the same print alerts (in FoxTrack: Settings, Account, Alerts). Turn each alert on in one place only, or it arrives twice.": "FoxTrack kan dezelfde printmeldingen sturen (in FoxTrack: Instellingen, Account, Meldingen). Zet elke melding maar op één plek aan, anders komt hij twee keer binnen.",
  "FoxTrack connected": "FoxTrack verbonden",
- "FoxTrack has its own notifications and maintenance reminders. Set these up here only if you also want them from this computer.": "FoxTrack heeft eigen meldingen en onderhoudsherinneringen. Stel die hier alleen in als je ze ook van deze computer wilt.",
  "FoxTrack is not accepting the Bridge's data": "FoxTrack accepteert de gegevens van de Bridge niet",
  "FoxTrack is not accepting this Bridge right now. Paste a new token to try again.": "FoxTrack accepteert deze Bridge nu niet. Plak een nieuw token om het opnieuw te proberen.",
  "FoxTrack is not accepting this Bridge. Open the FoxTrack settings.": "FoxTrack accepteert deze Bridge niet. Open de FoxTrack-instellingen.",

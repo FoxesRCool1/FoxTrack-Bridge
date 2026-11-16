@@ -338,7 +338,6 @@
  "FoxTrack already sends {0} to {1} (in FoxTrack: Settings, Account, Alerts). Turn each one on in one place only, or it arrives twice.": "FoxTrack ya envía {0} a {1} (en FoxTrack: Ajustes, Cuenta, Alertas). Activa cada aviso en un solo lugar, o llegará dos veces.",
  "FoxTrack can send the same print alerts (in FoxTrack: Settings, Account, Alerts). Turn each alert on in one place only, or it arrives twice.": "FoxTrack puede enviar los mismos avisos de impresión (en FoxTrack: Ajustes, Cuenta, Alertas). Activa cada aviso en un solo lugar, o llegará dos veces.",
  "FoxTrack connected": "FoxTrack conectado",
- "FoxTrack has its own notifications and maintenance reminders. Set these up here only if you also want them from this computer.": "FoxTrack tiene sus propios avisos y recordatorios de mantenimiento. Configúralos aquí solo si también los quieres desde este equipo.",
  "FoxTrack is not accepting the Bridge's data": "FoxTrack no acepta los datos del Bridge",
  "FoxTrack is not accepting this Bridge right now. Paste a new token to try again.": "FoxTrack no acepta este Bridge ahora mismo. Pega un token nuevo para intentarlo de nuevo.",
  "FoxTrack is not accepting this Bridge. Open the FoxTrack settings.": "FoxTrack no acepta este Bridge. Abre los ajustes de FoxTrack.",
