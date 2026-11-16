@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.6.4
+
+**Getting started**
+
+- Added a "Do you use FoxTrack?" question to the welcome screen.
+- Ordered the setup steps by the answer.
+
+**Settings**
+
+- Opened Settings on FoxTrack, with rarely used sections under "Advanced".
+- Renamed the Home Assistant section to "MQTT (Home Assistant)".
+
+**Printers**
+
+- Used the same status words everywhere, with "Last seen" on offline printers.
+- Showed which access codes are missing after a restore.
+- Folded the smart plug fields when adding a printer.
+
+**Network**
+
+- Added a page that explains how to open the Bridge from an unknown name.
+- Allowed Tailscale names ending in .ts.net.
+
 ## v2.6.2
 
 **FoxTrack**

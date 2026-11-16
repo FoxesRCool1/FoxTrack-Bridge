@@ -368,7 +368,6 @@
  "Home Assistant has to use the same broker. Automations can also listen on the printer's event topic for prints that start, finish or fail.": "Home Assistant moet dezelfde broker gebruiken. Automatiseringen kunnen ook meeluisteren op het event-topic van de printer voor prints die starten, eindigen of mislukken.",
  "Home Assistant token": "Home Assistant-token",
  "Home Assistant token for the plug": "Home Assistant-token voor de stekker",
- "Home Assistant, Spoolman, Prometheus and the experimental features. Most setups never need these.": "Home Assistant, Spoolman, Prometheus en de experimentele functies. De meeste installaties hebben die nooit nodig.",
  "Homing": "Homing",
  "Hours": "Uren",
  "How to find the printers in Home Assistant": "Zo vind je de printers in Home Assistant",

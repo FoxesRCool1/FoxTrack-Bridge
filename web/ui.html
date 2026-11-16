@@ -1641,7 +1641,6 @@ function settingsNavGroups(tabs, { linked = false, hasPrinters = true, cloudInUs
 
 const FOLD_NOTES = {
     more: 'FoxTrack has its own notifications and maintenance reminders. Set these up here only if you also want them from this computer.',
-    advanced: 'Home Assistant, Spoolman, Prometheus and the experimental features. Most setups never need these.',
 };
 // What the nav depends on: the link, whether a printer exists, and whether
 // Bambu Cloud is in use (a cloud printer, or the account signed in).
@@ -1677,7 +1676,7 @@ function renderSettingsNav() {
         const open = foldOpen(x.fold) || x.tabs.some(t => t.id === settingsTab);
         return '<button type="button" onclick="toggleSettingsMore(\'' + x.fold + '\')" aria-expanded="' + open + '" class="eyebrow mb-1 mt-8 flex w-full items-center justify-between px-3 text-left hover:text-text">'
             + '<span>' + escHtml(x.group) + '</span><i class="fas fa-chevron-' + (open ? 'up' : 'down') + ' text-[10px]" aria-hidden="true"></i></button>'
-            + '<p class="mb-2 px-3 text-xs leading-relaxed text-text-2">' + escHtml(FOLD_NOTES[x.fold]) + '</p>'
+            + (FOLD_NOTES[x.fold] ? '<p class="mb-2 px-3 text-xs leading-relaxed text-text-2">' + escHtml(FOLD_NOTES[x.fold]) + '</p>' : '')
             + (open ? rows : '');
     }).join('');
     document.querySelectorAll('[data-set-tab]').forEach(el => {
@@ -4428,11 +4427,11 @@ function cardInnerHTML(printer, live) {
         }())
         + (function() {
             const lr = lastReportLine(printer);
-            return lr ? '<p class="last-report mt-2 text-[11px] text-text-2">' + escHtml(lr) + '</p>' : '';
+            return '<p class="last-report mt-2 text-[11px] text-text-2' + (lr ? '' : ' hidden') + '">' + escHtml(lr) + '</p>';
         }())
         + (function() {
             const ft = foxtrackCardLine(printer);
-            return ft ? '<p class="ft-line mt-2 text-[11px] ' + (ft.warn ? 'text-warning' : 'text-text-2') + '">' + escHtml(ft.text) + '</p>' : '';
+            return '<p class="ft-line mt-2 text-[11px] ' + (ft && ft.warn ? 'text-warning' : 'text-text-2') + (ft ? '' : ' hidden') + '">' + escHtml(ft ? ft.text : '') + '</p>';
         }())
         + (printer.plug ? '<p class="plug-line mt-2 text-[11px] text-text-2"><i class="fas fa-plug mr-1"></i><span class="plug-text">' + escHtml(plugLineText(plug)) + '</span></p>' : '')
         + '<div class="filament-wrap flex items-center gap-3 mt-2' + ((status==='printing' && filamentUsedMM !== null) ? '' : ' hidden') + '">'
