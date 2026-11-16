@@ -23,6 +23,23 @@
 - Added a page that explains how to open the Bridge from an unknown name.
 - Allowed Tailscale names ending in .ts.net.
 
+**FoxTrack**
+
+- Kept reporting an offline printer to FoxTrack until it comes back.
+- Kept the file name and progress of an offline printer after a Bridge restart.
+
+**Backups and history**
+
+- Left Discord, Slack, ntfy and webhook URLs out of backups.
+- Left logins inside printer addresses out of backups.
+- Refused backup without a password through a reverse proxy.
+- Kept a print's real start time when the printer is renamed mid-print.
+
+**Fixes**
+
+- Fixed sign-in errors showing as raw code on the login page.
+- Fixed "FoxTrack unlinked" showing when the unlink did not take.
+
 ## v2.6.2
 
 **FoxTrack**

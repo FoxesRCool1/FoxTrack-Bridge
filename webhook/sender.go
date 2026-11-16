@@ -286,6 +286,18 @@ func setRelayProblem(kind, message, serial, printer string) {
 	log.Printf("[relay-health] %s: %s", kind, message)
 }
 
+// clearPrinterProblem ends only the problem filed under this key. A snapshot
+// that went through says nothing about the relay endpoint or the account, so
+// it leaves an account-wide problem standing.
+func clearPrinterProblem(key string) {
+	relayProblemMu.Lock()
+	defer relayProblemMu.Unlock()
+	if p := relayProblems["printer:"+key]; p != nil {
+		log.Printf("[relay-health] cleared (%s resolved)", p.Kind)
+		delete(relayProblems, "printer:"+key)
+	}
+}
+
 // clearRelayProblem is called when the printer with this serial posted well:
 // the account is fine, so account-wide problems end, and so does this
 // printer's own. Other printers' problems stay. serial may be a snapshot key
@@ -951,7 +963,7 @@ func SendSnapshot(apiKey, snapshotURL, serial, name string, jpegBytes []byte) er
 		return fmt.Errorf("%w: %s", errNotRetryable, msg)
 	}
 	if isCurrentProject(snapshotURL) {
-		clearRelayProblem(snapKey)
+		clearPrinterProblem(snapKey)
 	}
 	log.Printf("[snapshot] sent frame for %s (%d bytes)", name, len(jpegBytes))
 	return nil

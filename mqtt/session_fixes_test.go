@@ -137,7 +137,9 @@ func TestCloudOffline_RepeatsUntilSessionReturns(t *testing.T) {
 	r := newCloudRunner(CloudSession{}, []Printer{p}, nil)
 	UpdatePrinterState(name, TelemetryData{Status: "disconnected", PrinterID: name})
 
-	r.reportOfflineIfStill(p)
+	r.mu.Lock()
+	r.armOfflineLocked(p, 0)
+	r.mu.Unlock()
 	if got := nextRelay(t, sent); got.payload.Print.GcodeState != "OFFLINE" {
 		t.Fatalf("first OFFLINE report = %+v", got.payload.Print)
 	}
@@ -160,5 +162,38 @@ func TestCloudOffline_RepeatsUntilSessionReturns(t *testing.T) {
 	case extra := <-sent:
 		t.Fatalf("the printer is connected again but another OFFLINE arrived: %+v", extra)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// A second outage signal for the same printer (a failed subscribe, a dropped
+// session) replaces the running chain instead of adding one: the old chain
+// stops at its next tick without reporting.
+func TestCloudOffline_OneChainPerPrinter(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	sent := captureRelays(t)
+
+	const name = "cloud-one-chain"
+	RemovePrinterState(name)
+	t.Cleanup(func() { RemovePrinterState(name) })
+
+	p := Printer{Name: name, Serial: "CONE", FoxTrack2APIKey: "v2"}
+	r := newCloudRunner(CloudSession{}, []Printer{p}, nil)
+	UpdatePrinterState(name, TelemetryData{Status: "disconnected", PrinterID: name})
+
+	r.mu.Lock()
+	r.armOfflineLocked(p, time.Hour)
+	r.armOfflineLocked(p, time.Hour)
+	gen := r.offlineGen[p.Serial]
+	r.mu.Unlock()
+	if gen != 2 {
+		t.Fatalf("offlineGen = %d, want 2", gen)
+	}
+
+	// The superseded chain's tick reports nothing.
+	r.reportOfflineIfStill(p, 1)
+	select {
+	case extra := <-sent:
+		t.Fatalf("a superseded chain reported: %+v", extra)
+	case <-time.After(200 * time.Millisecond):
 	}
 }

@@ -266,3 +266,24 @@ func TestRelayProblems_RelaySuccessKeepsSnapshotRefusal(t *testing.T) {
 		t.Fatalf("a snapshot success must clear its own refusal, got %+v", p)
 	}
 }
+
+// A snapshot that went through clears only the snapshot's own problem: an
+// account-wide refusal from the relay endpoint stays on the dashboard.
+func TestSnapshotSuccessKeepsAccountWideProblem(t *testing.T) {
+	resetRelayHealth(t)
+	relayProblemMu.Lock()
+	relayProblems[accountWide] = &RelayProblem{Kind: "plan_limit"}
+	relayProblems["printer:snapshot:S1"] = &RelayProblem{Kind: "unauthorized"}
+	relayProblemMu.Unlock()
+
+	clearPrinterProblem("snapshot:S1")
+
+	relayProblemMu.Lock()
+	defer relayProblemMu.Unlock()
+	if relayProblems[accountWide] == nil {
+		t.Error("a snapshot success cleared the account-wide problem")
+	}
+	if relayProblems["printer:snapshot:S1"] != nil {
+		t.Error("a snapshot success kept its own problem")
+	}
+}
