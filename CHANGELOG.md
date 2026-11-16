@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.6.5
+
+**Settings**
+
+- Listed Notifications and Maintenance under a plain "More" heading.
+- Kept only "Advanced" folded.
+
 ## v2.6.4
 
 **Getting started**
