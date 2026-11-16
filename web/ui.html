@@ -1605,12 +1605,13 @@ const SETTINGS_TABS = [
 
 // Printer features only make sense once a printer exists.
 const PRINTER_TABS = ['notifications', 'timelapse', 'maintenance', 'costs'];
-// With FoxTrack linked these fold into "More": FoxTrack has its own
-// notifications and maintenance reminders.
+// With FoxTrack linked these move to their own "More" group: FoxTrack has its
+// own notifications and maintenance reminders.
 const MORE_TABS = ['notifications', 'maintenance'];
-// Experimental and rarely used connections, folded behind "Advanced".
+// Experimental and rarely used connections, folded behind "Advanced", the
+// only group that folds.
 const ADVANCED_TABS = ['homeassistant', 'spoolman', 'metrics', 'assistant', 'cloud'];
-const FOLD_OPEN_KEYS = { more: 'foxtrack.bridge.settingsMoreOpen', advanced: 'foxtrack.bridge.settingsAdvancedOpen' };
+const FOLD_OPEN_KEYS = { advanced: 'foxtrack.bridge.settingsAdvancedOpen' };
 function foldOpen(fold) { try { return localStorage.getItem(FOLD_OPEN_KEYS[fold]) === '1'; } catch (_) { return false; } }
 function toggleSettingsMore(fold) {
     try { localStorage.setItem(FOLD_OPEN_KEYS[fold], foldOpen(fold) ? '0' : '1'); } catch (_) {}
@@ -1634,14 +1635,11 @@ function settingsNavGroups(tabs, { linked = false, hasPrinters = true, cloudInUs
     if (advTabs.length) out.push({ group: 'Advanced', tabs: advTabs, more: true, fold: 'advanced' });
     if (linked) {
         const moreTabs = keep.filter(t => more.has(t.id)).sort((a, b) => a.order - b.order);
-        if (moreTabs.length) out.splice(SETTINGS_GROUPS.length, 0, { group: 'More', tabs: moreTabs, more: true, fold: 'more' });
+        if (moreTabs.length) out.splice(SETTINGS_GROUPS.length, 0, { group: 'More', tabs: moreTabs, more: false, fold: null });
     }
     return out;
 }
 
-const FOLD_NOTES = {
-    more: 'FoxTrack has its own notifications and maintenance reminders. Set these up here only if you also want them from this computer.',
-};
 // What the nav depends on: the link, whether a printer exists, and whether
 // Bambu Cloud is in use (a cloud printer, or the account signed in).
 function settingsNavOpts() {
@@ -1676,7 +1674,6 @@ function renderSettingsNav() {
         const open = foldOpen(x.fold) || x.tabs.some(t => t.id === settingsTab);
         return '<button type="button" onclick="toggleSettingsMore(\'' + x.fold + '\')" aria-expanded="' + open + '" class="eyebrow mb-1 mt-8 flex w-full items-center justify-between px-3 text-left hover:text-text">'
             + '<span>' + escHtml(x.group) + '</span><i class="fas fa-chevron-' + (open ? 'up' : 'down') + ' text-[10px]" aria-hidden="true"></i></button>'
-            + (FOLD_NOTES[x.fold] ? '<p class="mb-2 px-3 text-xs leading-relaxed text-text-2">' + escHtml(FOLD_NOTES[x.fold]) + '</p>' : '')
             + (open ? rows : '');
     }).join('');
     document.querySelectorAll('[data-set-tab]').forEach(el => {

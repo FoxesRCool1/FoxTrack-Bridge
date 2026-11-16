@@ -1,7 +1,7 @@
 // The Settings nav and the FoxTrack chip in connected mode: printer features
 // only show once a printer exists, the rarely used connections fold into
-// "Advanced", and with a FoxTrack token notifications and maintenance fold
-// into "More"; the chip says "connected" only once FoxTrack has accepted a
+// "Advanced", and with a FoxTrack token notifications and maintenance move to
+// a plain "More" group; the chip says "connected" only once FoxTrack has accepted a
 // report. Runs the real functions cut out of ui.html, as
 // config-guard.test.mjs does.
 //
@@ -67,14 +67,15 @@ function navGroups(opts = {}) {
   return JSON.parse(ctx.result); // plain host objects: strict deepEqual rejects the vm context's Array
 }
 
-test('linked with printers: printer features stay, FoxTrack and Virtual together, More and Advanced fold the rest', () => {
+test('linked with printers: printer features stay, FoxTrack and Virtual together, More is a plain group, Advanced folds the rest', () => {
   const groups = navGroups({ linked: true, hasPrinters: true });
   assert.deepEqual(groups.map(g => g.group), ['Printing', 'Connect', 'Bridge', 'More', 'Advanced']);
   assert.deepEqual(groups[0].tabs.map(t => t.id), ['timelapse', 'costs']);
   assert.deepEqual(groups[1].tabs.map(t => t.id), ['foxtrack', 'virtual']);
   assert.deepEqual(groups[2].tabs.map(t => t.id), ['security', 'general']);
   const more = groups[3];
-  assert.equal(more.more, true);
+  assert.equal(more.more, false);
+  assert.equal(more.fold, null);
   assert.deepEqual(more.tabs.map(t => t.id), ['notifications', 'maintenance']);
   const adv = groups[4];
   assert.equal(adv.more, true);
