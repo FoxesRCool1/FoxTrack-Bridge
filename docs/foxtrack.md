@@ -51,7 +51,7 @@ runs, open its dashboard at [http://localhost:8080](http://localhost:8080).
 ### 4. Add your printers to the Bridge
 
 In the Bridge dashboard, open **Printers** and click **Add printer**. See
-[Adding printers](../README.md#adding-printers) for the details each printer type
+[Setup guides](../README.md#setup-guides) for the details each printer type
 needs.
 
 ### 5. Link each printer in FoxTrack
@@ -81,7 +81,8 @@ history stay, but they are no longer assigned to a printer. Linking keeps all of
 it.
 
 The names do not have to match. FoxTrack recognizes a Bambu Lab printer by its
-serial number, and a Klipper printer by the name you gave it in the Bridge.
+serial number, and a Klipper printer by a fixed ID the Bridge gives it, so the
+name can change without FoxTrack losing the printer.
 
 ## Change a printer later
 
@@ -101,9 +102,10 @@ Good to know:
   address.
 - **Renaming a printer is safe.** FoxTrack keeps the link and shows the new name.
   A Bambu Lab printer is followed by its serial number, a Klipper, PrusaLink,
-  OctoPrint or Home Assistant printer by a fixed ID the Bridge gives it. (Older
-  Bridges had FoxTrack know those by name, so a rename made a new device. The
-  first report from a newer Bridge moves the old device to the ID.)
+  OctoPrint or Home Assistant printer by a fixed ID the Bridge gives it. The
+  Bridge sends the printer's current name as X-Printer-Legacy-Id so FoxTrack
+  can re-key a printer it already has under that name; the header is blank when
+  the name is longer than 128 bytes.
 - **Print history in the Bridge** from before a rename stays with the printer.
 - **You cannot rename a printer during a print.** Finish or stop the print first.
   You can change the IP address at any time.

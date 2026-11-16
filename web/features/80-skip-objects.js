@@ -300,8 +300,8 @@ async function skSubmit() {
     const ok = await confirmDialog({
         title: n === 1 ? 'Skip this object?' : 'Skip ' + n + ' objects?',
         body: fill(everyOne
-            ? '{0} will not be printed. The rest of the plate carries on. This cannot be undone. That is every object left, so nothing more will print. Use Stop if you want to end the print.'
-            : '{0} will not be printed. The rest of the plate carries on. This cannot be undone.', skNames(picked)),
+            ? '{0} will not be printed. The rest of the plate carries on. Skipped objects stay skipped for the rest of this print. That is every object left, so nothing more will print. Use Stop if you want to end the print.'
+            : '{0} will not be printed. The rest of the plate carries on. Skipped objects stay skipped for the rest of this print.', skNames(picked)),
         confirmLabel: n === 1 ? 'Skip object' : 'Skip ' + n + ' objects',
     });
     if (!ok || seq !== SK.seq || skEl('skipObjectsModal').classList.contains('hidden')) return;

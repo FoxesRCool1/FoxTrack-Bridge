@@ -313,7 +313,7 @@
 <div id="stopConfirmModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeStopConfirm()">
     <div class="floating w-full max-w-xs rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="stopConfirmTitle">
         <h3 id="stopConfirmTitle" class="font-heading text-xl font-medium leading-tight">Stop this print?</h3>
-        <p class="mt-2 mb-5 text-sm leading-relaxed text-text-2">This cancels the current print. It cannot be undone.</p>
+        <p class="mt-2 mb-5 text-sm leading-relaxed text-text-2">The current print will stop and the rest of the print file will be gone for good.</p>
         <div class="flex gap-2 justify-end">
             <button onclick="closeStopConfirm()" class="btn-outline btn-lg">Cancel</button>
             <button onclick="executeStop()" class="btn-danger btn-lg">Stop print</button>
@@ -373,8 +373,8 @@
                 <div class="select-wrap">
                     <select id="pBrand" onchange="onBrandChange()" class="field">
                         <option value="">Select type…</option>
-                        <option value="bambu">Bambu Lab (LAN mode)</option>
-                        <option value="bambu_cloud">Bambu Lab (cloud, experimental)</option>
+                        <option value="bambu">Bambu Lab, on your network (LAN)</option>
+                        <option value="bambu_cloud">Bambu Lab, through Bambu Cloud (experimental)</option>
                         <option value="klipper">Klipper / Moonraker</option>
                         <option value="prusalink">Prusa (PrusaLink)</option>
                         <option value="octoprint">OctoPrint</option>
@@ -468,11 +468,13 @@
                 </div>
                 <!-- Smart plug: optional for every printer the Bridge controls. -->
                 <div id="fieldPlug" class="hidden border-t border-border pt-3 space-y-3">
-                    <div class="flex items-center justify-between gap-3">
+                    <button type="button" id="plugReveal" onclick="revealPlug()" class="btn-ghost -ml-3">Add a smart plug (optional)</button>
+                    <div id="plugHeaderRow" class="hidden flex items-center justify-between gap-3">
                         <span class="flex items-center gap-1"><span class="field-label mb-0">Smart plug <span class="font-normal">(optional)</span></span>
                             <button type="button" class="info-tip" aria-label="About smart plugs" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Shelly, Tasmota, TP-Link Kasa and Tapo, Tuya / Smart Life, Meross, Sonoff (DIY mode), ESPHome, myStrom and WiZ, or any plug Home Assistant can switch. Pick the type for setup help. The Bridge talks to the plug over your network, not the maker's cloud. The card shows its watts and a power button, and history records the energy each print used.</span></span>
                         <button type="button" id="plugTestBtn" onclick="testPlug()" class="btn-ghost btn-xs">Check plug</button>
                     </div>
+                    <div id="plugBody" class="hidden space-y-3">
                     <div class="grid grid-cols-1 sm:grid-cols-[10rem_minmax(0,1fr)] gap-3">
                         <div>
                             <label for="pPlugKind" class="field-label">Type</label>
@@ -567,6 +569,7 @@
                         <span class="inline-flex items-center gap-1.5 text-text-2 whitespace-nowrap">Wait <input type="number" id="pPlugDelay" min="1" max="240" value="10" class="field py-1 text-sm" style="width:4.5rem" aria-label="Minutes to wait"> min, once cool</span>
                     </div>
                     <p id="plugTestResult" class="hidden text-xs leading-relaxed" role="status" aria-live="polite"></p>
+                    </div>
                 </div>
                 <div class="flex items-center gap-2 pt-1 flex-wrap">
                     <button onclick="testConnection()" id="testBtn" class="btn-outline btn-lg">Test connection</button>
@@ -688,7 +691,7 @@
                 <i class="fas fa-circle-exclamation"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-xs text-text-2">Errors</p>
+                <p class="text-xs text-text-2">Need attention</p>
                 <p id="statErrors" class="font-heading text-2xl leading-none mt-0.5 tabular-nums">0</p>
             </div>
         </div>
@@ -712,7 +715,7 @@
     <div id="view-printers" class="px-5 pt-3 pb-5">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 min-h-[2rem]">
             <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">
-                Connected printers
+                Printers
                 <span id="printerCount" class="font-sans inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[11px] text-text-2 tabular-nums">0</span>
             </h2>
             <div class="flex items-center gap-2">
@@ -760,8 +763,8 @@
             <div id="settingsPanels" class="min-w-0 flex-1 max-w-2xl">
                 <!-- FoxTrack -->
                 <section id="foxtrackCard" data-settings-tab="foxtrack" class="rounded-lg border border-border bg-panel p-6">
-                    <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">FoxTrack <span class="font-sans inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-text-2">Optional</span></h2>
-                    <p class="mt-1.5 text-sm text-text-2">See your printers in FoxTrack from anywhere, with print history. Needs the Pro or Farm plan.</p>
+                    <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">FoxTrack</h2>
+                    <p class="mt-1.5 text-sm text-text-2">Sends your printers' live status to FoxTrack, so you can see them from anywhere. Needs the FoxTrack Pro or Farm plan.</p>
                     <div class="mt-5">
                         <div class="label-row">
                             <label for="foxtrack2ApiKey" class="field-label">Bridge token</label>
@@ -773,6 +776,7 @@
                             <span id="foxtrackStatusDot" class="w-1.5 h-1.5 rounded-full shrink-0"></span>
                             <span id="foxtrackStatusText" class="min-w-0"></span>
                         </p>
+                        <p class="mt-2 text-xs leading-relaxed text-text-2">After linking, open Printers in FoxTrack and link each printer under Bridge devices to link.</p>
                     </div>
                     <div id="legacyKeyRow" class="hidden mt-5">
                         <label for="apiKey" class="field-label">FoxTrack token (legacy)</label>
@@ -868,7 +872,7 @@
                             <p id="vpUrlsNone" class="hidden text-xs text-text-2"></p>
                         </div>
                         <div>
-                            <span class="field-label">API key</span>
+                            <span class="field-label">Key for your slicer (made by the Bridge)</span>
                             <div class="flex items-center gap-2">
                                 <div class="min-w-0 flex-1 rounded-md border border-border px-3 py-1.5"><code id="vpKey" class="field-mono wrap-any"></code></div>
                                 <button type="button" onclick="copyVirtualPrinterKey()" class="btn-outline shrink-0">Copy</button>
@@ -976,7 +980,7 @@
                             </div>
                             <div class="flex items-start justify-between gap-4">
                                 <div class="min-w-0">
-                                    <p class="text-sm font-medium flex items-center gap-1">Advanced mode <button type="button" class="info-tip" aria-label="About advanced mode" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Shows the Temps, Fan, Speed and GCode controls on printer cards.</span></p>
+                                    <p class="text-sm font-medium flex items-center gap-1">Advanced mode <button type="button" class="info-tip" aria-label="About advanced mode" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">Shows the Temps, Fan, Speed and G-code controls on printer cards.</span></p>
                                 </div>
                                 <button id="advancedToggle" onclick="toggleAdvancedMode()" class="switch shrink-0 mt-0.5" role="switch" aria-checked="false" aria-label="Advanced mode">
                                     <span id="advancedThumb" class="switch-thumb"></span>
@@ -995,7 +999,7 @@
                     </section>
                     <section class="rounded-lg border border-border bg-panel p-6">
                         <h2 class="font-heading text-xl font-medium leading-tight">Back up and restore</h2>
-                        <p class="mt-1.5 text-sm text-text-2">Download your printers and settings as one file, or restore them from a backup. The file holds your printers' access codes, so keep it private. Your dashboard password, API tokens, share links, Bambu account and assistant key are not in it. A restore never changes the first four, and keeps the assistant key unless the backup uses a different AI provider. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.</p>
+                        <p class="mt-1.5 text-sm text-text-2">Download your printers and settings as one file, or restore them from a backup. Passwords, access codes and keys are left out of the file. Restoring on this computer keeps the ones you already entered; on a new computer, enter them again, and each printer that needs one says so. A restore never changes your dashboard password, API tokens, share links or Bambu account, and keeps the assistant key unless the backup uses a different AI provider. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.</p>
                         <div class="mt-5 flex items-center gap-3">
                             <a href="/api/config/export" download class="btn-outline">Download backup</a>
                             <button type="button" onclick="pickBackupFile()" class="btn-outline">Restore from file…</button>
@@ -1049,6 +1053,7 @@
 let configuredPrinters = [];
 let liveStatus = {};
 let prevLiveStatus = {};
+const PAGE_LOADED_AT = Date.now();
 const printStartTimes = {};   // id → unix seconds when printing began (JS-side tracking)
 let updateInfo = null;
 let currentView = 'printers';
@@ -1073,11 +1078,11 @@ function brandNote(line, help, label) {
 
 const brands = {
     bambu: {
-        instructions: brandNote('Needs LAN Only Mode on the printer.', 'On the printer, open Settings, Network (WLAN on the P1 and A1) and turn on LAN Only Mode. The access code shows there. The serial number is on the printer\'s label and under Settings, Device. Pause, stop and start also need Developer mode: next to LAN Only Mode on 2025 firmware and later, under About on older firmware.', 'How to set up a Bambu Lab printer'),
+        instructions: brandNote('Needs LAN Only Mode on the printer.', 'On the printer, open Settings, Network (WLAN on the P1 and A1) and turn on LAN Only Mode. The access code shows there. The serial number is on the printer\'s label and under Settings, Device. Pause, stop and start also need Developer mode: next to LAN Only Mode on 2025 firmware and later, under About on older firmware. LAN Only Mode cuts the printer off from Bambu Cloud, so Bambu Handy and printing from the cloud stop working while it is on.', 'How to set up a Bambu Lab printer'),
         fields: { ip: true, serial: true, lanCode: true, moonrakerUrl: false, klipperKey: false, webcamUrl: false }
     },
     bambu_cloud: {
-        instructions: brandNote('Uses the Bambu account linked in Settings.', 'Status, the camera, the light and a smart plug work over the cloud. Pause, stop, speed and fan need LAN Only Mode. The camera needs the printer on this network: its address is learned from the printer, or type it below.', 'What works over Bambu Cloud'),
+        instructions: brandNote('Uses the Bambu account linked in Settings.', 'Status, the camera, the light and a smart plug work over the cloud. Pause, stop, speed and fan need LAN Only Mode. The camera needs the printer on this network: its address is learned from the printer, or type it below. Bambu Handy keeps working. Use this if you do not want LAN Only Mode.', 'What works over Bambu Cloud'),
         fields: { ip: true, serial: false, lanCode: false, moonrakerUrl: false, klipperKey: false, webcamUrl: false, cloudDevices: true }
     },
     klipper: {
@@ -1108,6 +1113,94 @@ const PLUG_BRANDS = ['bambu', 'bambu_cloud', 'klipper', 'prusalink', 'octoprint'
 
 function escHtml(str) {
     return (str == null ? '' : String(str)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// The name of a required secret the saved printer no longer has, or '' when it
+// has everything its type needs. The server returns only the *_set flags, so
+// this is what makes "the code is gone after a restore" visible. Klipper's key
+// is optional and never flagged; a type's secret is flagged only when its form
+// requires one to save.
+function printerMissingSecret(p) {
+    if (!p) return '';
+    const brand = printerBrand(p);
+    if (brand === 'bambu') return p.lan_code_set ? '' : 'LAN access code';
+    if (brand === 'prusalink') return p.api_key_set ? '' : 'PrusaLink API key';
+    if (brand === 'octoprint') return p.api_key_set ? '' : 'OctoPrint API key';
+    if (brand === 'home_assistant') return p.home_assistant_token_set ? '' : 'Home Assistant token';
+    if (p.plug && p.plug.kind) {
+        const kind = p.plug.kind;
+        if (kind === 'tuya') return p.plug_secret_set ? '' : 'smart plug local key';
+        if (kind === 'tapo') return p.plug_secret_set ? '' : 'TP-Link account password';
+        if (kind === 'home_assistant') return p.plug_secret_set ? '' : 'Home Assistant token for the plug';
+    }
+    return '';
+}
+
+// True while a card may show "Connecting": the printer has no state yet and the
+// page is still young. Afterwards it reads "Can't reach" instead.
+function isConnectingStatus(status) {
+    return !status && Date.now() - PAGE_LOADED_AT < 60000;
+}
+
+// No state at all a minute after the page opened: the card reads "Can't reach".
+function printerCantReachNoState(live) {
+    return !(live && live.status) && Date.now() - PAGE_LOADED_AT >= 60000;
+}
+
+// A printer needs attention when it is in an error, has alarms, can't be
+// reached (its plug is not off), or is missing a required secret.
+function printerNeedsAttention(p) {
+    const live = liveStatus[p.id] || null;
+    if (live && live.status === 'error') return true;
+    if (live && Array.isArray(live.alarms) && live.alarms.length) return true;
+    if (live && live.status === 'disconnected' && !(live.plug && live.plug.reachable && !live.plug.on)) return true;
+    if (printerCantReachNoState(live)) return true;
+    if (printerMissingSecret(p)) return true;
+    return false;
+}
+
+// When each printer last reported a live state, as this browser saw it (unix
+// seconds, kept across reloads). The server's timestamp moves on every failed
+// poll too, so it cannot say how long a printer has been gone.
+const LAST_SEEN_KEY = 'foxtrack.bridge.lastSeen';
+let lastSeen = (() => { try { return JSON.parse(localStorage.getItem(LAST_SEEN_KEY) || '{}') || {}; } catch (_) { return {}; } })();
+let lastSeenSavedAt = 0;
+function noteLastSeen() {
+    const now = Math.floor(Date.now() / 1000);
+    for (const [id, st] of Object.entries(liveStatus)) {
+        if (st && st.status && st.status !== 'disconnected') lastSeen[id] = now;
+    }
+    if (now - lastSeenSavedAt < 30) return;
+    lastSeenSavedAt = now;
+    const kept = {};
+    for (const p of configuredPrinters) if (lastSeen[p.id]) kept[p.id] = lastSeen[p.id];
+    if (configuredPrinters.length) lastSeen = kept;
+    try { localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(lastSeen)); } catch (_) {}
+}
+
+// "Last seen" line of an unreachable card, when this browser has seen the
+// printer report before.
+function lastReportLine(p) {
+    const live = liveStatus[p.id] || null;
+    const plugOff = !!(live && live.plug && live.plug.reachable && !live.plug.on);
+    const unreachable = (live && live.status === 'disconnected' && !plugOff) || printerCantReachNoState(live);
+    if (!unreachable || !(lastSeen[p.id] > 0)) return '';
+    // Whole sentences, not "Last seen" + "5 min ago": the two halves do not
+    // join in every language ("il y a" would come out twice in French).
+    const s = Math.max(0, Math.floor(Date.now() / 1000) - lastSeen[p.id]);
+    if (s < 60) return 'Last seen just now';
+    if (s < 3600) return fill('Last seen {0} min ago', Math.floor(s / 60));
+    if (s < 86400) return fill('Last seen {0} h ago', Math.floor(s / 3600));
+    return fill('Last seen {0} days ago', Math.floor(s / 86400));
+}
+
+// The FoxTrack line of a card, only when the Bridge is linked to FoxTrack.
+function foxtrackCardLine(p) {
+    if (!foxtrackLinked()) return '';
+    if (relayProblem && relayProblem.printer === p.name)
+        return { text: fill('FoxTrack refused this printer: {0}', relayProblem.message), warn: true };
+    if (relayDelivered) return { text: 'Sending to FoxTrack', warn: false };
+    return { text: 'Not in FoxTrack yet', warn: false };
 }
 
 // "{0}", "{1}" mark where a name or number goes, so a whole sentence stays one
@@ -1177,7 +1270,9 @@ function printerBrand(p) {
     if (p && p.prusalink_url) return 'prusalink';
     if (p && p.octoprint_url) return 'octoprint';
     if (p && p.home_assistant_url) return 'home_assistant';
-    return (p && p.serial && (p.lan_code || p.lan_code_set)) ? 'bambu' : 'klipper';
+    // A serial and no other address is a Bambu LAN printer, with or without
+    // its code (a restore on a new computer leaves the code out).
+    return (p && p.serial) ? 'bambu' : 'klipper';
 }
 
 const BRAND_LABELS = { bambu_cloud: 'Bambu cloud', bambu: 'Bambu', klipper: 'Klipper', prusalink: 'PrusaLink', octoprint: 'OctoPrint', home_assistant: 'Home Assistant' };
@@ -1404,6 +1499,8 @@ window.addEventListener('popstate', e => {
 })();
 
 function statusMeta(status, plug) {
+    // The cards pass 'connecting' for a printer with no state yet.
+    if (status === 'connecting') status = '';
     // Offline with its plug off: the plug cut the power.
     if (status === 'disconnected' && plug && plug.reachable && !plug.on) return { label:'Powered off', dot:'bg-text-2', badge:'badge-muted' };
     // Status colour is the one place a hue is allowed: accent for activity,
@@ -1415,12 +1512,18 @@ function statusMeta(status, plug) {
         finished:     { label:'Finished',   dot:'bg-link',          badge:'badge-link' },
         error:        { label:'Error',      dot:'bg-danger pulse',  badge:'badge-danger' },
         cancelled:    { label:'Canceled',   dot:'bg-text-2',        badge:'badge-muted' },
-        disconnected: { label:'Offline',    dot:'bg-text-2',        badge:'badge-muted' },
+        disconnected: { label:"Can't reach", dot:'bg-text-2', badge:'badge-muted' },
         connected:    { label:'Connected',  dot:'bg-text-2',        badge:'badge-muted' },
         idle:         { label:'Idle',       dot:'bg-brand',         badge:'badge-muted' },
         busy:         { label:'Busy',       dot:'bg-text-2',        badge:'badge-muted' },
     };
-    return map[status] || { label:'Connecting', dot:'bg-text-2 pulse', badge:'badge-muted' };
+    if (map[status]) return map[status];
+    // No state yet: "Connecting" only while the page is young; afterwards the
+    // printer is unreachable, not still starting up.
+    if (!status) return (Date.now() - PAGE_LOADED_AT < 60000)
+        ? { label:'Connecting', dot:'bg-text-2 pulse', badge:'badge-muted' }
+        : { label:"Can't reach", dot:'bg-text-2', badge:'badge-muted' };
+    return { label:'Unknown', dot:'bg-text-2', badge:'badge-muted' };
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -1495,50 +1598,85 @@ const SETTINGS_GROUPS = ['Printing', 'Connect', 'Bridge'];
 const SETTINGS_TABS = [
     { id: 'cloud', label: 'Bambu Cloud', group: 'Connect', order: 50 },
     { id: 'foxtrack', label: 'FoxTrack', group: 'Connect', order: 10 },
-    { id: 'virtual', label: 'Virtual printer', group: 'Connect', order: 85 },
+    { id: 'virtual', label: 'Virtual printer', group: 'Connect', order: 15 },
     { id: 'assistant', label: 'Assistant', group: 'Bridge', order: 60 },
     { id: 'general', label: 'General', group: 'Bridge', order: 90 },
 ];
 
-// The standalone features: what the Bridge offers on its own. With FoxTrack
-// linked they fold into one "More" group so Settings stays short, since
-// FoxTrack covers most of them (notifications, history, maintenance, costs).
-const STANDALONE_TABS = ['notifications', 'timelapse', 'maintenance', 'costs', 'homeassistant', 'spoolman', 'metrics', 'assistant', 'virtual'];
-const MORE_OPEN_KEY = 'foxtrack.bridge.settingsMoreOpen';
-function settingsMoreOpen() { try { return localStorage.getItem(MORE_OPEN_KEY) === '1'; } catch (_) { return false; } }
-function toggleSettingsMore() {
-    try { localStorage.setItem(MORE_OPEN_KEY, settingsMoreOpen() ? '0' : '1'); } catch (_) {}
+// Printer features only make sense once a printer exists.
+const PRINTER_TABS = ['notifications', 'timelapse', 'maintenance', 'costs'];
+// With FoxTrack linked these fold into "More": FoxTrack has its own
+// notifications and maintenance reminders.
+const MORE_TABS = ['notifications', 'maintenance'];
+// Experimental and rarely used connections, folded behind "Advanced".
+const ADVANCED_TABS = ['homeassistant', 'spoolman', 'metrics', 'assistant', 'cloud'];
+const FOLD_OPEN_KEYS = { more: 'foxtrack.bridge.settingsMoreOpen', advanced: 'foxtrack.bridge.settingsAdvancedOpen' };
+function foldOpen(fold) { try { return localStorage.getItem(FOLD_OPEN_KEYS[fold]) === '1'; } catch (_) { return false; } }
+function toggleSettingsMore(fold) {
+    try { localStorage.setItem(FOLD_OPEN_KEYS[fold], foldOpen(fold) ? '0' : '1'); } catch (_) {}
     renderSettingsNav();
 }
 
-// settingsNavGroups is the nav as shown: [{ group, tabs, more }], in order.
-// Pure, so the test can run it: linked is foxtrackLinked().
-function settingsNavGroups(tabs, linked) {
-    const byGroup = g => tabs.filter(t => t.group === g).sort((a, b) => a.order - b.order);
-    if (!linked) return SETTINGS_GROUPS.map(g => ({ group: g, tabs: byGroup(g), more: false })).filter(x => x.tabs.length);
-    const isMore = t => STANDALONE_TABS.includes(t.id);
-    const out = SETTINGS_GROUPS.map(g => ({ group: g, tabs: byGroup(g).filter(t => !isMore(t)), more: false })).filter(x => x.tabs.length);
-    const more = SETTINGS_GROUPS.flatMap(g => byGroup(g).filter(isMore));
-    if (more.length) out.push({ group: 'More', tabs: more, more: true });
+// settingsNavGroups is the nav as shown: [{ group, tabs, more, fold }], in
+// order. Pure, so the test can run it: linked is foxtrackLinked(), hasPrinters
+// is configuredPrinters.length > 0, cloudInUse a Bambu Cloud printer or a
+// signed-in Bambu account.
+function settingsNavGroups(tabs, { linked = false, hasPrinters = true, cloudInUse = false } = {}) {
+    const drop = new Set();
+    if (!hasPrinters) PRINTER_TABS.forEach(id => drop.add(id));
+    if (!linked) drop.add('virtual');
+    const keep = tabs.filter(t => !drop.has(t.id));
+    const advanced = new Set(ADVANCED_TABS.filter(id => !(id === 'cloud' && cloudInUse)));
+    const more = linked ? new Set(MORE_TABS) : new Set();
+    const byGroup = g => keep.filter(t => t.group === g && !advanced.has(t.id) && !more.has(t.id)).sort((a, b) => a.order - b.order);
+    const out = SETTINGS_GROUPS.map(g => ({ group: g, tabs: byGroup(g), more: false, fold: null })).filter(x => x.tabs.length);
+    const advTabs = keep.filter(t => advanced.has(t.id)).sort((a, b) => a.order - b.order);
+    if (advTabs.length) out.push({ group: 'Advanced', tabs: advTabs, more: true, fold: 'advanced' });
+    if (linked) {
+        const moreTabs = keep.filter(t => more.has(t.id)).sort((a, b) => a.order - b.order);
+        if (moreTabs.length) out.splice(SETTINGS_GROUPS.length, 0, { group: 'More', tabs: moreTabs, more: true, fold: 'more' });
+    }
     return out;
+}
+
+const FOLD_NOTES = {
+    more: 'FoxTrack has its own notifications and maintenance reminders. Set these up here only if you also want them from this computer.',
+};
+// What the nav depends on: the link, whether a printer exists, and whether
+// Bambu Cloud is in use (a cloud printer, or the account signed in).
+function settingsNavOpts() {
+    return {
+        linked: foxtrackLinked(),
+        hasPrinters: configuredPrinters.length > 0,
+        cloudInUse: configuredPrinters.some(isCloudPrinter) || !!(cloudStatus && cloudStatus.linked),
+    };
 }
 
 function renderSettingsNav() {
     const chips = document.getElementById('settingsNavChips');
     const desk = document.getElementById('settingsNavDesktop');
     if (!chips || !desk) return;
-    const groups = settingsNavGroups(SETTINGS_TABS, foxtrackLinked());
-    const sorted = groups.flatMap(x => x.tabs);
+    const groups = settingsNavGroups(SETTINGS_TABS, settingsNavOpts());
     const btn = (t, cls) => '<button type="button" class="' + cls + '" data-set-tab="' + escHtml(t.id) + '" onclick="pickSettingsTab(\'' + escHtml(t.id) + '\')">' + escHtml(t.label) + '</button>';
-    chips.innerHTML = sorted.map(t => btn(t, 'set-chip')).join('');
+    const foldBtn = (x, cls) => '<button type="button" class="' + cls + '" onclick="toggleSettingsMore(\'' + x.fold + '\')" aria-expanded="' + (foldOpen(x.fold) || x.tabs.some(t => t.id === settingsTab)) + '">' + escHtml(x.group) + '</button>';
+    // Mobile: the normal tabs, then each fold's button with its tabs only when open.
+    const chipParts = [];
+    for (const x of groups) {
+        if (!x.more) chipParts.push(...x.tabs.map(t => btn(t, 'set-chip')));
+        else {
+            chipParts.push(foldBtn(x, 'set-chip'));
+            if (foldOpen(x.fold) || x.tabs.some(t => t.id === settingsTab)) chipParts.push(...x.tabs.map(t => btn(t, 'set-chip')));
+        }
+    }
+    chips.innerHTML = chipParts.join('');
     desk.innerHTML = groups.map((x, i) => {
         const rows = '<ul class="space-y-0.5">' + x.tabs.map(t => '<li>' + btn(t, 'set-nav-row') + '</li>').join('') + '</ul>';
         if (!x.more) return '<p class="eyebrow mb-2 px-3' + (i ? ' mt-8' : '') + '">' + escHtml(x.group) + '</p>' + rows;
-        // The section on screen keeps its group open.
-        const open = settingsMoreOpen() || x.tabs.some(t => t.id === settingsTab);
-        return '<button type="button" onclick="toggleSettingsMore()" aria-expanded="' + open + '" class="eyebrow mb-1 mt-8 flex w-full items-center justify-between px-3 text-left hover:text-text">'
-            + '<span>More</span><i class="fas fa-chevron-' + (open ? 'up' : 'down') + ' text-[10px]" aria-hidden="true"></i></button>'
-            + '<p class="mb-2 px-3 text-xs leading-relaxed text-text-2">Standalone features. FoxTrack already covers most of these.</p>'
+        // A fold stays open when the user left it open or it holds the section on screen.
+        const open = foldOpen(x.fold) || x.tabs.some(t => t.id === settingsTab);
+        return '<button type="button" onclick="toggleSettingsMore(\'' + x.fold + '\')" aria-expanded="' + open + '" class="eyebrow mb-1 mt-8 flex w-full items-center justify-between px-3 text-left hover:text-text">'
+            + '<span>' + escHtml(x.group) + '</span><i class="fas fa-chevron-' + (open ? 'up' : 'down') + ' text-[10px]" aria-hidden="true"></i></button>'
+            + (FOLD_NOTES[x.fold] ? '<p class="mb-2 px-3 text-xs leading-relaxed text-text-2">' + escHtml(FOLD_NOTES[x.fold]) + '</p>' : '')
             + (open ? rows : '');
     }).join('');
     document.querySelectorAll('[data-set-tab]').forEach(el => {
@@ -1565,8 +1703,8 @@ function registerSettingsTab({ id, label, group = 'Printing', order = 50, mount,
     }
 }
 
-let settingsTab = 'notifications';
-let settingsTabChosen = false; // a section was opened or named in the address; else Settings lands on FoxTrack when linked
+let settingsTab = 'foxtrack';
+let settingsTabChosen = false; // a section was opened or named in the address; else the first config load picks it
 let pendingSettingsTab = null;
 // pickSettingsTab is a click in the nav: from then on the section is the user's choice.
 function pickSettingsTab(tab) { settingsTabChosen = true; showSettingsTab(tab); }
@@ -1593,16 +1731,14 @@ function showSettingsTab(tab) {
         }
     }
     document.querySelectorAll('[data-settings-tab]').forEach(el => el.classList.toggle('hidden', el.dataset.settingsTab !== tab));
-    document.querySelectorAll('[data-set-tab]').forEach(el => {
-        if (el.dataset.setTab === tab) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
-    });
+    renderSettingsNav();
 }
 
 function toggleAdvancedMode() {
     advancedMode = !advancedMode;
     const toggle = document.getElementById('advancedToggle');
     if (toggle) toggle.setAttribute('aria-checked', advancedMode); // .switch styles follow aria-checked
-    // Advanced mode adds/removes the Temps, Fan, Speed and GCode buttons. This is a
+    // Advanced mode adds/removes the Temps, Fan, Speed and G-code buttons. This is a
     // structural change patchCard's field-level updates can't produce, so force a full rebuild.
     forceFullCardRefresh = true;
     renderPrinters();
@@ -1634,7 +1770,7 @@ async function toggleAutoUpdate() {
         await apiFetch('/api/config', { method:'POST', body:JSON.stringify({ auto_update: !previous }) });
     } catch (e) {
         applyAutoUpdateState(previous);
-        toast("Couldn't save the setting: " + e.message, 'error');
+        toast("Could not save the setting: " + e.message, 'error');
     }
 }
 
@@ -1651,7 +1787,7 @@ async function toggleLightEncoded(enc) {
         await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/toggle_light', { method:'POST', body:'{}' });
         pollStatus();
     } catch (e) {
-        toast("Couldn't switch the light: " + friendlyError(e.message), 'error');
+        toast("Could not switch the light: " + friendlyError(e.message), 'error');
         delete pendingLightTarget[id];
         renderPrinters();
     }
@@ -1662,18 +1798,22 @@ async function toggleLightEncoded(enc) {
 function updateStatCards() {
     document.getElementById('statPrinters').textContent = configuredPrinters.length;
     document.getElementById('statActive').textContent = Object.values(liveStatus).filter(s => s && s.status === 'printing').length;
-    const errors = Object.values(liveStatus).filter(s => s && s.status === 'error').length;
+    const attention = configuredPrinters.filter(printerNeedsAttention);
     const errEl = document.getElementById('statErrors');
     const errIco = document.getElementById('statErrorIcon');
-    if (errEl) { errEl.textContent = errors; errEl.className = 'font-heading text-2xl leading-none mt-0.5 tabular-nums' + (errors > 0 ? ' text-danger' : ''); }
-    if (errIco) errIco.className = 'stat-icon w-9 h-9 rounded-md border border-border flex items-center justify-center shrink-0 ' + (errors > 0 ? 'text-danger' : 'text-text-2');
+    if (errEl) {
+        errEl.textContent = attention.length;
+        errEl.className = 'font-heading text-2xl leading-none mt-0.5 tabular-nums' + (attention.length > 0 ? ' text-danger' : '');
+        errEl.title = attention.map(p => p.name).join(', ');
+    }
+    if (errIco) errIco.className = 'stat-icon w-9 h-9 rounded-md border border-border flex items-center justify-center shrink-0 ' + (attention.length > 0 ? 'text-danger' : 'text-text-2');
 }
 
 function setBridgeStatus(online) {
     const el = document.getElementById('bridgeStatus');
     if (!el) return;
-    if (online) el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-brand"></span> <span class="text-brand">Running</span>';
-    else        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-danger pulse"></span> <span class="text-danger">Offline</span>';
+    if (online) el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-brand"></span> <span class="text-brand">Bridge running</span>';
+    else        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-danger pulse"></span> <span class="text-danger">Bridge not responding</span>';
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -1708,13 +1848,20 @@ async function loadConfig() {
         if (unlink) unlink.classList.toggle('hidden', !foxtrackLinked());
         const tokenField = document.getElementById('foxtrack2ApiKey');
         if (tokenField) tokenField.disabled = false; // enabled once the stored state is known
-        // On the first load, Settings lands on FoxTrack for a linked Bridge,
-        // unless a section was clicked or named in the address.
-        if (!configEverLoaded && !settingsTabChosen && foxtrackLinked()) {
-            settingsTab = 'foxtrack';
-            if (currentView === 'settings') showSettingsTab('foxtrack');
-        }
+        // On the first load, Settings lands on FoxTrack for a linked Bridge
+        // (or one that has used FoxTrack before), unless a section was clicked
+        // or named in the address; otherwise the first section of the nav.
         configuredPrinters = (cfg && cfg.printers) ? cfg.printers : [];
+        if (!configEverLoaded && !settingsTabChosen) {
+            let usesFoxTrack = false;
+            try { usesFoxTrack = localStorage.getItem('foxtrack.bridge.usesFoxTrack') === 'yes'; } catch (_) {}
+            if (foxtrackLinked() || usesFoxTrack) settingsTab = 'foxtrack';
+            else {
+                const first = settingsNavGroups(SETTINGS_TABS, settingsNavOpts())[0];
+                if (first && first.tabs.length) settingsTab = first.tabs[0].id;
+            }
+            if (currentView === 'settings') showSettingsTab(settingsTab);
+        }
         // Reflect the stored value in both directions. Only ever setting it to
         // true left the toggle stuck on after auto-update was switched off
         // elsewhere. auto_update is omitted from the response when false.
@@ -1727,6 +1874,7 @@ async function loadConfig() {
         setBridgeStatus(false);
         const tokenField = document.getElementById('foxtrack2ApiKey');
         if (tokenField) tokenField.disabled = false; // a token can still be saved; the server keeps the rest
+        updateSecretPlaceholder('foxtrack2ApiKey', false, '', 'Paste the token (starts with ftb_)');
     }
     refreshFoxTrackUi();
     renderSettingsNav();
@@ -1781,10 +1929,10 @@ async function checkFoxTrack() {
     if (state === 'ok') setFoxTrackStatus('bg-brand', 'text-brand', 'Connected to FoxTrack.');
     else if (state && state !== 'not_set') {
         const warn = state === 'offline';
-        setFoxTrackStatus(warn ? 'bg-warning' : 'bg-danger', warn ? 'text-warning' : 'text-danger', r.message || "Couldn't check the FoxTrack connection.");
+        setFoxTrackStatus(warn ? 'bg-warning' : 'bg-danger', warn ? 'text-warning' : 'text-danger', r.message || "Could not check the FoxTrack connection.");
     } else if (foxtrackLinked() && !r) {
         // The Bridge itself did not answer: say so rather than nothing.
-        setFoxTrackStatus('bg-warning', 'text-warning', "Couldn't check the FoxTrack connection.");
+        setFoxTrackStatus('bg-warning', 'text-warning', "Could not check the FoxTrack connection.");
     } else setFoxTrackStatus('', '', '');
     // The top-bar chip reads this; a check that gave no verdict is not a problem.
     foxtrackCheckState = state && state !== 'not_set' ? state : 'unknown';
@@ -1807,7 +1955,7 @@ async function saveApiKeys() {
             document.getElementById('apiKey').value = '';
             document.getElementById('foxtrack2ApiKey').value = '';
             await loadConfig();
-        } catch (e) { toast("Couldn't save settings: " + e.message, 'error'); return; }
+        } catch (e) { toast("Could not save settings: " + e.message, 'error'); return; }
         let state = null;
         if (foxtrackTokenSet || typedToken) state = await checkFoxTrack();
         else setFoxTrackStatus('', '', '');
@@ -1830,14 +1978,16 @@ async function unlinkFoxTrack() {
     if (!ok) return;
     try {
         await apiFetch('/api/config', { method:'POST', body:JSON.stringify({ clear_foxtrack_token: true }) });
-    } catch (e) { toast("Couldn't unlink FoxTrack: " + e.message, 'error'); return; }
+    } catch (e) { toast("Could not unlink FoxTrack: " + e.message, 'error'); return; }
+    foxtrackCheckSeq++;   // a check started before the unlink must not rewrite the line
     foxtrackCheckState = null;
     relayProblem = false;
     relayDelivered = false;
     setFoxTrackStatus('', '', '');
     await loadConfig();
     renderSettingsNav();
-    toast('FoxTrack unlinked');
+    if (foxtrackLinked()) toast('FoxTrack is still linked. Reload the page.', 'error');
+    else toast('FoxTrack unlinked');
 }
 
 // ── Bambu Cloud account ───────────────────────────────────────────────────────
@@ -1850,7 +2000,9 @@ let cloudPendingEmail = '';
 function fmtDate(ts) { return ts ? new Date(ts * 1000).toLocaleDateString() : ''; }
 
 async function loadCloudStatus() {
+    const wasCloud = !!(cloudStatus && cloudStatus.linked);
     try { cloudStatus = await apiFetch('/api/cloud/status'); } catch (_) { cloudStatus = null; }
+    if (wasCloud !== !!(cloudStatus && cloudStatus.linked)) renderSettingsNav();
     renderCloudStatus();
 }
 
@@ -1881,7 +2033,7 @@ function renderCloudStatus() {
         }
         let detail = m.detail || '';
         if (s.token_expired) detail = 'The Bambu sign-in has expired. Unlink and sign in again to reconnect cloud printers.';
-        else if (m.state === 'off' && n === 0) detail = 'Add a printer with the type "Bambu Lab (cloud, experimental)" to start the connection.';
+        else if (m.state === 'off' && n === 0) detail = 'Add a printer with the type "Bambu Lab, through Bambu Cloud (experimental)" to start the connection.';
         const detailEl = document.getElementById('cloudDetail');
         if (detailEl) { detailEl.textContent = detail; detailEl.classList.toggle('hidden', !detail); }
         const retry = document.getElementById('cloudRetryBtn');
@@ -1988,7 +2140,7 @@ async function cloudUnlink() {
         toast('Bambu account unlinked', 'info');
         await loadCloudStatus();
         pollStatus();
-    } catch (e) { toast("Couldn't unlink the account: " + e.message, 'error'); }
+    } catch (e) { toast("Could not unlink the account: " + e.message, 'error'); }
 }
 
 async function cloudRetry() {
@@ -2009,6 +2161,15 @@ async function cloudRetry() {
 const FLAG_WELCOME_SEEN = 'foxtrack.bridge.welcomeSeen';
 const FLAG_FT_SKIPPED = 'foxtrack.bridge.skipFoxTrack'; // "Not now" on the welcome's FoxTrack step
 const FLAG_FIRST_DISMISSED = 'foxtrack.bridge.firstPrinterDismissed';
+const KEY_USES_FT = 'foxtrack.bridge.usesFoxTrack'; // answer to the welcome question "Do you use FoxTrack?": yes or no
+function usesFoxTrackAnswer() {
+    if (foxtrackLinked()) return 'yes';
+    try { const v = localStorage.getItem(KEY_USES_FT); if (v === 'yes' || v === 'no') return v; } catch (_) {}
+    return flagGet(FLAG_FT_SKIPPED) ? 'no' : '';
+}
+function setUsesFoxTrack(v) {
+    try { if (v === 'yes' || v === 'no') localStorage.setItem(KEY_USES_FT, v); } catch (_) {}
+}
 const memFlags = {};
 function flagGet(k) { if (memFlags[k]) return true; try { return localStorage.getItem(k) === '1'; } catch (_) { return false; } }
 function flagSet(k) { memFlags[k] = true; try { localStorage.setItem(k, '1'); } catch (_) {} }
@@ -2264,10 +2425,19 @@ function addDiscovered(k) { const r = discovery.printers.find(x => discKey(x) ==
 const WELCOME_HTML =
     '<div class="col-span-full mx-auto w-full max-w-2xl py-2 sm:py-6">'
     + '<h2 class="font-heading text-2xl font-medium leading-tight sm:text-3xl">Welcome to FoxTrack Bridge</h2>'
-    + '<p class="mt-2 text-sm leading-relaxed text-text-2">Everything runs on this computer. You don\'t need an account or a subscription.</p>'
+    + '<p class="mt-2 text-sm leading-relaxed text-text-2">The Bridge talks to your printers on this network. Use it on its own, or let it send live status to FoxTrack so you can see your printers from anywhere.</p>'
     + '<ol class="mt-6 space-y-3">'
+    // The question first: the steps are ordered by the answer.
+    + '<li id="wAsk" class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
+    + '<h3 class="font-heading text-xl font-medium leading-tight">Do you use FoxTrack?</h3>'
+    + '<div class="mt-4 flex flex-wrap items-center gap-2">'
+    + '<button type="button" onclick="answerUsesFoxTrack(\'yes\')" class="btn-primary">Yes, link FoxTrack</button>'
+    + '<button type="button" onclick="answerUsesFoxTrack(\'no\')" class="btn-outline">No, just this dashboard</button>'
+    + '</div>'
+    + '<p class="mt-3 text-xs text-text-2">You can change this later in Settings.</p>'
+    + '</li>'
     // Step 1: find printers
-    + '<li class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
+    + '<li id="wStepPrinters" class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
     + '<div class="flex items-center gap-3">'
     + '<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-xs tabular-nums text-text-2" aria-hidden="true">1</span>'
     + '<h3 class="font-heading text-xl font-medium leading-tight"><span class="sr-only">Step 1: </span>Find your printers</h3>'
@@ -2281,17 +2451,17 @@ const WELCOME_HTML =
     + '<button type="button" onclick="openAddPrinterModal()" class="btn-outline">Add manually</button>'
     + '</div>'
     + '<p class="mt-4 text-xs leading-relaxed text-text-2">Using Bambu Cloud? <button type="button" onclick="goToSettingsCard(\'cloudCard\',\'cloudEmail\')" class="text-link underline-offset-4 hover:underline">Sign in to your Bambu account</button></p>'
+    + '<p id="wFtLater" class="mt-2 hidden text-xs leading-relaxed text-text-2">Using FoxTrack later? <button type="button" onclick="goToSettingsCard(\'foxtrackCard\')" class="text-link underline-offset-4 hover:underline">Link it in Settings</button></p>'
     + '</div>'
     + '</li>'
-    // Step 2: FoxTrack, optional
-    + '<li class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
+    // FoxTrack step: shown first for a "yes" answer, hidden for "no".
+    + '<li id="wStepFt" class="rounded-lg border border-border bg-panel p-4 sm:p-5">'
     + '<div class="flex flex-wrap items-center gap-x-3 gap-y-1">'
     + '<span id="wFtPill" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-xs tabular-nums text-text-2" aria-hidden="true">2</span>'
     + '<h3 class="font-heading text-xl font-medium leading-tight"><span class="sr-only">Step 2: </span>FoxTrack</h3>'
-    + '<span class="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-2">Optional</span>'
     + '</div>'
     + '<div id="wFtOpen" class="mt-4">'
-    + '<p class="text-sm leading-relaxed text-text-2">See your printers in FoxTrack from anywhere, with print history. Needs the Pro or Farm plan.</p>'
+    + '<p class="text-sm leading-relaxed text-text-2">Sends your printers\' live status to FoxTrack, so you can see them from anywhere. Needs the FoxTrack Pro or Farm plan.</p>'
     + '<div class="mb-1.5 mt-4 flex items-center justify-between gap-3">'
     + '<span class="flex items-center gap-1"><label for="wFtToken" class="field-label mb-0">Bridge token</label>' + tip('In FoxTrack, open Settings, Integrations, FoxTrack Bridge and click Generate token. Paste it here.', 'Where to get the token') + '</span>'
     + '<a href="https://foxtrack.studio/app/settings?tab=integrations" target="_blank" rel="noopener" class="flex shrink-0 items-center gap-1 text-xs text-link underline-offset-4 hover:underline">Get a token <i class="fas fa-arrow-up-right-from-square text-[10px]"></i></a>'
@@ -2301,10 +2471,13 @@ const WELCOME_HTML =
     + '<button type="button" id="wFtSave" onclick="connectFoxTrackFromWelcome()" class="btn-primary btn-lg shrink-0">Connect</button>'
     + '</div>'
     + '<p id="wFtStatus" class="mt-2 hidden items-center gap-1.5 text-xs" role="status" aria-live="polite"><span id="wFtDot" class="h-1.5 w-1.5 shrink-0 rounded-full"></span><span id="wFtText" class="min-w-0"></span></p>'
-    + '<div class="mt-3"><button type="button" onclick="skipFoxTrack()" class="btn-ghost -ml-3">Not now</button></div>'
+    + '<div class="mt-3"><button type="button" onclick="answerUsesFoxTrack(\'no\')" class="btn-ghost -ml-3">I don\'t use FoxTrack</button></div>'
     + '</div>'
     + '<div id="wFtDone" class="mt-4 hidden flex-wrap items-center justify-between gap-2">'
+    + '<div class="min-w-0">'
     + '<p class="flex items-center gap-2 text-sm"><span id="wFtDoneDot" class="h-1.5 w-1.5 shrink-0 rounded-full"></span><span id="wFtDoneText" class="min-w-0"></span></p>'
+    + '<p class="mt-1 text-xs leading-relaxed text-text-2">Next, add your printers. Then open Printers in FoxTrack and link each one under Bridge devices to link.</p>'
+    + '</div>'
     + '<button type="button" onclick="goToSettingsCard(\'foxtrackCard\')" class="btn-ghost">Settings</button>'
     + '</div>'
     + '<div id="wFtSkipped" class="mt-4 hidden flex-wrap items-center justify-between gap-2">'
@@ -2322,6 +2495,7 @@ let welcomeActive = false;   // the welcome is what the printer list shows right
 function startWelcome() {
     flagSet(FLAG_WELCOME_SEEN);
     renderDiscovery();
+    renderWelcomeOrder();
     renderWelcomeFt();
     runDiscovery(false);
 }
@@ -2331,15 +2505,59 @@ function syncStatRow() {
     if (row) row.classList.toggle('hidden', currentView !== 'printers' || welcomeActive);
 }
 
-function skipFoxTrack() { flagSet(FLAG_FT_SKIPPED); renderWelcomeFt(); }
+function skipFoxTrack() { flagSet(FLAG_FT_SKIPPED); renderWelcomeOrder(); renderWelcomeFt(); }
 function unskipFoxTrack() {
     flagClear(FLAG_FT_SKIPPED);
+    renderWelcomeOrder();
     renderWelcomeFt();
     const input = document.getElementById('wFtToken');
     if (input) input.focus();
 }
 
-// Step 2 of the welcome: the token form, the connected state, or the skipped line.
+// The welcome's steps are ordered by the "Do you use FoxTrack?" answer:
+// no answer shows the question and the printers step; "yes" puts the FoxTrack
+// step first; "no" hides it. The <li> nodes are only moved, never rebuilt:
+// the scan is filling them.
+function renderWelcomeOrder() {
+    const ask = document.getElementById('wAsk');
+    const ft = document.getElementById('wStepFt');
+    const printers = document.getElementById('wStepPrinters');
+    if (!ask || !ft || !printers) return;
+    const ol = ask.closest('ol');
+    const later = document.getElementById('wFtLater');
+    const answer = usesFoxTrackAnswer();
+    ask.classList.toggle('hidden', answer !== '');
+    ft.classList.toggle('hidden', answer !== 'yes');
+    if (later) later.classList.toggle('hidden', answer !== 'no');
+    const ftFirst = answer === 'yes';
+    if (ftFirst) ol.insertBefore(ft, printers);
+    else ol.appendChild(printers);
+    // The pill text is the number; renderWelcomeFt may have put a check icon in
+    // the FoxTrack pill (connected), which this does not clobber.
+    const ftPill = document.getElementById('wFtPill');
+    if (ftPill && !ftPill.querySelector('i')) ftPill.textContent = ftFirst ? '1' : '2';
+    const printPill = printers.querySelector('[aria-hidden="true"]');
+    if (printPill) printPill.textContent = ftFirst ? '2' : '1';
+    const sr = printers.querySelector('h3 .sr-only');
+    if (sr) sr.textContent = ftFirst ? 'Step 2: ' : 'Step 1: ';
+    const ftSr = ft.querySelector('h3 .sr-only');
+    if (ftSr) ftSr.textContent = ftFirst ? 'Step 1: ' : 'Step 2: ';
+}
+
+function answerUsesFoxTrack(v) {
+    setUsesFoxTrack(v);
+    if (v === 'no') flagSet(FLAG_FT_SKIPPED);
+    else flagClear(FLAG_FT_SKIPPED);
+    renderWelcomeOrder();
+    renderWelcomeFt();
+    if (v === 'yes') {
+        const input = document.getElementById('wFtToken');
+        if (input) input.focus();
+    }
+    if (typeof renderSettingsNav === 'function') renderSettingsNav();
+}
+
+// The FoxTrack step of the welcome: the token form or the connected state.
 function renderWelcomeFt() {
     const open = document.getElementById('wFtOpen');
     if (!open) return;
@@ -2347,17 +2565,18 @@ function renderWelcomeFt() {
     const mode = foxtrackMode();
     // A token FoxTrack rejects leaves the form open, with the reason under it.
     const showDone = linked && mode !== 'attention';
-    // The token form is open on a fresh install (linking FoxTrack is what most
-    // people are here for); "Not now" folds it until asked for again.
-    const skipped = !linked && flagGet(FLAG_FT_SKIPPED);
-    open.classList.toggle('hidden', showDone || skipped);
+    open.classList.toggle('hidden', showDone);
     const done = document.getElementById('wFtDone');
     done.classList.toggle('hidden', !showDone);
     done.classList.toggle('flex', showDone);
     const skip = document.getElementById('wFtSkipped');
-    skip.classList.toggle('hidden', !skipped);
-    skip.classList.toggle('flex', skipped);
-    document.getElementById('wFtPill').innerHTML = showDone && mode === 'connected' ? '<i class="fas fa-check-circle text-brand"></i>' : '2';
+    // The step is hidden for a "no" answer, so the skipped block is never shown.
+    skip.classList.add('hidden');
+    skip.classList.remove('flex');
+    const ftFirst = usesFoxTrackAnswer() === 'yes';
+    const pill = document.getElementById('wFtPill');
+    if (showDone && mode === 'connected') pill.innerHTML = '<i class="fas fa-check-circle text-brand"></i>';
+    else pill.textContent = ftFirst ? '1' : '2';
     if (showDone) {
         const doneText = {
             connected: 'Connected to FoxTrack.',
@@ -2375,6 +2594,7 @@ function mirrorWelcomeFtStatus() {
     if (!wrap) return;
     let s = lastFtStatus;
     if (!s.text && foxtrackMode() === 'attention') s = { dotCls: 'bg-warning', textCls: 'text-warning', text: 'FoxTrack is not accepting this Bridge right now. Paste a new token to try again.' };
+    if (!s.text && foxtrackMode() === 'unreachable') s = { dotCls: 'bg-warning', textCls: 'text-warning', text: "Token saved. Can't reach FoxTrack right now." };
     wrap.classList.toggle('hidden', !s.text);
     wrap.classList.toggle('flex', !!s.text);
     document.getElementById('wFtDot').className = 'h-1.5 w-1.5 shrink-0 rounded-full ' + s.dotCls;
@@ -2424,7 +2644,9 @@ function foxtrackLinked() { return foxtrackTokenSet || legacyKeySet; }
 // printer report has been accepted. Anything less is said as what it is.
 function foxtrackMode() {
     if (!foxtrackLinked()) return 'standalone';
-    if (relayProblem || (foxtrackCheckState && foxtrackCheckState !== 'ok' && foxtrackCheckState !== 'unknown')) return 'attention';
+    if (relayProblem) return 'attention';
+    if (foxtrackCheckState === 'offline') return 'unreachable';
+    if (foxtrackCheckState && foxtrackCheckState !== 'ok' && foxtrackCheckState !== 'unknown') return 'attention';
     if (foxtrackCheckState === null) return 'checking';
     if (foxtrackCheckState === 'unknown') return 'unreachable';
     if (!relayDelivered) return 'waiting';
@@ -2437,7 +2659,8 @@ const FT_CHIP = {
     attention:   ['bg-warning', 'FoxTrack needs attention', 'FoxTrack is not accepting this Bridge. Open the FoxTrack settings.'],
     checking:    ['bg-text-2 pulse', 'Checking FoxTrack…', 'Checking the FoxTrack connection.'],
     unreachable: ['bg-warning', "Can't reach FoxTrack", 'The Bridge could not check the FoxTrack connection. It keeps trying.'],
-    waiting:     ['bg-warning', 'FoxTrack linked, waiting for the first report', 'FoxTrack accepted the token. The chip turns green once a printer report is accepted.'],
+    waiting:     ['bg-warning', 'FoxTrack linked, waiting for the first report', 'FoxTrack accepted the token. The chip turns green once FoxTrack accepts a printer report. Link your printers in FoxTrack under Printers, Bridge devices to link.'],
+    waitingEmpty:['bg-warning', 'FoxTrack linked, add a printer', 'FoxTrack accepted the token. Add a printer to send the first report.'],
 };
 
 function renderFoxTrackChip() {
@@ -2447,7 +2670,7 @@ function renderFoxTrackChip() {
     if (!configEverLoaded) { chip.classList.add('hidden'); return; }
     const mode = foxtrackMode();
     if (mode === 'standalone') { chip.classList.add('hidden'); return; }
-    const [dot, label, title] = FT_CHIP[mode];
+    const [dot, label, title] = FT_CHIP[(mode === 'waiting' && configuredPrinters.length === 0) ? 'waitingEmpty' : mode];
     chip.classList.remove('hidden');
     chip.classList.toggle('ft-attention', mode === 'attention');
     document.getElementById('foxtrackChipDot').className = 'w-1.5 h-1.5 rounded-full shrink-0 ' + dot;
@@ -2547,6 +2770,22 @@ function fillPlugFields(plug, secretSet) {
     onPlugKindChange();
 }
 
+// Collapses the smart plug block to a single button, or expands it.
+function setPlugExpanded(on) {
+    const reveal = document.getElementById('plugReveal');
+    const header = document.getElementById('plugHeaderRow');
+    const body = document.getElementById('plugBody');
+    if (reveal) reveal.classList.toggle('hidden', !!on);
+    if (header) header.classList.toggle('hidden', !on);
+    if (body) body.classList.toggle('hidden', !on);
+}
+
+function revealPlug() {
+    setPlugExpanded(true);
+    const kind = document.getElementById('pPlugKind');
+    if (kind) kind.focus();
+}
+
 function onPlugKindChange() {
     const kind = (document.getElementById('pPlugKind') || {}).value || '';
     const k = PLUG_KINDS[kind] || {};
@@ -2640,7 +2879,7 @@ async function toggleVirtualPrinter() {
     try {
         await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ virtual_printer: { enabled, port: vp.port || 8090 } }) });
         toast(enabled ? 'Virtual printer on' : 'Virtual printer off');
-    } catch (e) { toast("Couldn't save: " + friendlyError(e.message), 'error'); }
+    } catch (e) { toast("Could not save: " + friendlyError(e.message), 'error'); }
     await loadVirtualPrinter();
 }
 
@@ -2704,6 +2943,7 @@ function openAddPrinterModal(prefill) {
     renderModalScan();
     runDiscovery(false);   // a scan under a minute old is reused
     if (prefill) applyDiscovered(prefill);
+    setPlugExpanded(false);   // a new printer starts without a plug
 }
 
 // Id of the printer the modal is editing, or null when it is adding one. Edit
@@ -2741,6 +2981,7 @@ function openEditPrinterModal(id) {
     document.getElementById('pPrusaLinkUrl').value = printer.prusalink_url || '';
     document.getElementById('pOctoPrintUrl').value = printer.octoprint_url || '';
     fillPlugFields(printer.plug, printer.plug_secret_set);
+    setPlugExpanded(!!(printer.plug && printer.plug.kind));   // a saved plug opens expanded
     document.getElementById('pHaUrl').value = printer.home_assistant_url || '';
     Object.entries(HA_FIELDS).forEach(([id, key]) => { document.getElementById(id).value = printer[key] || ''; });
     if (printer.lan_code_set) document.getElementById('pLanCode').placeholder = 'Saved. Leave blank to keep it';
@@ -2761,6 +3002,7 @@ function closeAddPrinterModal() {
     Object.entries(SECRET_PLACEHOLDERS).forEach(([id, text]) => { const el=document.getElementById(id); if(el) el.placeholder=text; });
     ['pName','pIp','pMoonrakerUrl','pSerial','pLanCode','pKlipperKey','pWebcamUrl','pPrusaLinkUrl','pOctoPrintUrl','pHaUrl','pHaToken',...Object.keys(HA_FIELDS)].forEach(id => { const el=document.getElementById(id); if(el) { el.value=''; el.classList.remove(FIELD_ERROR_CLASS); } });
     fillPlugFields(null);
+    setPlugExpanded(false);
     document.getElementById('pBrand').value = '';
     document.getElementById('brandInstructions').classList.add('hidden');
     document.getElementById('printerFields').classList.add('hidden');
@@ -3098,7 +3340,7 @@ async function savePrinter({ name, payload }) {
         await loadConfig();
         await pollStatus();
     } catch (e) {
-        showAddPrinterError((editing ? "Couldn't save the printer: " : "Couldn't add the printer: ") + e.message);
+        showAddPrinterError((editing ? "Could not save the printer: " : "Could not add the printer: ") + e.message);
         if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; } { const anyway = document.getElementById('saveAnywayBtn'); if (anyway) anyway.textContent = anywayLabel(); }
     }
 }
@@ -3175,7 +3417,7 @@ async function confirmBulkRemove() {
     } else if (removed > 0) {
         toast(removed + ' of ' + ids.length + ' removed: ' + lastError, 'error');
     } else {
-        toast("Couldn't remove the printer" + (many ? 's' : '') + ': ' + lastError, 'error');
+        toast("Could not remove the printer" + (many ? 's' : '') + ': ' + lastError, 'error');
     }
 }
 
@@ -3213,7 +3455,7 @@ async function sendControl(id, command, payload) {
         toast(CONTROL_DONE[command] || 'Command sent');
         setTimeout(pollStatus, 800);
         return true;
-    } catch (e) { toast("Couldn't send the command: " + friendlyError(e.message), 'error'); return false; }
+    } catch (e) { toast("Could not send the command: " + friendlyError(e.message), 'error'); return false; }
 }
 
 let _pendingStopId = null;
@@ -3632,6 +3874,9 @@ function collectHooks(el) {
         gcodePanel: el.querySelector('.gcode-panel'), // Bambu + advancedMode only
         gcodeInput: el.querySelector('.gcode-input'),
         alarmList: el.querySelector('.alarm-list'),
+        missingSecret: el.querySelector('.missing-secret'),
+        lastReport: el.querySelector('.last-report'),
+        ftLine: el.querySelector('.ft-line'),
         controlNotice: el.querySelector('.control-notice'), // Bambu LAN cards only
         plugText: el.querySelector('.plug-text'),   // only on a card whose printer has a plug
         plugBtn: el.querySelector('.plug-btn'),
@@ -3728,6 +3973,26 @@ function patchCard(entry, printer) {
         const html = alarmsInnerHTML(alarms);
         if (hooks.alarmList._html !== html) { hooks.alarmList.innerHTML = html; hooks.alarmList._html = html; }
         hooks.alarmList.classList.toggle('hidden', !alarms.length);
+    }
+    if (hooks.missingSecret) {
+        const missing = printerMissingSecret(printer);
+        const html = missing
+            ? escHtml(fill('{0} missing. Edit the printer to enter it.', missing))
+              + ' <button onclick="openEditPrinterModalEncoded(\'' + encodeURIComponent(printer.id) + '\')" class="btn-ghost btn-xs">Edit</button>'
+            : '';
+        if (hooks.missingSecret._html !== html) { hooks.missingSecret.innerHTML = html; hooks.missingSecret._html = html; }
+        hooks.missingSecret.classList.toggle('hidden', !missing);
+    }
+    if (hooks.lastReport) {
+        const lr = lastReportLine(printer);
+        hooks.lastReport.textContent = lr;
+        hooks.lastReport.classList.toggle('hidden', !lr);
+    }
+    if (hooks.ftLine) {
+        const ft = foxtrackCardLine(printer);
+        hooks.ftLine.textContent = ft ? ft.text : '';
+        hooks.ftLine.className = 'ft-line mt-2 text-[11px] ' + (ft && ft.warn ? 'text-warning' : 'text-text-2');
+        hooks.ftLine.classList.toggle('hidden', !ft);
     }
     const controlBlocked = !!(live && live.control_blocked);
     entry.el.classList.toggle('controls-blocked', controlBlocked);
@@ -3845,7 +4110,7 @@ function patchCard(entry, printer) {
 const BAMBU_HMS_WIKI = 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/';
 const BAMBU_DEV_MODE_WIKI = 'https://wiki.bambulab.com/en/knowledge-sharing/enable-developer-mode';
 // The same sentence the Bridge answers /api/control with for such a printer.
-const CONTROL_BLOCKED_TEXT = 'This printer refuses control commands. Turn on LAN Only Mode and Developer Mode on the printer (Settings, Network), then try again.';
+const CONTROL_BLOCKED_TEXT = 'This printer refuses control commands. Turn on LAN Only Mode and Developer Mode on the printer, then try again. LAN Only Mode is under Settings, Network (WLAN on the P1 and A1); Developer Mode is next to it on 2025 firmware and later, and under About on older firmware.';
 
 // One line per alarm, worst first, at most three. Bambu HMS codes link to the
 // Bambu wiki page that explains them.
@@ -4080,7 +4345,7 @@ function cardInnerHTML(printer, live) {
         '<div class="flex flex-wrap items-end justify-between gap-3 mt-3">'
         + '<div class="flex flex-wrap gap-1.5">'
         // Cloud printers: current Bambu firmware only honours the light over the
-        // cloud, so pause/stop/fan/speed/GCode are LAN-only buttons.
+        // cloud, so pause/stop/fan/speed/G-code are LAN-only buttons.
         + ((isCloud || readOnly) ? '' :
             '<button onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline' + (status === 'printing' ? '' : ' hidden') + '">Pause</button>'
             + '<button onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline' + (status === 'paused' ? '' : ' hidden') + '">Resume</button>'
@@ -4088,7 +4353,7 @@ function cardInnerHTML(printer, live) {
         + ((isCloud || noExtras) ? '' : '<button ' + dis + 'onclick="openSkipObjects(\'' + enc + '\')" class="skip-btn btn-outline' + ((status === 'printing' || status === 'paused') ? '' : ' hidden') + '">Skip objects</button>')
         + (noExtras ? '' : '<button ' + (lightPending?'disabled ':'') + dis + 'onclick="toggleLightEncoded(\'' + enc + '\')" class="' + lightCls + '" aria-pressed="' + lightOn + '">' + lightHtml + '</button>')
         + (printer.plug ? plugButtonHTML(enc, plug, status) : '')
-        // Temps, Fan, Speed and GCode are the tuning controls: advanced mode only,
+        // Temps, Fan, Speed and G-code are the tuning controls: advanced mode only,
         // so a plain card stays short.
         + ((hasConsole && advancedMode) ? '<button onclick="toggleTemps(\'' + enc + '\')" class="btn-outline"><i class="fas fa-thermometer mr-1"></i>Temps</button>' : '')
         + camControls
@@ -4097,7 +4362,7 @@ function cardInnerHTML(printer, live) {
             + (isBambu
                 ? (advancedMode
                     ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'
-                      + '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>GCode</button>'
+                      + '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>G-code</button>'
                     : '')
                 : '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline' + ((status === 'printing' || status === 'paused') ? ' hidden' : '') + '">Start print</button>'))
         + '</div>'
@@ -4116,7 +4381,7 @@ function cardInnerHTML(printer, live) {
 
     const gcodePanel = (isBambu && !removeMode && !isCloud) ?
         '<div id="gcode-' + enc + '" class="gcode-panel hidden border-t border-border px-4 py-3 flex gap-2">'
-        + '<input id="gcodeInput-' + enc + '" type="text" placeholder="e.g. M106 P1 S128" autocomplete="off" aria-label="GCode command"'
+        + '<input id="gcodeInput-' + enc + '" type="text" placeholder="e.g. M106 P1 S128" autocomplete="off" aria-label="G-code command"'
         + '  class="gcode-input field field-mono flex-1"'
         + '  onkeydown="if(event.key===\'Enter\')sendGcodeEncoded(\'' + enc + '\')">'
         + '<button onclick="sendGcodeEncoded(\'' + enc + '\')" class="btn-outline btn-lg">Send</button>'
@@ -4157,6 +4422,21 @@ function cardInnerHTML(printer, live) {
         + '</div>'
         + '<p class="error-text wrap-any mt-2 text-[11px] text-danger' + (error ? '' : ' hidden') + '" title="' + escHtml(errorLineParts(status, error).title) + '">' + escHtml(errorLineParts(status, error).text) + '</p>'
         + '<div class="alarm-list mt-2 space-y-1' + (alarms.length ? '' : ' hidden') + '">' + alarmsInnerHTML(alarms) + '</div>'
+        + (function() {
+            const missing = printerMissingSecret(printer);
+            return missing
+                ? '<p class="missing-secret mt-2 text-[11px] text-warning">' + escHtml(fill('{0} missing. Edit the printer to enter it.', missing))
+                  + ' <button onclick="openEditPrinterModalEncoded(\'' + enc + '\')" class="btn-ghost btn-xs">Edit</button></p>'
+                : '';
+        }())
+        + (function() {
+            const lr = lastReportLine(printer);
+            return '<p class="last-report mt-2 text-[11px] text-text-2' + (lr ? '' : ' hidden') + '">' + escHtml(lr) + '</p>';
+        }())
+        + (function() {
+            const ft = foxtrackCardLine(printer);
+            return '<p class="ft-line mt-2 text-[11px] ' + (ft && ft.warn ? 'text-warning' : 'text-text-2') + (ft ? '' : ' hidden') + '">' + escHtml(ft ? ft.text : '') + '</p>';
+        }())
         + (printer.plug ? '<p class="plug-line mt-2 text-[11px] text-text-2"><i class="fas fa-plug mr-1"></i><span class="plug-text">' + escHtml(plugLineText(plug)) + '</span></p>' : '')
         + '<div class="filament-wrap flex items-center gap-3 mt-2' + ((status==='printing' && filamentUsedMM !== null) ? '' : ' hidden') + '">'
         + '<span class="text-[11px] text-text-2"><i class="fas fa-ruler-horizontal mr-1"></i><span class="filament-value">' + (filamentUsedMM !== null ? (filamentUsedMM >= 1000 ? (filamentUsedMM/1000).toFixed(1)+'m' : Math.round(filamentUsedMM)+'mm') : '') + '</span></span>'
@@ -4195,6 +4475,7 @@ async function pollStatus() {
         pollApplied = seq;
         prevLiveStatus = liveStatus;
         liveStatus = data || {};
+        noteLastSeen();
         detectStatusTransitions();
         setBridgeStatus(true);
         renderPrinters();
@@ -4217,6 +4498,7 @@ async function pollRelayHealth() {
         relayProblem = !!problem;
         relayDelivered = !!(data && data.delivered);
         refreshFoxTrackUi();
+        renderPrinters(); // the card's FoxTrack line follows this poll
         if (!problem) { wrap.classList.add('hidden'); return; }
         document.getElementById('relayHealthMsg').textContent = problem.message || '';
         const since = document.getElementById('relayHealthSince');
@@ -4235,6 +4517,7 @@ async function pollRelayHealth() {
         wrap.classList.add('hidden');
         relayProblem = false;
         refreshFoxTrackUi();
+        renderPrinters();
     }
 }
 
@@ -4324,7 +4607,7 @@ async function toggleCameraHiddenEncoded(enc) {
         toast(fill(printer.camera_hidden ? 'Camera hidden for {0}' : 'Camera shown for {0}', printer.name), 'info');
     } catch (e) {
         if (hideBtn) hideBtn.disabled = false;
-        toast("Couldn't change the camera setting: " + e.message, 'error');
+        toast("Could not change the camera setting: " + e.message, 'error');
     }
 }
 
@@ -4362,7 +4645,7 @@ async function setFanSpeedEncoded(enc, pct) {
     } catch (e) {
         clearTimeout(safetyTimer);
         delete pendingFanTarget[id];
-        toast("Couldn't change the fan: " + friendlyError(e.message), 'error');
+        toast("Could not change the fan: " + friendlyError(e.message), 'error');
         renderPrinters();
         pollStatus();
     }
@@ -4397,7 +4680,7 @@ async function setTempEncoded(enc, cmd) {
             : fill(bedCmd ? 'Bed set to {0} °C' : 'Nozzle set to {0} °C', text));
         inp.value = '';
         setTimeout(pollStatus, 1500);
-    } catch (e) { toast("Couldn't set the temperature: " + friendlyError(e.message), 'error'); }
+    } catch (e) { toast("Could not set the temperature: " + friendlyError(e.message), 'error'); }
 }
 
 // ── Gcode console ─────────────────────────────────────────────────────────────
@@ -4422,9 +4705,9 @@ async function sendGcodeEncoded(enc) {
     if (!line) return;
     try {
         await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/gcode', { method:'POST', body:JSON.stringify({ line }) });
-        toast('GCode sent: ' + line, 'info');
+        toast('G-code sent: ' + line, 'info');
         inp.value = '';
-    } catch (e) { toast("Couldn't send the GCode: " + friendlyError(e.message), 'error'); }
+    } catch (e) { toast("Could not send the G-code: " + friendlyError(e.message), 'error'); }
 }
 
 // ── Global History view ───────────────────────────────────────────────────────
@@ -4499,7 +4782,7 @@ async function installUpdate() {
         const rb=document.getElementById('restartNowBtn'); if(rb) rb.classList.remove('hidden');
         if(btn) btn.classList.add('hidden');
         setUpdateProgress('Update downloaded. Click Restart to finish.');
-    } catch(e) { setUpdateProgress("Couldn't install the update: "+e.message,true); if(btn) btn.disabled=false; }
+    } catch(e) { setUpdateProgress("Could not install the update: "+e.message,true); if(btn) btn.disabled=false; }
 }
 
 async function restartForUpdate() {
@@ -4509,7 +4792,7 @@ async function restartForUpdate() {
     try {
         await apiFetch('/api/update/restart', { method: 'POST' });
     } catch(e) {
-        setUpdateProgress("Couldn't restart: " + e.message, true);
+        setUpdateProgress("Could not restart: " + e.message, true);
         if (rb) rb.disabled = false;
         return;
     }
@@ -4599,8 +4882,15 @@ async function restoreFromFile(file) {
         const out = await res.json();
         input.value = '';
         const restored = out.printers == null ? n : out.printers;
-        toast(restored === 1 ? 'Restored 1 printer' : fill('Restored {0} printers', restored));
         await loadConfig();
+        const missing = configuredPrinters.filter(p => printerMissingSecret(p));
+        if (missing.length) {
+            toast(missing.length === 1
+                ? fill('Restored 1 printer. Enter its codes again: {0}.', missing[0].name)
+                : fill('Restored {0} printers. Enter their codes again: {1}.', restored, missing.map(p => p.name).join(', ')), 'info');
+        } else {
+            toast(restored === 1 ? 'Restored 1 printer' : fill('Restored {0} printers', restored));
+        }
         await pollStatus();
     } catch (e) {
         input.value = '';
@@ -4634,7 +4924,7 @@ async function restoreFromFile(file) {
             if (prev && prev.focus) prev.focus();
         }
         if (ok) toast('Log copied');
-        else toast("Couldn't copy. Select the text and copy it by hand.", 'error');
+        else toast("Could not copy. Select the text and copy it by hand.", 'error');
     };
     window.toggleLogPanel = function() {
         open = !open;

@@ -126,7 +126,10 @@
                     body: JSON.stringify({ password: pw.value, remember: document.getElementById('remember').checked }),
                 });
                 if (res.ok) { location.replace('/'); return; }
-                err.textContent = (await res.text()).trim() || T('Sign-in failed.');
+                const raw = (await res.text()).trim();
+                let msg = raw;
+                try { msg = JSON.parse(raw).error || raw; } catch (_) {}
+                err.textContent = msg || T('Sign-in failed.');
                 pw.select();
             } catch (_) {
                 err.textContent = T('The Bridge did not answer. Is it still running?');

@@ -7,6 +7,7 @@ import (
 	configpkg "foxtrack-bridge/config"
 	"foxtrack-bridge/history"
 	mqttpkg "foxtrack-bridge/mqtt"
+	"foxtrack-bridge/pace"
 	"foxtrack-bridge/webhook"
 )
 
@@ -38,14 +39,14 @@ func nextCall(t *testing.T, calls chan relayCall) relayCall {
 	}
 }
 
-// A Klipper printer is posted under its config ID, with its name (and earlier
-// names) as the legacy id, current project first. The legacy project keeps the
-// name as its key and gets no legacy id.
+// A Klipper printer is posted under its config ID, with its name as the legacy
+// id, current project first. The legacy project keeps the name as its key and
+// gets no legacy id.
 func TestQueueRelay_KlipperIdentity(t *testing.T) {
 	calls := captureSends(t)
 	p := configpkg.Printer{ID: "a1b2c3", Name: "Shop Klipper", MoonrakerURL: "http://k.local", PreviousNames: []string{"Old Name", "Shop Klipper"}}
 	serial, legacy := p.RelayIdentity()
-	if serial != "a1b2c3" || legacy != "Shop Klipper,Old Name" {
+	if serial != "a1b2c3" || legacy != "Shop Klipper" {
 		t.Fatalf("RelayIdentity = %q, %q", serial, legacy)
 	}
 
@@ -53,7 +54,7 @@ func TestQueueRelay_KlipperIdentity(t *testing.T) {
 	c.queueRelay(p.Name, relayJob{foxAPIKey: "legacy", fox2APIKey: "v2", serial: serial, legacy: legacy})
 
 	v2 := nextCall(t, calls)
-	if v2.url != webhook.RelayURLV2 || v2.serial != "a1b2c3" || v2.name != "Shop Klipper" || v2.payload.LegacyID != "Shop Klipper,Old Name" {
+	if v2.url != webhook.RelayURLV2 || v2.serial != "a1b2c3" || v2.name != "Shop Klipper" || v2.payload.LegacyID != "Shop Klipper" {
 		t.Errorf("current project post = %+v", v2)
 	}
 	old := nextCall(t, calls)
@@ -73,33 +74,39 @@ func TestRelayIdentity(t *testing.T) {
 	}
 }
 
-// Two failed polls in a row make one OFFLINE report; a third does not repeat it;
-// the first good poll afterwards goes out at once even if nothing changed.
+// Two failed polls in a row make an OFFLINE report; it repeats every
+// pace.HeartbeatSec while the printer stays down, not before; the first good poll
+// afterwards goes out at once even if nothing changed.
 func TestOfflineAfterTwoFailedPolls(t *testing.T) {
 	c := NewController()
+	hb := int64(pace.HeartbeatSec)
 	if c.noteFailedPoll("Voron", 1000) {
 		t.Fatal("one failed poll is not an outage")
 	}
 	if !c.noteFailedPoll("Voron", 1005) {
 		t.Fatal("the second failed poll in a row must report OFFLINE")
 	}
-	if c.noteFailedPoll("Voron", 1010) {
-		t.Fatal("OFFLINE is sent once per outage")
+	if c.noteFailedPoll("Voron", 1005+hb-1) {
+		t.Fatal("no second OFFLINE inside the heartbeat window")
+	}
+	if !c.noteFailedPoll("Voron", 1005+hb) {
+		t.Fatal("OFFLINE must repeat once the heartbeat window has passed")
 	}
 
+	now := 1005 + hb
 	idle := &mqttpkg.TelemetryData{Status: "idle", NozzleTemp: 24, BedTemp: 24}
-	if !c.shouldRelay("Voron", idle, idle, 1011) {
+	if !c.shouldRelay("Voron", idle, idle, now+1) {
 		t.Fatal("the first good poll after OFFLINE must be urgent")
 	}
-	if c.shouldRelay("Voron", idle, idle, 1012) {
+	if c.shouldRelay("Voron", idle, idle, now+2) {
 		t.Fatal("only the first one is urgent")
 	}
 	// A new outage is reported again, and a good poll between resets the count.
-	if c.noteFailedPoll("Voron", 1020) || !c.noteFailedPoll("Voron", 1025) {
+	if c.noteFailedPoll("Voron", now+10) || !c.noteFailedPoll("Voron", now+15) {
 		t.Fatal("a later outage must be reported once more")
 	}
-	c.shouldRelay("Voron", idle, idle, 1030)
-	if c.noteFailedPoll("Voron", 1035) {
+	c.shouldRelay("Voron", idle, idle, now+20)
+	if c.noteFailedPoll("Voron", now+25) {
 		t.Fatal("a good poll in between restarts the count")
 	}
 

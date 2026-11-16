@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"foxtrack-bridge/history"
+	"foxtrack-bridge/pace"
 	"foxtrack-bridge/webhook"
 )
 
@@ -55,10 +56,11 @@ func nextRelay(t *testing.T, sent chan sentRelay) sentRelay {
 	}
 }
 
-// An unreachable printer is reported once per outage, as OFFLINE with no alarms
-// key and an unknown remaining time; the current project is posted before the
-// legacy one; and the first real report afterwards re-arms it.
-func TestReportOffline_OncePerOutage(t *testing.T) {
+// An unreachable printer is reported as OFFLINE (no alarms key, unknown
+// remaining time; the current project first, then the legacy one); a second
+// report inside pace.HeartbeatSec does not post and one after it does; the
+// first real report afterwards re-arms it.
+func TestReportOffline_RepeatsEachHeartbeat(t *testing.T) {
 	const name = "offline-test"
 	RemovePrinterState(name)
 	t.Cleanup(func() { RemovePrinterState(name) })
@@ -82,11 +84,18 @@ func TestReportOffline_OncePerOutage(t *testing.T) {
 	if second := nextRelay(t, sent); second.url != webhook.URL {
 		t.Errorf("the legacy project comes second, got %s", second.url)
 	}
+	// Still inside the heartbeat window: nothing. After it: the report repeats.
+	reportOffline(p, 1000+int64(pace.HeartbeatSec)-1)
 	select {
 	case extra := <-sent:
-		t.Fatalf("a second OFFLINE post in the same outage: %+v", extra)
+		t.Fatalf("OFFLINE re-posted inside the heartbeat window: %+v", extra)
 	case <-time.After(200 * time.Millisecond):
 	}
+	reportOffline(p, 1000+int64(pace.HeartbeatSec))
+	if got := nextRelay(t, sent); got.payload.Print.GcodeState != "OFFLINE" {
+		t.Fatalf("a printer still down after a heartbeat must be reported again, got %q", got.payload.Print.GcodeState)
+	}
+	nextRelay(t, sent) // the legacy copy
 
 	// The printer comes back: a real report goes out and re-arms the OFFLINE post.
 	UpdatePrinterState(name, TelemetryData{Status: "connected"})

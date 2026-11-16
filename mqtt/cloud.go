@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"foxtrack-bridge/pace"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/eclipse/paho.mqtt.golang/packets"
 )
@@ -140,6 +142,7 @@ type cloudRunner struct {
 	lastMsg     map[string]time.Time
 	lastNudge   map[string]time.Time
 	subFailed   map[string]time.Time // serial → last failed subscribe on this connection
+	offlineGen  map[string]uint64    // serial → the live offline report chain (armOfflineLocked)
 	lastRetry   time.Time
 }
 
@@ -421,7 +424,7 @@ func (r *cloudRunner) awaitSubscribe(client mqtt.Client, tok mqtt.Token, serial 
 	if err != nil {
 		r.subFailed[serial] = time.Now()
 		markDisconnected(p.Name)
-		time.AfterFunc(offlineGrace, func() { r.reportOfflineIfStill(p) })
+		r.armOfflineLocked(p, offlineGrace)
 		log.Printf("[%s] cloud subscribe failed: %v. Trying again in %s.", p.Name, err, cloudNudgeGap)
 		return
 	}
@@ -756,21 +759,46 @@ func (r *cloudRunner) dropClient() {
 	}
 	// The Bridge is up and the cloud session is not: tell FoxTrack the printers
 	// are unreachable if the session has not come back by then.
+	r.mu.Lock()
 	for _, p := range listed {
-		time.AfterFunc(offlineGrace, func() { r.reportOfflineIfStill(p) })
+		r.armOfflineLocked(p, offlineGrace)
 	}
+	r.mu.Unlock()
 }
 
-// reportOfflineIfStill reports p unreachable (reportOffline) when it is still a
-// cloud printer here and still disconnected.
-func (r *cloudRunner) reportOfflineIfStill(p Printer) {
+// offlineRepeat is how often a cloud printer that stays unreachable is
+// reported again. A var so a test can shorten it.
+var offlineRepeat = time.Duration(pace.HeartbeatSec) * time.Second
+
+// armOfflineLocked starts a new offline report chain for p after delay. Each
+// call supersedes the printer's earlier chain, which ends at its next tick, so
+// a printer has one live chain however often its subscribe fails or the
+// session drops during an outage. r.mu must be held.
+func (r *cloudRunner) armOfflineLocked(p Printer, delay time.Duration) {
+	if r.offlineGen == nil {
+		r.offlineGen = make(map[string]uint64)
+	}
+	r.offlineGen[p.Serial]++
+	gen := r.offlineGen[p.Serial]
+	time.AfterFunc(delay, func() { r.reportOfflineIfStill(p, gen) })
+}
+
+// reportOfflineIfStill reports p unreachable (reportOffline) when it is still
+// a cloud printer here and still disconnected, then looks again after
+// offlineRepeat. It ends when a newer chain was armed for the printer, the
+// printer is removed, the session is back (the printer is no longer
+// disconnected) or the runner stopped. reportOffline itself drops a report
+// that is too close to the last one.
+func (r *cloudRunner) reportOfflineIfStill(p Printer, gen uint64) {
 	r.mu.Lock()
-	_, listed := r.printers[p.Serial]
+	cur, listed := r.printers[p.Serial] // current name and keys: the printer may have been renamed or edited
+	live := r.offlineGen[p.Serial] == gen
 	r.mu.Unlock()
-	if !listed || r.stopped() || GetPrinterState(p.Name).Status != "disconnected" {
+	if !live || !listed || r.stopped() || GetPrinterState(cur.Name).Status != "disconnected" {
 		return
 	}
-	reportOffline(p, time.Now().Unix())
+	reportOffline(cur, time.Now().Unix())
+	time.AfterFunc(offlineRepeat, func() { r.reportOfflineIfStill(cur, gen) })
 }
 
 // handleMessage routes a report to the printer that owns the topic and feeds

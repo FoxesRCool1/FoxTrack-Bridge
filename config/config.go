@@ -297,11 +297,12 @@ func (p Printer) IsCloud() bool {
 
 // RelayIdentity is how FoxTrack keys this printer. A Bambu printer is its
 // serial. Any other kind is its stable config ID (the name changes on a
-// rename, and two printers can share a Klipper address). legacy is what FoxTrack
-// keyed the printer on before that, the name, then every earlier name, comma
-// separated: the X-Printer-Legacy-Id header, so FoxTrack can re-key the printer
-// it already has. It is blank for Bambu, and for a printer with no ID yet,
-// which falls back to its name as before.
+// rename, and two printers can share a Klipper address). legacy is what
+// FoxTrack keyed the printer on before stable IDs, the name, sent as
+// X-Printer-Legacy-Id so FoxTrack can re-key the printer it already has.
+// FoxTrack matches the whole header exactly and refuses one over 128 bytes, so
+// a name longer than that gives a blank legacy. It is blank for Bambu, and for
+// a printer with no ID yet, which falls back to its name as before.
 func (p Printer) RelayIdentity() (serial, legacy string) {
 	if p.Kind() == KindBambu && strings.TrimSpace(p.Serial) != "" {
 		return p.Serial, ""
@@ -309,19 +310,11 @@ func (p Printer) RelayIdentity() (serial, legacy string) {
 	if p.ID == "" {
 		return p.Name, ""
 	}
-	names := []string{p.Name}
-next:
-	for _, n := range p.PreviousNames {
-		for _, have := range names {
-			if n == have {
-				continue next
-			}
-		}
-		if n != "" {
-			names = append(names, n)
-		}
+	legacy = p.Name
+	if len(legacy) > 128 {
+		legacy = ""
 	}
-	return p.ID, strings.Join(names, ",")
+	return p.ID, legacy
 }
 
 // NewPrinterID returns a fresh, server-generated printer ID: 16 random bytes,
