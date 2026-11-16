@@ -171,7 +171,7 @@
         });
         el.querySelectorAll('[data-revoke]').forEach(b => b.addEventListener('click', async () => {
             const name = b.closest('.sec-row').querySelector('p').textContent;
-            const ok = await confirmDialog({ title: 'Revoke this token?', body: fill('Anything using "{0}" stops working at once. This cannot be undone.', name), confirmLabel: 'Revoke' });
+            const ok = await confirmDialog({ title: 'Revoke this token?', body: fill('Anything using "{0}" loses access at once, and the token stops working for good.', name), confirmLabel: 'Revoke' });
             if (!ok) return;
             try {
                 view = await apiFetch('/api/security/tokens/' + encodeURIComponent(b.dataset.revoke), { method: 'DELETE' });
@@ -203,7 +203,7 @@
         });
         el.querySelectorAll('[data-share-revoke]').forEach(b => b.addEventListener('click', async () => {
             const name = b.closest('.sec-row').querySelector('p').textContent;
-            const ok = await confirmDialog({ title: 'Revoke this share link?', body: fill('Anyone using "{0}" loses access at once. This cannot be undone.', name), confirmLabel: 'Revoke' });
+            const ok = await confirmDialog({ title: 'Revoke this share link?', body: fill('Anyone using "{0}" loses access at once, and the link stops working for good.', name), confirmLabel: 'Revoke' });
             if (!ok) return;
             try {
                 shares = await apiFetch('/api/shares/' + encodeURIComponent(b.dataset.shareRevoke), { method: 'DELETE' });

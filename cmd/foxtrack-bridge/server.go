@@ -337,7 +337,7 @@ func guardWrites(next http.Handler) http.Handler {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		}
 		if !hostAllowed(r.Host) {
-			writeErr(w, http.StatusForbidden, "unknown host name; set FOXTRACK_BRIDGE_ALLOWED_HOSTS to allow it")
+			writeHostRefused(w, r)
 			return
 		}
 		switch r.Method {
@@ -381,9 +381,12 @@ func writeAllowed(r *http.Request) bool {
 // at this computer sends its own name as Host, and the browser then treats
 // the dashboard as that site (same-origin), so the write guard would pass.
 // Allowed: IP addresses, localhost, a name with no dot, the LAN-only suffixes
-// (.local, .lan, .home.arpa, .internal, .localhost), this computer's name, and
-// any name in FOXTRACK_BRIDGE_ALLOWED_HOSTS (comma-separated, for a reverse
-// proxy on a real domain). Public names cannot end in those suffixes.
+// (.local, .lan, .home.arpa, .internal, .localhost), Tailscale MagicDNS names
+// (.ts.net: only Tailscale serves that zone, and its records point at the
+// tailnet's own devices, so a website cannot re-point one at this computer),
+// this computer's name, and any name in FOXTRACK_BRIDGE_ALLOWED_HOSTS
+// (comma-separated, for a reverse proxy on a real domain). Public names cannot
+// end in the LAN suffixes.
 func hostAllowed(hostport string) bool {
 	host := hostport
 	if h, _, err := net.SplitHostPort(hostport); err == nil {
@@ -393,7 +396,7 @@ func hostAllowed(hostport string) bool {
 	if host == "" || net.ParseIP(host) != nil || !strings.Contains(host, ".") {
 		return true
 	}
-	for _, suffix := range []string{".local", ".lan", ".home.arpa", ".internal", ".localhost"} {
+	for _, suffix := range []string{".local", ".lan", ".home.arpa", ".internal", ".localhost", ".ts.net"} {
 		if strings.HasSuffix(host, suffix) {
 			return true
 		}

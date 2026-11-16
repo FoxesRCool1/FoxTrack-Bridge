@@ -28,7 +28,7 @@ var (
 	errNotStarted  = errors.New("The printer took the file but did not start it. Check that it is idle and ready.")
 	errQueued      = errors.New("The printer put the file in its queue instead of starting it. Check Klipper, then try again.")
 	errFileInUse   = errors.New("That file is printing on the printer right now.")
-	errMoonKey     = errors.New("The printer refused the access key saved in Bridge. Check it in the printer settings in Bridge.")
+	errMoonKey     = errors.New("The printer refused the Moonraker API key saved in Bridge. Check it in the printer settings in Bridge.")
 	errNoAddress   = errors.New("Bridge has no network address saved for this printer. Add it in Bridge.")
 	errUnreachable = errors.New("Bridge could not reach the printer while sending the file. Check that the printer and Klipper are on.")
 	errRefused     = errors.New("The printer refused the file. Check its free space and that Klipper is ready.")

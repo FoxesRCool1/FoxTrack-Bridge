@@ -51,7 +51,7 @@ runs, open its dashboard at [http://localhost:8080](http://localhost:8080).
 ### 4. Add your printers to the Bridge
 
 In the Bridge dashboard, open **Printers** and click **Add printer**. See
-[Adding printers](../README.md#adding-printers) for the details each printer type
+[Setup guides](../README.md#setup-guides) for the details each printer type
 needs.
 
 ### 5. Link each printer in FoxTrack

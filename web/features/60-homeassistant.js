@@ -1,7 +1,7 @@
 // Settings > Home Assistant: publish printer state to the user's own MQTT
 // broker, with Home Assistant discovery. Talks to /api/mqtt-export.
 registerSettingsTab({
-    id: 'homeassistant', label: 'Home Assistant', group: 'Connect', order: 10,
+    id: 'homeassistant', label: 'MQTT (Home Assistant)', group: 'Connect', order: 10,
     mount(sec) { haMount(sec); },
     onShow() { haRefreshStatus(); },
 });
@@ -21,10 +21,10 @@ function haMount(sec) {
 @media (max-width: 640px) { #settings-homeassistant .field, #settings-homeassistant .btn-lg { height: 2.75rem; } }
 </style>
 <div class="flex items-start justify-between gap-3">
-    <h2 class="font-heading text-xl font-medium leading-tight">Home Assistant</h2>
+    <h2 class="font-heading text-xl font-medium leading-tight">MQTT (Home Assistant)</h2>
     <button id="haEnabled" type="button" class="switch shrink-0 mt-1" role="switch" aria-checked="false" aria-label="Send printer state to an MQTT broker"><span class="switch-thumb"></span></button>
 </div>
-<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Show your printers in Home Assistant, or react to them from any MQTT client.
+<p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Publishes printer status to an MQTT broker for Home Assistant, or lets you react to them from any MQTT client.
     ${tip('<span class="block">In Home Assistant, open Settings, then Devices and services, then MQTT. Each printer is a device there, with sensors, pause, resume and stop buttons, and a light.</span><span class="block mt-1.5">Home Assistant has to use the same broker. Automations can also listen on the printer\'s event topic for prints that start, finish or fail.</span><span class="block mt-1.5">Printer state goes to the broker you name here and nowhere else.</span>', 'How to find the printers in Home Assistant')}
 </p>
 <p id="haConn" class="mt-4 text-sm" role="status" aria-live="polite"></p>
@@ -126,7 +126,7 @@ async function haLoad() {
     haLock(true);
     try { haFill(await apiFetch('/api/mqtt-export')); haLock(false); }
     catch (e) {
-        haShowError("Couldn't load these settings. " + friendlyError(e.message));
+        haShowError("Could not load these settings. " + friendlyError(e.message));
         haEl('haRetry').classList.remove('hidden');
     }
 }

@@ -11,7 +11,9 @@
 
 <p><strong>All your 3D printers on one dashboard.</strong></p>
 
-<p>Bambu Lab, Klipper, OctoPrint and PrusaLink side by side, with live cameras, phone alerts,<br>a print queue, timelapses and print costs. Free, open source, and it runs on your own network.</p>
+<p>With FoxTrack, the Bridge runs on a computer on your printers' network and sends their live status to FoxTrack (Pro or Farm plan), so you see them from anywhere. Setup guide: <a href="docs/foxtrack.md">docs/foxtrack.md</a>.</p>
+
+<p>On its own, it is a local dashboard for your printers, with no account needed. Bambu Lab, Klipper, OctoPrint and PrusaLink side by side, with live cameras, phone alerts, a print queue, timelapses and print costs. Free, open source, and it runs on your own network.</p>
 
 [![Latest release](https://img.shields.io/github/v/release/FoxesRCool1/FoxTrack-Bridge?label=release&color=c2410c)](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/FoxesRCool1/FoxTrack-Bridge/total?color=c2410c)](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases)
@@ -59,7 +61,7 @@
 - **Alerts on your phone.** Discord, Slack, Telegram, ntfy, Pushover, Gotify, email or any webhook, with a camera picture.
 - **History that adds up.** Every print with its time, filament, energy, cost and your notes, exportable as CSV.
 - **Share a printer.** Send someone a read-only link to watch a print, with no access to anything else.
-- **Yours to keep.** No account, no subscription, no cloud. Settings are backed up every day and can be moved to another machine in one file.
+- **Yours to keep.** Used on its own, it needs no account, subscription or cloud. Settings are backed up every day and can be moved to another machine in one file (passwords and access codes stay out of it).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -91,7 +93,7 @@ The Bridge talks to each printer the way the printer prefers: MQTT for Bambu Lab
 
 ### Who makes it
 
-FoxTrack Bridge is made by [@FoxesRCool1](https://github.com/FoxesRCool1), who also builds the [FoxTrack](https://foxtrack.studio/) print-farm app, together with everyone who has sent a fix, a translation or a bug report. The Bridge works fully on its own; FoxTrack is optional.
+FoxTrack Bridge is made by [@FoxesRCool1](https://github.com/FoxesRCool1), who also builds the [FoxTrack](https://foxtrack.studio/) print-farm app, together with everyone who has sent a fix, a translation or a bug report. The Bridge works on its own, and with FoxTrack it puts your printers in the app from anywhere.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -335,7 +337,7 @@ Turn on **Settings > Timelapse** to take a picture every few seconds while a pri
 <details>
 <summary><b>Home Assistant and Prometheus</b></summary>
 
-**Settings > Home Assistant** connects the Bridge to your MQTT broker (the Mosquitto add-on works). With discovery on, each printer appears under **Settings > Devices & services > MQTT** with its status, progress, temperatures, time left and pause, resume, stop and light buttons. State is published to `foxtrack_bridge/<printer id>/state` and events to `foxtrack_bridge/<printer id>/event`, so any MQTT client can use them.
+**Settings > MQTT (Home Assistant)** connects the Bridge to your MQTT broker (the Mosquitto add-on works). With discovery on, each printer appears under **Settings > Devices & services > MQTT** with its status, progress, temperatures, time left and pause, resume, stop and light buttons. State is published to `foxtrack_bridge/<printer id>/state` and events to `foxtrack_bridge/<printer id>/event`, so any MQTT client can use them.
 
 **Settings > Prometheus** turns on `/metrics`: printer up, printing, progress, temperatures, time left, alarms, job counts, print time and energy. With a dashboard password set, create an API token and send it as a bearer token:
 
@@ -366,7 +368,7 @@ To reset a forgotten password, stop the Bridge, run it once with `--reset-passwo
 
 Bambu printers that aren't in LAN mode can be added through your Bambu account. Open **Settings > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer of type **Bambu Lab (cloud, experimental)** and pick it from the list.
 
-Status, temperatures, progress, AMS, the light and smart plugs work. The camera works when the printer is on the same network as the Bridge. Pause, stop, speed, fan and GCode don't: Bambu's 2025 and later firmware rejects every command except the light from third-party software, so those buttons are hidden.
+Status, temperatures, progress, AMS, the light and smart plugs work. The camera works when the printer is on the same network as the Bridge. Pause, stop, speed, fan and G-code don't: Bambu's 2025 and later firmware rejects every command except the light from third-party software, so those buttons are hidden.
 
 Bambu bans accounts for 24 hours to 7 days when it sees too many connections, so the Bridge keeps one MQTT connection for the whole account, backs off from 5 seconds to 5 minutes between reconnects, waits 30 minutes after 10 failures, never signs in by itself, and asks each printer for its full status at most once a minute. Tokens last about 90 days and the dashboard warns you a week before. If Cloudflare blocks sign-in, **Use a token instead** accepts a token from a signed-in Bambu session. Details: [docs/bambu-cloud.md](docs/bambu-cloud.md).
 

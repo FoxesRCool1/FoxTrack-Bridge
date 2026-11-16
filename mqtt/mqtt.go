@@ -1560,7 +1560,7 @@ func queueRelay(p Printer, terminal bool, build func() webhook.RelayPayload) {
 			webhookNoKeyLogged[p.Name] = true
 			webhookLastSentMu.Unlock()
 			if !logged {
-				log.Printf("[%s] not sending to FoxTrack: no API key configured", p.Name)
+				log.Printf("[%s] not sending to FoxTrack: no Bridge token set", p.Name)
 			}
 			return
 		}

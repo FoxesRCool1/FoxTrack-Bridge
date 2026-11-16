@@ -10,9 +10,12 @@ services:
     # the host directly. Linux only; on Docker Desktop (Windows/macOS) add
     # printers by address if discovery finds nothing.
     network_mode: host
-    # To use another port, uncomment this (default 8080):
+    # To use another port, or to open the dashboard by a name other than an
+    # IP address, a .local/.lan/.ts.net name or this machine's name (a
+    # reverse proxy domain, say), uncomment the lines you need:
     # environment:
     #   FOXTRACK_BRIDGE_PORT: "9000"
+    #   FOXTRACK_BRIDGE_ALLOWED_HOSTS: "bridge.example.com"
     volumes:
       # Settings and print history. A named volume keeps the image's non-root
       # ownership; a ./data bind mount would be created root-owned.

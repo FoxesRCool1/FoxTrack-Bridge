@@ -339,5 +339,5 @@ async function refreshGlobalHistory() {
         }).join('');
 
         content.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">' + cards + '</div>';
-    } catch (_) { content.innerHTML = '<p class="text-danger text-sm py-4 text-center">Couldn\'t load history. Is the Bridge still running?</p>'; }
+    } catch (_) { content.innerHTML = '<p class="text-danger text-sm py-4 text-center">Could not load history. Is the Bridge still running?</p>'; }
 }

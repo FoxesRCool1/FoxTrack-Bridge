@@ -22,7 +22,7 @@ async function mxCopy(text, source, done) {
         ? await copyText(text, source)
         : !!(navigator.clipboard && await navigator.clipboard.writeText(text).then(() => true, () => false));
     if (ok) toast(done, 'success');
-    else toast("Couldn't copy. Select the text and copy it by hand.", 'error');
+    else toast("Could not copy. Select the text and copy it by hand.", 'error');
 }
 
 function mxMount(sec) {
@@ -79,13 +79,13 @@ function mxMount(sec) {
             state(!!r.enabled);
             toast(r.enabled ? 'Prometheus metrics are on.' : 'Prometheus metrics are off.', 'success');
         } catch (e) {
-            toast("Couldn't change that. " + friendlyError(e.message), 'error');
+            toast("Could not change that. " + friendlyError(e.message), 'error');
         } finally {
             sw.disabled = false;
         }
     });
     document.getElementById('mxState').textContent = 'Checking…';
     apiFetch('/api/metrics').then(r => { setSwitch('mxEnabled', !!r.enabled); state(!!r.enabled); })
-        .catch(e => { document.getElementById('mxState').textContent = "Couldn't load this setting. " + friendlyError(e.message); })
+        .catch(e => { document.getElementById('mxState').textContent = "Could not load this setting. " + friendlyError(e.message); })
         .finally(() => { sw.disabled = false; });
 }

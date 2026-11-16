@@ -1,7 +1,9 @@
-// The Settings nav and the FoxTrack chip in connected mode: with a token the
-// standalone features fold into "More" and FoxTrack comes first; the chip says
-// "connected" only once FoxTrack has accepted a report. Runs the real
-// functions cut out of ui.html, as config-guard.test.mjs does.
+// The Settings nav and the FoxTrack chip in connected mode: printer features
+// only show once a printer exists, the rarely used connections fold into
+// "Advanced", and with a FoxTrack token notifications and maintenance fold
+// into "More"; the chip says "connected" only once FoxTrack has accepted a
+// report. Runs the real functions cut out of ui.html, as
+// config-guard.test.mjs does.
 //
 // Run: node --test web/tests/
 import { test } from 'node:test';
@@ -40,48 +42,64 @@ test('inline scripts parse', () => {
 const TABS = [
   { id: 'cloud', label: 'Bambu Cloud', group: 'Connect', order: 50 },
   { id: 'foxtrack', label: 'FoxTrack', group: 'Connect', order: 10 },
-  { id: 'virtual', label: 'Virtual printer', group: 'Connect', order: 85 },
+  { id: 'virtual', label: 'Virtual printer', group: 'Connect', order: 15 },
   { id: 'assistant', label: 'Assistant', group: 'Bridge', order: 60 },
   { id: 'general', label: 'General', group: 'Bridge', order: 90 },
   { id: 'notifications', label: 'Notifications', group: 'Printing', order: 10 },
   { id: 'timelapse', label: 'Timelapse', group: 'Printing', order: 20 },
   { id: 'maintenance', label: 'Maintenance', group: 'Printing', order: 30 },
   { id: 'costs', label: 'Costs', group: 'Printing', order: 40 },
-  { id: 'homeassistant', label: 'Home Assistant', group: 'Connect', order: 20 },
+  { id: 'homeassistant', label: 'MQTT (Home Assistant)', group: 'Connect', order: 20 },
   { id: 'spoolman', label: 'Spoolman', group: 'Connect', order: 30 },
   { id: 'metrics', label: 'Prometheus', group: 'Connect', order: 40 },
   { id: 'security', label: 'Security', group: 'Bridge', order: 10 },
 ];
 
-function navGroups(linked) {
+function navGroups(opts = {}) {
   const ctx = {};
   vm.createContext(ctx);
   vm.runInContext(
-    extractConst('SETTINGS_GROUPS') + extractConst('STANDALONE_TABS') + extractFunction('settingsNavGroups')
-      + `; result = JSON.stringify(settingsNavGroups(${JSON.stringify(TABS)}, ${linked}));`,
+    extractConst('SETTINGS_GROUPS') + extractConst('PRINTER_TABS') + extractConst('MORE_TABS')
+      + extractConst('ADVANCED_TABS') + extractFunction('settingsNavGroups')
+      + `; result = JSON.stringify(settingsNavGroups(${JSON.stringify(TABS)}, ${JSON.stringify(opts)}));`,
     ctx,
   );
   return JSON.parse(ctx.result); // plain host objects: strict deepEqual rejects the vm context's Array
 }
 
-test('with a FoxTrack token the nav is short: FoxTrack first, standalone features under More', () => {
-  const groups = navGroups(true);
-  assert.deepEqual(groups.map(g => g.group), ['Connect', 'Bridge', 'More']);
-  assert.deepEqual(groups[0].tabs.map(t => t.id), ['foxtrack', 'cloud']);
-  assert.deepEqual(groups[1].tabs.map(t => t.id), ['security', 'general']);
-  const more = groups[2];
+test('linked with printers: printer features stay, FoxTrack and Virtual together, More and Advanced fold the rest', () => {
+  const groups = navGroups({ linked: true, hasPrinters: true });
+  assert.deepEqual(groups.map(g => g.group), ['Printing', 'Connect', 'Bridge', 'More', 'Advanced']);
+  assert.deepEqual(groups[0].tabs.map(t => t.id), ['timelapse', 'costs']);
+  assert.deepEqual(groups[1].tabs.map(t => t.id), ['foxtrack', 'virtual']);
+  assert.deepEqual(groups[2].tabs.map(t => t.id), ['security', 'general']);
+  const more = groups[3];
   assert.equal(more.more, true);
-  assert.deepEqual(
-    more.tabs.map(t => t.id).sort(),
-    ['assistant', 'costs', 'homeassistant', 'maintenance', 'metrics', 'notifications', 'spoolman', 'timelapse', 'virtual'],
-  );
+  assert.deepEqual(more.tabs.map(t => t.id), ['notifications', 'maintenance']);
+  const adv = groups[4];
+  assert.equal(adv.more, true);
+  assert.deepEqual(adv.tabs.map(t => t.id).sort(), ['assistant', 'cloud', 'homeassistant', 'metrics', 'spoolman']);
 });
 
-test('without a token the nav is the full three groups and nothing is folded', () => {
-  const groups = navGroups(false);
-  assert.deepEqual(groups.map(g => g.group), ['Printing', 'Connect', 'Bridge']);
-  assert.ok(groups.every(g => !g.more));
-  assert.equal(groups.flatMap(g => g.tabs).length, TABS.length);
+test('not linked with printers: the three groups, no virtual, no More fold', () => {
+  const groups = navGroups({ linked: false, hasPrinters: true });
+  assert.deepEqual(groups.map(g => g.group), ['Printing', 'Connect', 'Bridge', 'Advanced']);
+  assert.deepEqual(groups[0].tabs.map(t => t.id), ['notifications', 'timelapse', 'maintenance', 'costs']);
+  assert.deepEqual(groups[1].tabs.map(t => t.id), ['foxtrack']);
+  assert.ok(!groups.some(g => g.group === 'More'));
+  assert.ok(!groups.flatMap(g => g.tabs).some(t => t.id === 'virtual'));
+});
+
+test('not linked without printers: printer features are dropped entirely', () => {
+  const groups = navGroups({ linked: false, hasPrinters: false });
+  assert.deepEqual(groups.map(g => g.group), ['Connect', 'Bridge', 'Advanced']);
+  assert.ok(!groups.flatMap(g => g.tabs).some(t => ['notifications', 'timelapse', 'maintenance', 'costs'].includes(t.id)));
+});
+
+test('cloud in use: the cloud section stays in Connect and leaves Advanced', () => {
+  const groups = navGroups({ linked: false, hasPrinters: true, cloudInUse: true });
+  assert.deepEqual(groups.find(g => g.group === 'Connect').tabs.map(t => t.id), ['foxtrack', 'cloud']);
+  assert.ok(!groups.find(g => g.group === 'Advanced').tabs.some(t => t.id === 'cloud'));
 });
 
 function mode({ linked, check, delivered, problem }) {
