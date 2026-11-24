@@ -845,7 +845,7 @@ func TestFilesCommand_AckIsRetried(t *testing.T) {
 func TestHome_RefusedWhilePrintingButTempsAreNot(t *testing.T) {
 	newPrintEnv(t) // the P1S Shelf printer config
 	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "printing"})
-	t.Cleanup(func() { mqttpkg.RemovePrinterState("P1S Shelf") })
+	t.Cleanup(func() { mqttpkg.ResetPrinterStateForTest("P1S Shelf") })
 	home := bridgeCommand{ID: "h1", ExternalID: "01P00A000000001", Command: "home"}
 	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
 		t.Fatalf("home while printing: err = %v", err)

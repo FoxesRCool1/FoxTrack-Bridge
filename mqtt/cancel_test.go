@@ -28,8 +28,8 @@ func waitResult(t *testing.T, name string) string {
 func TestHandler_UserCancelIsCancelledNotError(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	const name = "cancel-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	sent := make(chan webhook.RelayPayload, 16)
 	prevSend := sendRelay
@@ -89,8 +89,8 @@ func TestHandler_UserCancelIsCancelledNotError(t *testing.T) {
 func TestHandler_RealFailureStaysError(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	const name = "fail-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	prevSend := sendRelay
 	sendRelay = func(_, _, _, _ string, p webhook.RelayPayload) error { return nil }
@@ -128,8 +128,8 @@ func quietRelay(t *testing.T) {
 func TestHandler_CancelCodeBeforeFailed(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	const name = "cancel-order-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	quietRelay(t)
 
 	handle := makeHandler(Printer{Name: name, Serial: "CANCELORDER", APIKey: "key"})
@@ -153,8 +153,8 @@ func TestHandler_CancelCodeBeforeFailed(t *testing.T) {
 func TestHandler_CancelSurvivesReconnect(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	const name = "cancel-reconnect-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	quietRelay(t)
 
 	handle := makeHandler(Printer{Name: name, Serial: "CANCELRECON", APIKey: "key"})
@@ -180,10 +180,13 @@ func TestHandler_CancelSurvivesReconnect(t *testing.T) {
 
 	// The next print that fails is a failure, not the old cancel.
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"RUNNING","subtask_name":"vase.gcode","mc_percent":5,"print_error":0,"mc_print_error_code":"0"}}`})
+	// A bare FAILED waits a moment for a cancel code (see failHoldWait).
+	shortFailHold(t, 20*time.Millisecond)
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"FAILED"}}`})
-	if got := GetPrinterState(name).Status; got != "error" {
+	if got := waitStatus(t, name, "error"); got != "error" {
 		t.Errorf("status of the next failed print = %q, want error", got)
 	}
+	waitHandler(name)
 	waitRecords(t, name, 2)
 }
 

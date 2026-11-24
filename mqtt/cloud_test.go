@@ -113,7 +113,7 @@ func TestSetCloudPrinters_NoSessionStaysOffline(t *testing.T) {
 	if err := RetryCloudNow(); err == nil {
 		t.Error("retry with no connection must report an error")
 	}
-	RemovePrinterState("Cloudy")
+	resetPrinterState("Cloudy")
 }
 
 func TestCloudClientID_StableAndSane(t *testing.T) {
@@ -164,7 +164,7 @@ func TestCloudSubscribe_FailureMarksOfflineAndRetries(t *testing.T) {
 	markConnected("SubP")
 	t.Cleanup(func() {
 		r.stopOnce.Do(func() { close(r.stop) }) // the offline-report timer becomes a no-op
-		RemovePrinterState("SubP")
+		resetPrinterState("SubP")
 	})
 
 	r.awaitSubscribe(fake, fakeToken{err: errors.New("refused")}, "S7")
@@ -204,7 +204,7 @@ func TestCloudSubscribe_StaleResultIsIgnored(t *testing.T) {
 	r := newCloudRunner(CloudSession{}, []Printer{{Name: "StaleP", Serial: "S8"}}, nil)
 	r.client = current
 	markConnected("StaleP")
-	t.Cleanup(func() { RemovePrinterState("StaleP") })
+	t.Cleanup(func() { resetPrinterState("StaleP") })
 	r.awaitSubscribe(old, fakeToken{err: errors.New("connection lost")}, "S8")
 	if s := GetPrinterState("StaleP").Status; s != "connected" {
 		t.Errorf("status = %q: a failure from an earlier connection must not mark the printer offline", s)
@@ -217,8 +217,9 @@ func TestCloudRename_KeepsStateAndAsksForDump(t *testing.T) {
 	r.client = fake
 	UpdatePrinterState("Old", TelemetryData{Status: "printing", Progress: 42})
 	t.Cleanup(func() {
-		RemovePrinterState("Old")
-		RemovePrinterState("New")
+		revivePrinter("Old") // the rename marked the old name removed
+		resetPrinterState("Old")
+		resetPrinterState("New")
 		clientMutex.Lock()
 		delete(printerClients, "New")
 		clientMutex.Unlock()

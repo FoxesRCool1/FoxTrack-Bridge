@@ -276,7 +276,7 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 	if len(cfg.Printers) == 0 && old != nil && len(old.Printers) > 0 && !confirmClear {
 		return nil, errRefuseClearPrinters
 	}
-	if err := rejectNewlyIntroducedDuplicateNames(nil, cfg.Printers); err != nil {
+	if err := rejectDuplicateNames(cfg.Printers); err != nil {
 		return nil, err
 	}
 	var oldPrinters []config.Printer

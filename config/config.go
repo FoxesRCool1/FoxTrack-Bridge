@@ -463,8 +463,15 @@ func LoadConfig() (*Config, error) {
 	// just got their IDs. Rewriting an unchanged file would drop every key this
 	// build does not know, which costs the user their settings when an older
 	// build opens a config a newer one wrote.
-	if fromLegacy || backfilled {
-		if err := SaveConfig(&cfg); err != nil && backfilled {
+	// Two printers under one name collide everywhere a name is the key.
+	renamed := dedupePrinterNames(cfg.Printers)
+
+	if fromLegacy || backfilled || renamed {
+		err := SaveConfig(&cfg)
+		if err != nil && renamed {
+			log.Printf("WARNING: failed to save the renamed duplicate printers (%v); they are renamed again on the next start", err)
+		}
+		if err != nil && backfilled {
 			log.Printf("WARNING: failed to persist backfilled printer IDs (%v); IDs will be regenerated on next restart until this config can be saved; printer identity will not be stable across restarts", err)
 		}
 	} else {

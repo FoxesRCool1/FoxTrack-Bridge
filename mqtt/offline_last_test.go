@@ -6,8 +6,8 @@ import "testing"
 // progress and file, with temperatures unknown.
 func TestReportOffline_KeepsLastPrint(t *testing.T) {
 	const name = "offline-keep"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	sent := captureRelays(t)
 
 	p := Printer{Name: name, Serial: "OFFK", FoxTrack2APIKey: "v2"}

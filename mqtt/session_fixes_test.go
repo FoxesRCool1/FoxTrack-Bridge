@@ -13,10 +13,10 @@ import (
 func TestRenameSession_KeepsSavedSessionAndLastReport(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	p := Printer{Name: "ren-old", Serial: "REN"}
-	RemovePrinterState(p.Name)
+	resetPrinterState(p.Name)
 	t.Cleanup(func() {
-		RemovePrinterState("ren-new")
-		RemovePrinterState("ren-old")
+		resetPrinterState("ren-new")
+		resetPrinterState("ren-old")
 	})
 
 	serialMutex.Lock()
@@ -31,7 +31,7 @@ func TestRenameSession_KeepsSavedSessionAndLastReport(t *testing.T) {
 	webhookLastSentMu.Unlock()
 
 	RenameSession("ren-old", "ren-new")
-	RemovePrinterState("ren-old")
+	resetPrinterState("ren-old")
 
 	if !history.LoadSession(sessionKey(p), &savedSession{}) {
 		t.Error("the saved session was lost by the rename")
@@ -53,7 +53,7 @@ func TestRenameSession_KeepsSavedSessionAndLastReport(t *testing.T) {
 	serialMutex.Lock()
 	printerSerials["ren-new"] = "REN"
 	serialMutex.Unlock()
-	RemovePrinterState("ren-new")
+	resetPrinterState("ren-new")
 	if history.LoadSession(sessionKey(p), &savedSession{}) {
 		t.Error("a plain removal must forget the saved session")
 	}
@@ -64,8 +64,8 @@ func TestRenameSession_KeepsSavedSessionAndLastReport(t *testing.T) {
 func TestStaleSavedSession_DroppedOnFirstIdleReport(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	const name = "stale-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	p := Printer{Name: name, Serial: "STL"}
 	if err := history.SaveSession(sessionKey(p), savedSession{
@@ -82,7 +82,7 @@ func TestStaleSavedSession_DroppedOnFirstIdleReport(t *testing.T) {
 	}
 
 	// A paused print of the same file is the print carrying on: keep it.
-	RemovePrinterState(name)
+	resetPrinterState(name)
 	if err := history.SaveSession(sessionKey(p), savedSession{
 		FileName: "cube.gcode", StartTime: 1, LastSeen: time.Now().Unix(), LastPercent: 10,
 	}); err != nil {
@@ -99,8 +99,8 @@ func TestStaleSavedSession_DroppedOnFirstIdleReport(t *testing.T) {
 func TestReportOffline_BaselineFromSavedSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	const name = "base-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	sent := captureRelays(t)
 
 	p := Printer{Name: name, Serial: "BAS", FoxTrack2APIKey: "v2"}
@@ -130,8 +130,8 @@ func TestCloudOffline_RepeatsUntilSessionReturns(t *testing.T) {
 	t.Cleanup(func() { offlineRepeat = prev })
 
 	const name = "cloud-off"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	p := Printer{Name: name, Serial: "COFF", FoxTrack2APIKey: "v2"}
 	r := newCloudRunner(CloudSession{}, []Printer{p}, nil)
@@ -173,8 +173,8 @@ func TestCloudOffline_OneChainPerPrinter(t *testing.T) {
 	sent := captureRelays(t)
 
 	const name = "cloud-one-chain"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	p := Printer{Name: name, Serial: "CONE", FoxTrack2APIKey: "v2"}
 	r := newCloudRunner(CloudSession{}, []Printer{p}, nil)

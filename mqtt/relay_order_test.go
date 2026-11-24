@@ -11,8 +11,8 @@ import (
 // with each post, so FINISH landing before RUNNING would leave it "printing".
 func TestRelay_PostsLeaveInOrder(t *testing.T) {
 	const name = "relay-order-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	inFlight, release := make(chan struct{}), make(chan struct{})
 	sent := make(chan string, 4)

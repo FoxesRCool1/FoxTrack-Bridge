@@ -262,7 +262,7 @@ func setupSkip(t *testing.T, name string, status string) (*skipHarness, Printer)
 	prevList, prevDL, prevPub, prevConn := ftpsList, ftpsDownload, publishRequestFn, printerClientConnected
 	t.Cleanup(func() {
 		ftpsList, ftpsDownload, publishRequestFn, printerClientConnected = prevList, prevDL, prevPub, prevConn
-		RemovePrinterState(name)
+		resetPrinterState(name)
 		skipJobsMu.Lock()
 		delete(skipJobs, name)
 		skipJobsMu.Unlock()

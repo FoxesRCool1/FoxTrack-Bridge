@@ -12,8 +12,8 @@ import (
 // the start of a print. Only an absent field keeps the previous one.
 func TestHandler_ExplicitZeroIsApplied(t *testing.T) {
 	const name = "zero-target-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
 
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"RUNNING","mc_percent":50,"nozzle_target_temper":220,"bed_target_temper":60}}`})
@@ -34,8 +34,8 @@ func TestHandler_ExplicitZeroIsApplied(t *testing.T) {
 // Deltas omit mc_print_error_code. The last one stays, and "0" means no error.
 func TestHandler_ErrorCodeSurvivesDeltas(t *testing.T) {
 	const name = "error-code-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
 
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","mc_print_error_code":"0"}}`})
@@ -62,8 +62,8 @@ func TestHandler_ErrorCodeSurvivesDeltas(t *testing.T) {
 func TestHandler_PrintEndedWhileLinkDown(t *testing.T) {
 	const name = "ended-offline-test"
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	snapLastTMu.Lock()
 	snapLastT[name] = time.Now().Unix() + 3600 // no camera snapshot
 	snapLastTMu.Unlock()
@@ -111,8 +111,8 @@ func TestHandler_PrintEndedWhileLinkDown(t *testing.T) {
 // the omitted fields and the active tray all stay.
 func TestHandler_PartialAMSMerges(t *testing.T) {
 	const name = "ams-merge-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
 
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","ams":{"tray_now":"1","ams":[
@@ -138,8 +138,8 @@ func TestHandler_PartialAMSMerges(t *testing.T) {
 // must not post an empty snapshot to FoxTrack.
 func TestHandler_NoRelayBeforeFullReport(t *testing.T) {
 	const name = "relay-blank-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	sent := make(chan webhook.RelayPayload, 4)
 	prevSend := sendRelay

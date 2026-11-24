@@ -1243,41 +1243,19 @@ func previousNameOwner(printers []config.Printer, name string) (string, bool) {
 	return "", false
 }
 
-// rejectNewlyIntroducedDuplicateNames checks a full-replace printer list
-// against the previous one and rejects only a name that the payload itself
-// makes duplicate. A name that was already duplicated in oldPrinters is
-// grandfathered through unchanged (logged once): no uniqueness check
-// existed before this session, so some installs may already have duplicates
-// on disk, and a strict reject here would make those installs permanently
-// unable to save any change through this path, including the rename that
-// would fix the duplicate.
-func rejectNewlyIntroducedDuplicateNames(oldPrinters, newPrinters []config.Printer) error {
-	oldCounts := make(map[string]int, len(oldPrinters))
-	for _, p := range oldPrinters {
-		oldCounts[normalizeName(p.Name)]++
-	}
-	newCounts := make(map[string]int, len(newPrinters))
-	for _, p := range newPrinters {
-		newCounts[normalizeName(p.Name)]++
-	}
-	for norm, count := range newCounts {
-		if count < 2 {
-			continue
+// rejectDuplicateNames refuses a printer list in which two printers share a
+// name (case-insensitively). No list is let through with a duplicate: control,
+// history and live state are keyed by name, and a stored config that had one
+// is repaired when it loads (config.LoadConfig renames the later printer), so
+// a strict check here cannot lock a user out of saving.
+func rejectDuplicateNames(printers []config.Printer) error {
+	seen := make(map[string]bool, len(printers))
+	for _, p := range printers {
+		norm := normalizeName(p.Name)
+		if norm != "" && seen[norm] {
+			return fmt.Errorf("more than one printer named %q: %w", p.Name, errDuplicatePrinterName)
 		}
-		if oldCounts[norm] >= 2 {
-			log.Printf("[config] printer name %q is already duplicated in the stored config; kept as-is", norm)
-			continue
-		}
-		// Find one of the actual (non-normalized) colliding names for a
-		// readable message.
-		display := norm
-		for _, p := range newPrinters {
-			if normalizeName(p.Name) == norm {
-				display = p.Name
-				break
-			}
-		}
-		return fmt.Errorf("more than one printer named %q: %w", display, errDuplicatePrinterName)
+		seen[norm] = true
 	}
 	return nil
 }
@@ -1308,7 +1286,7 @@ func rejectLongNames(printers []config.Printer) error {
 // rejectNewlyBlankNames checks a full-replace printer list against the previous
 // one and rejects only a nameless entry that the payload itself introduces. A
 // blank name already on disk is grandfathered through for the same reason a
-// pre-existing duplicate is (see rejectNewlyIntroducedDuplicateNames): no
+// pre-existing duplicate is (as duplicates once were): no
 // name check existed before, and a strict reject would leave such an install
 // permanently unable to save any change, including the rename that would fix it.
 func rejectNewlyBlankNames(oldPrinters, newPrinters []config.Printer) error {
@@ -1538,7 +1516,7 @@ func resolveConfigUpdate(old *config.Config, body []byte) (*config.Config, error
 		// ID it has. Entries without one are matched by name in
 		// applyStoredSecrets and get a fresh ID below only when nothing matched.
 		if old != nil {
-			if err := rejectNewlyIntroducedDuplicateNames(old.Printers, newCfg.Printers); err != nil {
+			if err := rejectDuplicateNames(newCfg.Printers); err != nil {
 				return nil, err
 			}
 			if err := rejectNewlyBlankNames(old.Printers, newCfg.Printers); err != nil {

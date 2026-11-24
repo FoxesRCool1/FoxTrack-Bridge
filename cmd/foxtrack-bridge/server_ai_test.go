@@ -459,7 +459,7 @@ func TestExecuteAITool_DisconnectedPrinterIsAConnectionError(t *testing.T) {
 	configMutex.Unlock()
 	const httpErr = `Get "http://192.168.87.30:7125/printer/objects/query": context deadline exceeded`
 	mqttpkg.UpdatePrinterState("Sherlock", mqttpkg.TelemetryData{Status: "disconnected", Error: httpErr})
-	defer mqttpkg.RemovePrinterState("Sherlock")
+	defer mqttpkg.ResetPrinterStateForTest("Sherlock")
 
 	got := toolValue(t, "get_printer_status", `{"printer_name":"Sherlock"}`)
 	if got["reporting"] != false {

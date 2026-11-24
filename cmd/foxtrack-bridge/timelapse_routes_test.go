@@ -216,7 +216,7 @@ func TestTimelapseIdleEndResult(t *testing.T) {
 				}
 			}
 			mqttpkg.UpdatePrinterState("Monsieur", mqttpkg.TelemetryData{Status: status})
-			t.Cleanup(func() { mqttpkg.RemovePrinterState("Monsieur"); delete(tlIdle, "p1") })
+			t.Cleanup(func() { mqttpkg.ResetPrinterStateForTest("Monsieur"); delete(tlIdle, "p1") })
 
 			now := time.Now()
 			timelapseTick(now)

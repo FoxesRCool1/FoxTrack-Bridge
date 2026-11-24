@@ -21,8 +21,8 @@ func (m fakeMessage) Ack()              {}
 // carry the printer's known state, or FoxTrack shows the printer as Unknown.
 func TestHandler_PartialMessageKeepsRelayGcodeState(t *testing.T) {
 	const name = "relay-state-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	sent := make(chan webhook.RelayPayload, 4)
 	prevSend := sendRelay
@@ -86,8 +86,8 @@ func TestHasPrintObject(t *testing.T) {
 
 func TestSnapshotBackoff_PausesAfterRepeatedFailures(t *testing.T) {
 	const name = "snapshot-backoff-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	now := int64(1_000_000)
 	for i := 1; i < snapFailLimit; i++ {

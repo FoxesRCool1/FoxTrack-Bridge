@@ -97,7 +97,7 @@ func TestReconnectEditedPrinter_BambuNoLongerUsableDropsOldState(t *testing.T) {
 	before := config.Printer{Name: "ReviewOld", IP: "192.0.2.1", Serial: "SER1", LANCode: "code1234"}
 	after := config.Printer{Name: "ReviewNew", IP: "192.0.2.1", Serial: "SER2"}
 	mqttpkg.UpdatePrinterState("ReviewOld", mqttpkg.TelemetryData{Status: "idle"})
-	t.Cleanup(func() { mqttpkg.RemovePrinterState("ReviewOld") })
+	t.Cleanup(func() { mqttpkg.ResetPrinterStateForTest("ReviewOld") })
 	reconnectEditedPrinter(before, after, &config.Config{})
 	if _, ok := mqttpkg.GetPrintersState()["ReviewOld"]; ok {
 		t.Fatal("state under the old name is still there")

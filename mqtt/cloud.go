@@ -359,6 +359,7 @@ func (r *cloudRunner) setPrinters(printers []Printer, onIP func(serial, ip strin
 		if had && old.Name == np.Name {
 			continue
 		}
+		revivePrinter(np.Name) // added, or renamed to a name removed earlier
 		if client != nil {
 			if !had {
 				r.subscribeLocked(client, serial, np.Name)
@@ -386,6 +387,7 @@ func (r *cloudRunner) setPrinters(printers []Printer, onIP func(serial, ip strin
 
 // subscribeLocked subscribes one serial and asks for a state dump. Caller holds r.mu.
 func (r *cloudRunner) subscribeLocked(client mqtt.Client, serial, name string) {
+	revivePrinter(name)
 	tok := client.Subscribe(cloudReportTopic(serial), 0, r.handleMessage)
 	go r.awaitSubscribe(client, tok, serial)
 	r.pushallLocked(client, serial, name)

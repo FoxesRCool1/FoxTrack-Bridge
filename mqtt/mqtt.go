@@ -332,6 +332,9 @@ func GetPrinterState(name string) *TelemetryData {
 func UpdatePrinterState(name string, t TelemetryData) {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
+	if removedPrinters[name] {
+		return // removed: a late write must not bring the printer back
+	}
 	t.PrinterID = name
 	t.Timestamp = time.Now().Unix()
 	printerStates[name] = &t
@@ -738,7 +741,18 @@ func RenameSession(oldName, newName string) {
 // and any active print session. Call after DisconnectPrinter when the printer
 // is being removed (not just restarted).
 func RemovePrinterState(name string) {
+	// Marked first, so nothing already under way writes between the mark and
+	// the reset (see removedPrinters).
+	stateMutex.Lock()
+	removedPrinters[name] = true
+	stateMutex.Unlock()
+	resetPrinterState(name)
+}
+
+// resetPrinterState forgets everything kept for name.
+func resetPrinterState(name string) {
 	setUserCancel(name, false)
+	clearFailHold(name)
 	stateMutex.Lock()
 	delete(printerStates, name)
 	stateMutex.Unlock()
@@ -787,6 +801,7 @@ func RemovePrinterState(name string) {
 }
 
 func ConnectPrinter(p Printer) {
+	revivePrinter(p.Name)
 	setSerial(p.Name, p.Serial)
 
 	// Guard against duplicate goroutines. If a management goroutine is already
@@ -1042,7 +1057,10 @@ func PlugState(name string) *webhook.RelayPlug { return plugState(name) }
 func PrintEnergy(name string) *float64 { return printEnergy(name) }
 
 func makeHandler(p Printer) mqtt.MessageHandler {
-	return func(_ mqtt.Client, msg mqtt.Message) {
+	// handle takes one report. holdOver marks the bare FAILED a hold kept
+	// back (see failHoldWait), now due. Callers hold handlerLock(p.Name).
+	var handle func(msg mqtt.Message, holdOver bool)
+	handle = func(msg mqtt.Message, holdOver bool) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[%s] MQTT message handler panic (message dropped): %v", p.Name, r)
@@ -1052,6 +1070,13 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		if err := json.Unmarshal(msg.Payload(), &report); err != nil {
 			log.Printf("[%s] MQTT parse error: %v | payload: %.120s", p.Name, err, msg.Payload())
 			return
+		}
+		if printerRemoved(p.Name) {
+			return // a late message for a printer that was removed
+		}
+		holding := failHeld(p.Name)
+		if holdOver && !holding {
+			return // the hold was settled while its timer fired
 		}
 
 		pr := report.Print
@@ -1069,6 +1094,13 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 				log.Printf("[%s] MQTT skip (no usable data) | gcode=%q | payload: %.120s", p.Name, pr.GcodeState, msg.Payload())
 			}
 			return
+		}
+
+		if holding && !holdOver && pr.GcodeState != "" && pr.GcodeState != "FAILED" {
+			// The printer moved on before the hold ran out: the held FAILED
+			// had no code, so it ends the print as an error first.
+			handle(heldFailed{}, true)
+			holding = false
 		}
 
 		// Preserve previous state for fields absent in incremental updates.
@@ -1103,11 +1135,31 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 		if v, err := strconv.ParseInt(pr.McPrintErrorCode, 10, 64); err == nil && v != 0 && !userCancelCode(v) {
 			sawRealError = true
 		}
+		hasCode := cancelCode || sawCancel || sawRealError || errCode != ""
+		if holding && pr.GcodeState == "" && hasCode {
+			status = "error" // the held FAILED, now with its code
+		}
 		switch {
 		case pr.GcodeState != "" && pr.GcodeState != "FAILED", sawRealError:
 			setUserCancel(p.Name, false)
 		case status == "error" && (cancelCode || sawCancel):
 			setUserCancel(p.Name, true)
+		}
+		if !holdOver && pr.GcodeState == "FAILED" && InPrint(prev.Status) && !hasCode && !userCancel(p.Name) {
+			// FAILED with no error code yet: a user stop sends its code in a
+			// message of its own, which can come after this one. Wait for it.
+			if !holding {
+				log.Printf("[%s] FAILED with no error code: waiting up to %s for one", p.Name, failHoldWait)
+			}
+			status = prev.Status
+			startFailHold(p.Name, func() {
+				lock := handlerLock(p.Name)
+				lock.Lock()
+				defer lock.Unlock()
+				handle(heldFailed{}, true)
+			})
+		} else if pr.GcodeState != "" || status == "error" {
+			clearFailHold(p.Name)
 		}
 		if status == "error" && userCancel(p.Name) {
 			status = "cancelled"
@@ -1521,6 +1573,12 @@ func makeHandler(p Printer) mqtt.MessageHandler {
 			}
 		}
 	}
+	return func(_ mqtt.Client, msg mqtt.Message) {
+		lock := handlerLock(p.Name)
+		lock.Lock()
+		defer lock.Unlock()
+		handle(msg, false)
+	}
 }
 
 // mapMachineType converts BambuLab internal model codes to human-readable names.
@@ -1608,6 +1666,9 @@ func RelayRemaining(status string, minutes int) int {
 // snapshot after a newer one. A post a newer one has queued behind is skipped
 // unless terminal. build runs on that goroutine, when it is the post's turn.
 func queueRelay(p Printer, terminal bool, build func() webhook.RelayPayload) {
+	if printerRemoved(p.Name) {
+		return
+	}
 	send := sendRelay // read now, not in the goroutine: tests swap it
 	relayOrderMu.Lock()
 	relaySeq[p.Name]++
@@ -1624,6 +1685,9 @@ func queueRelay(p Printer, terminal bool, build func() webhook.RelayPayload) {
 		relayOrderMu.Unlock()
 		if superseded && !terminal {
 			return
+		}
+		if printerRemoved(p.Name) {
+			return // removed while this post waited its turn
 		}
 		if p.APIKey == "" && p.FoxTrack2APIKey == "" {
 			webhookLastSentMu.Lock()

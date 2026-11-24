@@ -213,8 +213,8 @@ func TestNewTrayRef(t *testing.T) {
 // The report handler keeps the raw unit and tray ids per positional slot.
 func TestHandler_KeepsRawAMSIds(t *testing.T) {
 	const name = "print-file-ams-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","ams":{"tray_now":"255","ams":[
 		{"id":"1","tray":[{"id":"0","tray_color":"FF0000FF","tray_type":"PLA"},{"id":"1","tray_color":"00FF00FF","tray_type":"PLA"}]},
@@ -269,7 +269,7 @@ func setupPrint(t *testing.T, name, serial string, status string) (*printHarness
 	prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace, prevPrep := ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace, prepareWatch
 	t.Cleanup(func() {
 		ftpsUpload, publishRequestFn, printerClientConnected, startWait, startPoll, startErrGrace, prepareWatch = prevUp, prevPub, prevConn, prevWait, prevPoll, prevGrace, prevPrep
-		RemovePrinterState(name)
+		resetPrinterState(name)
 	})
 	ftpsUpload = func(_ context.Context, cfg ftps.Config, _, remote string) error {
 		h.uploads = append(h.uploads, cfg)
@@ -293,7 +293,7 @@ func setupPrint(t *testing.T, name, serial string, status string) (*printHarness
 	// Tests whose printer stays in PREPARE after the start check return at once.
 	prepareWatch = 20 * time.Millisecond
 
-	RemovePrinterState(name)
+	resetPrinterState(name)
 	UpdatePrinterState(name, TelemetryData{Status: status, AMS: []AmsSlot{{Slot: 0}, {Slot: 1}, {Slot: 2}, {Slot: 3}}})
 	setTrayRefs(name, testTrays[:4])
 	path := make3MF(t, map[string]string{
@@ -461,7 +461,7 @@ func TestPrintProjectFile_ErrorCodeButPrinterStartsIsSuccess(t *testing.T) {
 
 func TestWaitForStart_NewErrorWhileStillIdleFails(t *testing.T) {
 	const name = "pf-wait-idle"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWait, prevPoll, prevGrace := startWait, startPoll, startErrGrace
 	startWait, startPoll, startErrGrace = time.Second, 5*time.Millisecond, 20*time.Millisecond
 	t.Cleanup(func() { startWait, startPoll, startErrGrace = prevWait, prevPoll, prevGrace })
@@ -479,7 +479,7 @@ func TestWaitForStart_NewErrorWhileStillIdleFails(t *testing.T) {
 // A code that shows up one report before the state moves on is not a refusal.
 func TestWaitForStart_PassingErrorThenStartSucceeds(t *testing.T) {
 	const name = "pf-wait-passing"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWait, prevPoll, prevGrace := startWait, startPoll, startErrGrace
 	startWait, startPoll, startErrGrace = time.Second, 5*time.Millisecond, 300*time.Millisecond
 	t.Cleanup(func() { startWait, startPoll, startErrGrace = prevWait, prevPoll, prevGrace })
@@ -494,7 +494,7 @@ func TestWaitForStart_PassingErrorThenStartSucceeds(t *testing.T) {
 
 func TestWaitForStart_BusyStatesSucceedEvenWithNewError(t *testing.T) {
 	const name = "pf-wait-busy"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	noteReportedError(name, nil, "777")
 	for _, status := range []string{"PREPARE", "SLICING", "printing"} {
 		UpdatePrinterState(name, TelemetryData{Status: status})
@@ -506,7 +506,7 @@ func TestWaitForStart_BusyStatesSucceedEvenWithNewError(t *testing.T) {
 
 func TestWaitForStart_TimesOutWithOldMessage(t *testing.T) {
 	const name = "pf-wait-timeout"
-	t.Cleanup(func() { RemovePrinterState(name) })
+	t.Cleanup(func() { resetPrinterState(name) })
 	prevWait, prevPoll := startWait, startPoll
 	startWait, startPoll = 60*time.Millisecond, 5*time.Millisecond
 	t.Cleanup(func() { startWait, startPoll = prevWait, prevPoll })
@@ -548,7 +548,7 @@ func TestNoteProjectFileReply(t *testing.T) {
 	}
 	noteCommandReply(name, []byte(`{"print":{"command":"project_file","result":"fail"}}`))
 	UpdatePrinterState(name, TelemetryData{Status: "idle"})
-	t.Cleanup(func() { RemovePrinterState(name) })
+	t.Cleanup(func() { resetPrinterState(name) })
 	if err := waitForStart(context.Background(), name, ""); err == nil || err.Error() != "The printer refused the print. Check the printer screen." {
 		t.Fatalf("err = %v", err)
 	}
@@ -561,7 +561,7 @@ const testPrintError = `{"print":{"print_error":117473298}}`
 
 func TestWatchPreparing_RunningAfterPrepareIsStarted(t *testing.T) {
 	const name = "pf-prep-running"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWatch, prevPoll := prepareWatch, startPoll
 	prepareWatch, startPoll = 2*time.Second, 5*time.Millisecond
 	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
@@ -577,7 +577,7 @@ func TestWatchPreparing_RunningAfterPrepareIsStarted(t *testing.T) {
 // must not turn an accepted print into a failed one.
 func TestWatchPreparing_JobTimeLimitCountsAsStarted(t *testing.T) {
 	const name = "pf-prep-ctx"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWatch, prevPoll := prepareWatch, startPoll
 	prepareWatch, startPoll = time.Minute, 5*time.Millisecond
 	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
@@ -591,7 +591,7 @@ func TestWatchPreparing_JobTimeLimitCountsAsStarted(t *testing.T) {
 
 func TestWatchPreparing_PausedWithErrorFails(t *testing.T) {
 	const name = "pf-prep-paused"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWatch, prevPoll := prepareWatch, startPoll
 	prepareWatch, startPoll = 2*time.Second, 5*time.Millisecond
 	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
@@ -609,7 +609,7 @@ func TestWatchPreparing_PausedWithErrorFails(t *testing.T) {
 
 func TestWatchPreparing_FailedWithNewErrorFails(t *testing.T) {
 	const name = "pf-prep-failed"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWatch, prevPoll := prepareWatch, startPoll
 	prepareWatch, startPoll = 2*time.Second, 5*time.Millisecond
 	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
@@ -627,7 +627,7 @@ func TestWatchPreparing_FailedWithNewErrorFails(t *testing.T) {
 
 func TestWatchPreparing_LongPrepareIsStillStarted(t *testing.T) {
 	const name = "pf-prep-long"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWatch, prevPoll := prepareWatch, startPoll
 	prepareWatch, startPoll = 60*time.Millisecond, 5*time.Millisecond
 	t.Cleanup(func() { prepareWatch, startPoll = prevWatch, prevPoll })
@@ -639,7 +639,7 @@ func TestWatchPreparing_LongPrepareIsStillStarted(t *testing.T) {
 
 func TestWatchPreparing_ImmediatePrintingReturnsAtOnce(t *testing.T) {
 	const name = "pf-prep-immediate"
-	t.Cleanup(func() { RemovePrinterState(name); forgetPrintFileState(name) })
+	t.Cleanup(func() { resetPrinterState(name); forgetPrintFileState(name) })
 	prevWatch := prepareWatch
 	prepareWatch = time.Hour
 	t.Cleanup(func() { prepareWatch = prevWatch })
