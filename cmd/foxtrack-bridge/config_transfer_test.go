@@ -370,6 +370,23 @@ func TestMergeImportedAI_KeyOnlyForSameProvider(t *testing.T) {
 	if got := mergeImportedAI(nil, old); got != old {
 		t.Fatalf("absent block must keep the current one")
 	}
+	// The key a plain config.json carries stays with its own provider, also
+	// where it differs from the stored one.
+	if got := mergeImportedAI(&config.AI{Preset: "custom", BaseURL: "https://b.example/v1", APIKey: "file-key"}, old); got.APIKey != "file-key" {
+		t.Fatalf("the file's own key was blanked: %q", got.APIKey)
+	}
+	if got := mergeImportedAI(&config.AI{Preset: "custom", BaseURL: "https://a.example/v1", APIKey: "file-key"}, old); got.APIKey != "file-key" {
+		t.Fatalf("the file's key must win over the stored one: %q", got.APIKey)
+	}
+	// With nothing stored, a plain file's key is kept too.
+	raw := []byte(`{"printers":[],"ai":{"preset":"custom","base_url":"https://b.example/v1","model":"m","api_key":"file-key"}}`)
+	got, err := resolveConfigImport(nil, raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AI == nil || got.AI.APIKey != "file-key" {
+		t.Fatalf("fresh install import dropped the file's key: %+v", got.AI)
+	}
 }
 
 func TestConfigExportImportHandlers(t *testing.T) {

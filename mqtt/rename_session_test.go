@@ -8,7 +8,7 @@ func TestRenameSession_MovesPrintInProgress(t *testing.T) {
 	activeSessions["Old"] = &printSession{FileName: "cube.3mf"}
 	sessionMu.Unlock()
 	RenameSession("Old", "New")
-	RemovePrinterState("Old")
+	resetPrinterState("Old")
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
 	if s := activeSessions["New"]; s == nil || s.FileName != "cube.3mf" {

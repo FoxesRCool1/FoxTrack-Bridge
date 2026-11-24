@@ -412,8 +412,10 @@ func notePermanentReject(endpoint string, status int, body []byte, serial, print
 // noteSkipped reads a 2xx answer from the history or snapshot endpoint.
 // FoxTrack answers 202 {"ok":false,"skipped":"unknown printer"} when it has no
 // device for the printer: the data was dropped, and sending it again changes
-// nothing until the printer is linked in FoxTrack. It returns a message when
-// the answer says that, "" otherwise.
+// nothing until FoxTrack has a device for it (it makes one from the printer's
+// status reports, unless the plan's printer limit refuses it; linking the
+// device to a FoxTrack printer is not needed). It returns a message when the
+// answer says that, "" otherwise.
 func noteSkipped(endpoint string, body []byte, serial, printer string) string {
 	if !isCurrentProject(endpoint) {
 		return ""
@@ -424,8 +426,8 @@ func noteSkipped(endpoint string, body []byte, serial, printer string) string {
 	if json.Unmarshal(body, &reply) != nil || reply.Skipped == "" {
 		return ""
 	}
-	setRelayProblem("unknown_printer", "FoxTrack does not know this printer; link it in FoxTrack", serial, printer)
-	return fmt.Sprintf("warning: FoxTrack skipped it (%s); it does not know this printer, link it in FoxTrack", reply.Skipped)
+	setRelayProblem("unknown_printer", "FoxTrack has no device for this printer yet (it may be over the plan's printer limit)", serial, printer)
+	return fmt.Sprintf("warning: FoxTrack skipped it (%s); it has no device for this printer yet (it may be over the plan's printer limit)", reply.Skipped)
 }
 
 // planName is the plan as FoxTrack shows it: the plan value "enterprise" is
@@ -485,7 +487,21 @@ type retryItem struct {
 // shrink them.
 var relayBackoffs = []time.Duration{2 * time.Second, 8 * time.Second, 30 * time.Second}
 
-var pendingRelayRetries atomic.Int32
+// pendingRelayRetries counts the waiting retries for the current project,
+// pendingLegacyRelayRetries those for the legacy one. Separate budgets: a
+// legacy host that is down or refuses an old token must not fill the queue
+// and have the current project's retries dropped as "queue full".
+var (
+	pendingRelayRetries       atomic.Int32
+	pendingLegacyRelayRetries atomic.Int32
+)
+
+func relayRetryCounter(webhookURL string) *atomic.Int32 {
+	if isCurrentProject(webhookURL) {
+		return &pendingRelayRetries
+	}
+	return &pendingLegacyRelayRetries
+}
 
 // deliverRelay sends item unless a newer payload for the same printer has
 // already been delivered, in which case it reports skipped and sends nothing.
@@ -504,13 +520,14 @@ func deliverRelay(item retryItem) (err error, skipped bool) {
 // scheduleRelayRetry runs item after its backoff on its own timer, so one
 // printer's wait never delays another's. At most maxPendingRetries wait at once.
 func scheduleRelayRetry(item retryItem) {
-	if pendingRelayRetries.Add(1) > maxPendingRetries {
-		pendingRelayRetries.Add(-1)
+	pending := relayRetryCounter(item.webhookURL)
+	if pending.Add(1) > maxPendingRetries {
+		pending.Add(-1)
 		log.Printf("[relay-retry] queue full, dropping retry for %s", item.name)
 		return
 	}
 	time.AfterFunc(relayBackoffs[item.attempts-1], func() {
-		pendingRelayRetries.Add(-1)
+		pending.Add(-1)
 		runRelayRetry(item)
 	})
 }
@@ -592,6 +609,8 @@ type RelayPrint struct {
 	LightOn            *bool          `json:"light_on,omitempty"`       // nil when not reported (Klipper)
 	Ams                []RelayAmsSlot `json:"ams,omitempty"`            // nil for Klipper or printers without AMS
 	ExternalSpool      *RelayAmsSlot  `json:"external_spool,omitempty"` // Bambu external spool (slot 254); nil until reported
+	// ExternalSpool2 is the left external spool of a dual-nozzle Bambu (H2D), slot 253; nil otherwise.
+	ExternalSpool2 *RelayAmsSlot `json:"external_spool_2,omitempty"`
 
 	// Alarms is what the printer reports as wrong right now. A full printer
 	// report sends it as [] when there is none (build it with CleanAlarms,
@@ -912,6 +931,12 @@ func doSendRelay(apiKey, webhookURL, printerSerial, printerName string, p RelayP
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if msg := notePermanentReject(webhookURL, resp.StatusCode, readCappedBody(resp.Body), printerSerial, printerName); msg != "" {
 			return fmt.Errorf("%w: %s", errNotRetryable, msg)
+		}
+		// The legacy project refusing the token is as final as the current
+		// one doing so, and the same answer would come back on every retry.
+		// Nothing is recorded: the dashboard reports on the current project.
+		if !isCurrentProject(webhookURL) && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return fmt.Errorf("%w: FoxTrack relay webhook returned HTTP %d", errNotRetryable, resp.StatusCode)
 		}
 		return fmt.Errorf("FoxTrack relay webhook returned HTTP %d", resp.StatusCode)
 	}

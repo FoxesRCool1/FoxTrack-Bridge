@@ -263,6 +263,19 @@ When the printer is idle or finished, **Start next** appears. It asks whether th
 </details>
 
 <details>
+<summary><b>Virtual printer</b></summary>
+
+The Bridge can pose as an OctoPrint printer, so a slicer's **Send to printer** button sends the sliced file to FoxTrack instead of to a printer. The file does not reach any printer: it lands in FoxTrack under **Printers**, **From the slicer**, and you print it from there. It needs the Bridge to be linked to FoxTrack, because that is where the files go.
+
+1. In the dashboard, open **Settings**, **Virtual printer** and turn it on. The default port is 8090; change it in the **Port** field if another program uses it.
+2. The same card shows the address to type into the slicer and the key, with a **Copy** button for each. The key is made by the Bridge.
+3. In OrcaSlicer or PrusaSlicer, add a physical printer of type **OctoPrint**, enter that address and key, and press **Test**.
+
+Bambu Studio cannot send to it, because it only talks to Bambu printers. A virtual printer that is already on can always be turned off, even if the link to FoxTrack is gone.
+
+</details>
+
+<details>
 <summary><b>Smart plugs</b></summary>
 
 The Bridge talks to the plug over your network and never uses the maker's cloud.
@@ -335,7 +348,7 @@ Turn on **Settings > Timelapse** to take a picture every few seconds while a pri
 </details>
 
 <details>
-<summary><b>Home Assistant and Prometheus</b></summary>
+<summary><b>Home Assistant, Prometheus and scripts</b></summary>
 
 **Settings > MQTT (Home Assistant)** connects the Bridge to your MQTT broker (the Mosquitto add-on works). With discovery on, each printer appears under **Settings > Devices & services > MQTT** with its status, progress, temperatures, time left and pause, resume, stop and light buttons. State is published to `foxtrack_bridge/<printer id>/state` and events to `foxtrack_bridge/<printer id>/event`, so any MQTT client can use them.
 
@@ -348,6 +361,16 @@ scrape_configs:
       - targets: ["192.168.1.20:8080"]
     authorization:
       credentials: ftk_your_token
+```
+
+**Your own scripts.** Two read-only endpoints return JSON. With a dashboard password set, send an API token (**Settings > Security**) as `Authorization: Bearer ftk_...`, as above; with none, no header is needed.
+
+- `GET /api/printers` lists your printers as an array: `id`, `name`, the address or serial, `connection` and so on. Access codes, API keys and tokens are never returned: `lan_code_set` and `api_key_set` only say whether one is saved.
+- `GET /api/history/<printer name>` returns `{"records": [...]}`, the print history of that printer (percent-encode the name, and a renamed printer keeps its older records). Each record has `printer_name`, `file_name`, `start_time` and `end_time` (Unix seconds), `duration` (seconds), `result` (`finished`, `cancelled` or `error`), `nozzle_temp` and `bed_temp`, plus `percent_at_end`, `filament_mm`, `filaments`, `energy_wh`, `temp_samples` and `note` when known. A printer with no history gives an empty list.
+
+```bash
+curl -H "Authorization: Bearer ftk_your_token" http://192.168.1.20:8080/api/printers
+curl -H "Authorization: Bearer ftk_your_token" "http://192.168.1.20:8080/api/history/Voron%20Trident"
 ```
 
 </details>
@@ -438,6 +461,8 @@ To reach the dashboard from another device, open the port in your firewall (`sud
 The compose file runs `ghcr.io/foxesrcool1/foxtrack-bridge` with `network_mode: host`, because Bambu discovery relies on SSDP broadcasts that don't cross Docker's default network. With host networking `ports:` is ignored, so set `FOXTRACK_BRIDGE_PORT` to change the port. On Docker Desktop (Windows, macOS), add printers by address if discovery finds nothing. Settings and history live in the `foxtrack-bridge-data` volume.
 
 The Bridge can't update itself inside Docker; run `docker compose pull && docker compose up -d`. [docs/docker.md](docs/docker.md) covers building your own image.
+
+To open the dashboard through a reverse proxy on your own domain, see [Behind a reverse proxy](docs/docker.md#behind-a-reverse-proxy).
 
 </details>
 

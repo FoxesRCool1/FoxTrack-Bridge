@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -35,7 +36,18 @@ var printQueue struct {
 	loaded    bool
 	byPrinter map[string][]queueItem // printer ID -> items, head first
 	starting  map[string]bool        // printer IDs with a start in flight
+	lastStart map[string]time.Time   // printer ID -> when its last start was accepted
 }
+
+// queueStartGap is how long after an accepted start a printer that still
+// reads idle is taken as starting: its status only changes with its next
+// report, and a second "Start next" in that gap (a double click, a second
+// tab) would start and drop the following file.
+const queueStartGap = 30 * time.Second
+
+// queueStartTimeout bounds one "Start next": a Bambu printer is asked for the
+// file's sliced plate first and then has to confirm the start.
+const queueStartTimeout = 3 * time.Minute
 
 var (
 	errQueueNotReady = errors.New("The printer has to be idle or finished, and connected, to start the next print.")
@@ -163,7 +175,7 @@ func queueStartNext(printerID string, ready func(string) bool, start func(name, 
 		printQueue.Unlock()
 		return queueItem{}, errQueueEmpty
 	}
-	if printQueue.starting[printerID] {
+	if printQueue.starting[printerID] || time.Since(printQueue.lastStart[printerID]) < queueStartGap {
 		printQueue.Unlock()
 		return queueItem{}, errQueueBusy
 	}
@@ -185,6 +197,10 @@ func queueStartNext(printerID string, ready func(string) bool, start func(name, 
 
 	printQueue.Lock()
 	defer printQueue.Unlock()
+	if printQueue.lastStart == nil {
+		printQueue.lastStart = map[string]time.Time{}
+	}
+	printQueue.lastStart[printerID] = time.Now()
 	cur := printQueue.byPrinter[printerID]
 	for i, it := range cur {
 		if it.ID == head.ID {
@@ -220,7 +236,8 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	printerID := parts[0]
-	if _, ok := printerByID(printerID); !ok {
+	qp, ok := printerByID(printerID)
+	if !ok {
 		writeErr(w, http.StatusNotFound, "No such printer.")
 		return
 	}
@@ -230,6 +247,10 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 			FileName string `json:"file_name"`
 		}
 		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		if !printerCanStartFile(qp) {
+			writeErr(w, http.StatusBadRequest, errCannotStartFile.Error())
 			return
 		}
 		name := strings.TrimSpace(req.FileName)
@@ -311,7 +332,11 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.Method == http.MethodPost && len(parts) == 2 && parts[1] == "start":
 		started, err := queueStartNext(printerID, printerReadyForNext, func(name, file string) error {
-			return runControl(name, "start", map[string]interface{}{"file_name": file})
+			// Not the request's context: a browser that gives up must not
+			// leave a started print at the head of the queue.
+			ctx, cancel := context.WithTimeout(context.Background(), queueStartTimeout)
+			defer cancel()
+			return startStoredFile(ctx, name, file)
 		})
 		if err != nil {
 			code := http.StatusConflict

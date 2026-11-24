@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"mime"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"foxtrack-bridge/ai"
-	"foxtrack-bridge/capture"
 	"foxtrack-bridge/config"
 	"foxtrack-bridge/history"
 	mqttpkg "foxtrack-bridge/mqtt"
@@ -451,14 +452,14 @@ func toolListPrinters() map[string]any {
 			"name":             p.Name,
 			"kind":             printerKind(p),
 			"reporting":        states[p.Name] != nil && states[p.Name].Status != "disconnected",
-			"camera_available": p.WebcamURL != "" || (isBambuPrinterConfig(p) && p.IP != "" && p.LANCode != ""),
+			"camera_available": !p.CameraHidden && (p.WebcamURL != "" || (isBambuPrinterConfig(p) && p.IP != "" && p.LANCode != "")),
 			"camera_hidden":    p.CameraHidden,
 		}
 		if p.IP != "" {
 			row["ip"] = p.IP
 		}
 		if p.MoonrakerURL != "" {
-			row["moonraker_url"] = p.MoonrakerURL
+			row["moonraker_url"] = stripURLLogin(p.MoonrakerURL) // no user:pass@ for the provider
 		}
 		if st := states[p.Name]; st != nil {
 			row["status"] = st.Status
@@ -550,6 +551,16 @@ func toolPrinterStatus(name string) ai.ToolResult {
 	return ai.ToolResult{Value: out}
 }
 
+// errTextNoLogin is err's text without the user:pass@ login a request error
+// carries in its URL (net/http hides the password but not the user name).
+func errTextNoLogin(err error) string {
+	var ue *neturl.Error
+	if errors.As(err, &ue) {
+		ue.URL = stripURLLogin(ue.URL)
+	}
+	return err.Error()
+}
+
 // toolTestConnection probes reachability the same way handleTest does: a TCP
 // dial to the Bambu MQTT port, or a call to Moonraker's /printer/info. It sends
 // nothing to the printer beyond opening the connection.
@@ -568,17 +579,17 @@ func toolTestConnection(ctx context.Context, name string) ai.ToolResult {
 			out["detail"] = "No Moonraker URL is configured for this printer."
 			return ai.ToolResult{Value: out}
 		}
-		out["tested"] = url
+		out["tested"] = stripURLLogin(url) // no user:pass@ for the provider
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			out["reachable"] = false
-			out["detail"] = err.Error()
+			out["detail"] = errTextNoLogin(err)
 			return ai.ToolResult{Value: out}
 		}
 		resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 		if err != nil {
 			out["reachable"] = false
-			out["detail"] = err.Error()
+			out["detail"] = errTextNoLogin(err)
 			return ai.ToolResult{Value: out}
 		}
 		resp.Body.Close()
@@ -619,8 +630,8 @@ func toolBridgeInfo() map[string]any {
 	linked := configStore.APIKey != "" || configStore.FoxTrack2APIKey != ""
 	autoUpdate := configStore.AutoUpdate
 	printerCount := len(configStore.Printers)
-	cloud := configStore.BambuCloud
 	configMutex.RUnlock()
+	cloud := cloudAccount() // a copy: the stored block changes under its own lock
 
 	out := map[string]any{
 		"version":          version.AppVersion,
@@ -788,24 +799,18 @@ func toolCamera(ctx context.Context, name string) (ai.ToolResult, error) {
 		return notFound(name), nil
 	}
 
-	var frame []byte
-	var err error
-	if isBambuPrinterConfig(p) {
-		if p.IP == "" || p.LANCode == "" {
-			return ai.ToolResult{Value: map[string]string{
-				"error":   "no_camera",
-				"message": "This Bambu printer has no IP address or LAN access code stored, so the Bridge cannot reach its camera.",
-			}}, nil
+	// The reader the dashboard uses: it honours a hidden camera and finds a
+	// cloud printer's address.
+	frame, err := printerSnapshot(ctx, p)
+	if errors.Is(err, errNoCamera) {
+		msg := "The Bridge cannot reach this printer's camera: no IP address, LAN access code or webcam URL is stored for it."
+		if p.CameraHidden {
+			msg = "The camera of this printer is hidden in the Bridge, so it cannot be read."
 		}
-		frame, err = capture.BambuFrame(p.IP, p.LANCode, p.Name)
-	} else {
-		if strings.TrimSpace(p.WebcamURL) == "" {
-			return ai.ToolResult{Value: map[string]string{
-				"error":   "no_camera",
-				"message": "No webcam URL is configured for this printer, so the Bridge cannot reach its camera.",
-			}}, nil
-		}
-		frame, err = capture.KlipperFrame(p.WebcamURL)
+		return ai.ToolResult{Value: map[string]string{
+			"error":   "no_camera",
+			"message": msg,
+		}}, nil
 	}
 	if err != nil {
 		return ai.ToolResult{Value: map[string]string{
@@ -824,7 +829,6 @@ func toolCamera(ctx context.Context, name string) (ai.ToolResult, error) {
 		}}, nil
 	}
 
-	_ = ctx
 	log.Printf("[assistant] sent a camera frame from %s to the AI provider (%d bytes)", name, len(frame))
 	return ai.ToolResult{
 		Value: map[string]any{

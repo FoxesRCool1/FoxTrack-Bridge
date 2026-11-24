@@ -33,8 +33,9 @@ func TestParseBambuSSDP_Notify(t *testing.T) {
 func TestRememberBambu(t *testing.T) {
 	bambuSeen = map[string]bambuSighting{}
 	defer func() { bambuSeen = map[string]bambuSighting{} }()
-	a := discoveredPrinter{Type: "bambu", IP: "192.168.1.10", Serial: "A"}
-	b := discoveredPrinter{Type: "bambu", IP: "192.168.1.11", Serial: "B"}
+	// A TCP find (discoverHost) carries its IP as the name and "lan" as the mode.
+	a := discoveredPrinter{Type: "bambu", Name: "192.168.1.10", Model: "P1S", IP: "192.168.1.10", Serial: "A", Connect: "lan"}
+	b := discoveredPrinter{Type: "bambu", Name: "192.168.1.11", Model: "P1S", IP: "192.168.1.11", Serial: "B", Connect: "lan"}
 	t0 := time.Now()
 
 	rememberBambu([]discoveredPrinter{a}, t0)
@@ -46,12 +47,36 @@ func TestRememberBambu(t *testing.T) {
 		t.Errorf("after %v only the newer sighting stays: got %+v", bambuSeenFor, got)
 	}
 
-	// An unnamed TCP find keeps the name and mode the announcement gave.
-	named := discoveredPrinter{Type: "bambu", Name: "Garage", Connect: "lan", IP: "192.168.1.11", Serial: "B"}
+	// A TCP find (its name is its IP) keeps the name, model and mode the
+	// announcement gave, and stays the merged entry after the final dedupe.
+	named := discoveredPrinter{Type: "bambu", Name: "Garage", Model: "P1P", Connect: "cloud", IP: "192.168.1.11", Serial: "B"}
 	rememberBambu([]discoveredPrinter{named, b}, t0.Add(bambuSeenFor+time.Minute))
 	got = rememberBambu(nil, t0.Add(bambuSeenFor+2*time.Minute))
-	if len(got) != 1 || got[0].Name != "Garage" || got[0].Connect != "lan" {
+	if len(got) != 1 || got[0].Name != "Garage" || got[0].Model != "P1P" || got[0].Connect != "cloud" {
 		t.Errorf("TCP find dropped the announced name: got %+v", got)
+	}
+
+	// A TCP find with no earlier sighting of its own keeps its IP name, and an
+	// old unnamed sighting at another IP does not lend its IP as a name.
+	bambuSeen = map[string]bambuSighting{}
+	moved := discoveredPrinter{Type: "bambu", Name: "192.168.1.50", IP: "192.168.1.50", Serial: "C", Connect: "lan"}
+	rememberBambu([]discoveredPrinter{moved}, t0)
+	again := moved
+	again.Name, again.IP = "192.168.1.51", "192.168.1.51"
+	got = rememberBambu([]discoveredPrinter{again}, t0.Add(time.Minute))
+	if len(got) != 1 || got[0].Name != "192.168.1.51" {
+		t.Errorf("the name should follow the new IP: got %+v", got)
+	}
+
+	// The merged entry sorts after older sightings, so on a shared IP the
+	// printer seen in this scan is the one dedupeSort keeps.
+	bambuSeen = map[string]bambuSighting{}
+	stale := discoveredPrinter{Type: "bambu", Name: "Old", IP: "192.168.1.60", Serial: "D", Connect: "lan"}
+	fresh := discoveredPrinter{Type: "bambu", Name: "New", IP: "192.168.1.60", Serial: "E", Connect: "lan"}
+	rememberBambu([]discoveredPrinter{stale}, t0)
+	got = dedupeSort(rememberBambu([]discoveredPrinter{fresh}, t0.Add(time.Minute)))
+	if len(got) != 1 || got[0].Serial != "E" {
+		t.Errorf("a shared IP should show the printer seen now: got %+v", got)
 	}
 }
 

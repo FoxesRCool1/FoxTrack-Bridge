@@ -176,7 +176,9 @@ func TestPrintPrinterFile_KlipperStartsTheFileAndAcksDone(t *testing.T) {
 	filesPoll(t, e, bridgeCommand{ID: "f1", ExternalID: external, Command: "print_printer_file",
 		Args: map[string]interface{}{"name": "sub/vase.gcode"}})
 
-	if e.count("ack:done") != 1 || e.count("ack:failed") != 0 || printerStarts(starts) != 1 || len(e.snapshot()) != 1 {
+	// "running" first, so FoxTrack does not expire a start that takes minutes.
+	ev := e.snapshot()
+	if len(ev) != 2 || ev[0] != "ack:running" || ev[1] != "ack:done" || printerStarts(starts) != 1 {
 		t.Fatalf("starts = %d, events = %v", printerStarts(starts), e.snapshot())
 	}
 }
@@ -292,7 +294,7 @@ func TestFilesCommand_SameCommandTwiceRunsOnce(t *testing.T) {
 	startFilesCommand("test-key", cmd)
 	startFilesCommand("test-key", cmd)
 	printJobs.wg.Wait()
-	if e.count("ack:done") != 1 {
+	if e.count("ack:done") != 1 || e.count("ack:running") != 1 {
 		t.Fatalf("events = %v", e.snapshot())
 	}
 }

@@ -63,7 +63,7 @@ func setBambuPrinting(t *testing.T, status string) {
 	name := "Skip-Bambu"
 	mqttpkg.UpdatePrinterState(name, mqttpkg.TelemetryData{Status: status})
 	t.Cleanup(func() {
-		mqttpkg.RemovePrinterState(name)
+		mqttpkg.ResetPrinterStateForTest(name)
 	})
 }
 

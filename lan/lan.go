@@ -359,6 +359,12 @@ func (c *Controller) noteFailedPoll(name string, now int64) bool {
 // lastReport is the baseline of an OFFLINE report: the printer's last real
 // report, or, after a Bridge restart, the file and progress of its saved print
 // session. nil when there is neither.
+// LastReport is lastReport for the plug-only report, which must carry the
+// same baseline as the OFFLINE report of a failed poll.
+func (c *Controller) LastReport(name string) *webhook.RelayPayload {
+	return c.lastReport(name)
+}
+
 func (c *Controller) lastReport(name string) *webhook.RelayPayload {
 	c.relayLastTMu.Lock()
 	lp, ok := c.lastRelay[name]
@@ -1193,7 +1199,8 @@ func (c *Controller) findKlipperLightDevice(client *http.Client, p configpkg.Pri
 		return "", fmt.Errorf("no controllable power devices found")
 	}
 
-	var fallback string
+	// Only a device named like a light qualifies. Any other power device may
+	// feed the printer itself, and switching it off would cut its power.
 	for _, d := range devices {
 		name := ""
 		switch v := d.(type) {
@@ -1208,19 +1215,17 @@ func (c *Controller) findKlipperLightDevice(client *http.Client, p configpkg.Pri
 		if name == "" {
 			continue
 		}
-		if fallback == "" {
-			fallback = name
-		}
 		lc := strings.ToLower(name)
 		if strings.Contains(lc, "light") || strings.Contains(lc, "led") || strings.Contains(lc, "lamp") {
 			return name, nil
 		}
 	}
-	if fallback == "" {
-		return "", fmt.Errorf("no valid power device name found")
-	}
-	return fallback, nil
+	return "", errNoKlipperLight
 }
+
+// errNoKlipperLight is returned when Moonraker has no power device whose name
+// says it is a light.
+var errNoKlipperLight = errors.New("no light found: none of the Moonraker power devices has light, led or lamp in its name")
 
 func setKlipperLight(client *http.Client, p configpkg.Printer, device, action string) error {
 	headers := moonrakerAuthHeaders(p)

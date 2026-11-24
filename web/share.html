@@ -120,10 +120,13 @@
 
     var base = location.pathname.replace(/\/+$/, '');
     var $ = function (id) { return document.getElementById(id); };
+    // The same words as the dashboard's printer cards (statusMeta in ui.html), for
+    // every status the Bridge can report. The second item is the colour.
     var labels = {
         printing: ['Printing', 'ok'], paused: ['Paused', 'warn'], idle: ['Idle', ''],
-        finished: ['Finished', 'ok'], error: ['Needs attention', 'bad'],
-        disconnected: ['Offline', 'bad'], connecting: ['Connecting…', '']
+        finished: ['Finished', 'ok'], error: ['Error', 'bad'], cancelled: ['Canceled', ''],
+        disconnected: ["Can't reach", 'bad'], connected: ['Connected', ''], busy: ['Busy', ''],
+        connecting: ['Connecting', '']
     };
     var camTimer = null;
 
@@ -146,7 +149,7 @@
     function render(s) {
         $('name').textContent = s.name || T('Printer');
         document.title = (s.name || T('Printer')) + ' · FoxTrack Bridge';
-        var l = labels[s.status] || [s.status || 'Unknown', ''];
+        var l = labels[s.status] || ['Unknown', ''];
         $('status').textContent = T(l[0]);
         $('status').setAttribute('data-tone', l[1]);
         var active = s.status === 'printing' || s.status === 'paused';

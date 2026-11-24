@@ -845,7 +845,7 @@ func TestFilesCommand_AckIsRetried(t *testing.T) {
 func TestHome_RefusedWhilePrintingButTempsAreNot(t *testing.T) {
 	newPrintEnv(t) // the P1S Shelf printer config
 	mqttpkg.UpdatePrinterState("P1S Shelf", mqttpkg.TelemetryData{Status: "printing"})
-	t.Cleanup(func() { mqttpkg.RemovePrinterState("P1S Shelf") })
+	t.Cleanup(func() { mqttpkg.ResetPrinterStateForTest("P1S Shelf") })
 	home := bridgeCommand{ID: "h1", ExternalID: "01P00A000000001", Command: "home"}
 	if err := executeBridgeCommand(home); !errors.Is(err, errHomeWhilePrinting) {
 		t.Fatalf("home while printing: err = %v", err)
@@ -882,7 +882,9 @@ func TestConsoleCommand_RunsOnceAndAcks(t *testing.T) {
 	startConsoleCommand("test-key", cmd)
 	startConsoleCommand("test-key", cmd)
 	printJobs.wg.Wait()
-	if e.count("ack:") != 1 {
-		t.Fatalf("events = %v", e.snapshot())
+	// One "running" and one result: the second fetch adds nothing.
+	ev := e.snapshot()
+	if len(ev) != 2 || ev[0] != "ack:running" || e.count("ack:running") != 1 {
+		t.Fatalf("events = %v", ev)
 	}
 }

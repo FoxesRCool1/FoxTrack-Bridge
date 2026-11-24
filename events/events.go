@@ -48,10 +48,12 @@ var All = []Kind{PrintStarted, PrintAlmostDone, PrintPaused, PrintResumed, Print
 // turned the camera watch on.
 var Default = []Kind{PrintFinished, PrintFailed, PrintPaused, PrintFailureSuspected, PrinterError, MaintenanceDue}
 
-// Urgent kinds get through quiet hours. A cleared alarm goes too (quietly,
-// see Silent): whoever was woken by the alarm wants to know it is over.
+// Urgent kinds get through quiet hours. A failure the camera watch suspects is
+// one of them: a print going wrong at night is what that watch is for. A
+// cleared alarm goes too (quietly, see Silent): whoever was woken by the alarm
+// wants to know it is over.
 func (k Kind) Urgent() bool {
-	return k == PrintFailed || k == PrinterError || k == PrinterAlarmCleared || k == Test
+	return k == PrintFailed || k == PrintFailureSuspected || k == PrinterError || k == PrinterAlarmCleared || k == Test
 }
 
 // Loud kinds go out at high priority where a service has one.

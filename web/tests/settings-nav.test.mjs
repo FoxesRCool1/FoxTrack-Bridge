@@ -91,6 +91,11 @@ test('not linked with printers: the three groups, no virtual, no More fold', () 
   assert.ok(!groups.flatMap(g => g.tabs).some(t => t.id === 'virtual'));
 });
 
+test('not linked but the virtual printer is on: its tab stays so it can be turned off', () => {
+  const groups = navGroups({ linked: false, hasPrinters: true, virtualOn: true });
+  assert.deepEqual(groups.find(g => g.group === 'Connect').tabs.map(t => t.id), ['foxtrack', 'virtual']);
+});
+
 test('not linked without printers: printer features are dropped entirely', () => {
   const groups = navGroups({ linked: false, hasPrinters: false });
   assert.deepEqual(groups.map(g => g.group), ['Connect', 'Bridge', 'Advanced']);

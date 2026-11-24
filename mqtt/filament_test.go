@@ -15,8 +15,8 @@ import (
 // tray_now, and an odd vt_tray never costs the rest of the report.
 func TestHandler_ExternalSpool(t *testing.T) {
 	const name = "ext-spool-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
 
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","vt_tray":{"id":"254","tray_type":"PETG","tray_color":"FF8800FF","remain":-1}}}`})
@@ -81,7 +81,7 @@ func setupFilament(t *testing.T, name string, printer func(payload map[string]an
 	prevPub, prevPush, prevWait, prevPoll := publishRequestFn, requestPushall, filamentVerifyWait, filamentVerifyPoll
 	t.Cleanup(func() {
 		publishRequestFn, requestPushall, filamentVerifyWait, filamentVerifyPoll = prevPub, prevPush, prevWait, prevPoll
-		RemovePrinterState(name)
+		resetPrinterState(name)
 		forgetPrintFileState(name)
 	})
 	filamentVerifyWait, filamentVerifyPoll = 300*time.Millisecond, 5*time.Millisecond
@@ -99,7 +99,7 @@ func setupFilament(t *testing.T, name string, printer func(payload map[string]an
 		}
 		return nil
 	}
-	RemovePrinterState(name)
+	resetPrinterState(name)
 	UpdatePrinterState(name, TelemetryData{Status: "idle", AMS: []AmsSlot{{Slot: 0}, {Slot: 4, Material: "PLA", Color: "FFFFFF"}}})
 	setTrayRefs(name, []trayRef{{Slot: 0, Unit: 0, Tray: 0}, {Slot: 4, Unit: 1, Tray: 0}, {Slot: 8, Unit: 128, Tray: 0}})
 	return &sent
@@ -172,8 +172,8 @@ func TestSetFilament_DualNozzleExternalSpools(t *testing.T) {
 // 254 the left one. A vt_tray or a single entry carries the right spool only.
 func TestHandler_DualNozzleExternalSpools(t *testing.T) {
 	const name = "ext-dual-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
 
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","vir_slot":[{"id":"254","tray_type":"PLA","tray_color":"FF0000FF","remain":60},{"id":"255","tray_type":"TPU","tray_color":"112233FF","remain":40}]}}`})
@@ -189,7 +189,7 @@ func TestHandler_DualNozzleExternalSpools(t *testing.T) {
 		`{"print":{"gcode_state":"IDLE","vt_tray":{"id":"254","tray_type":"PETG","tray_color":"FF8800FF","remain":-1}}}`,
 		`{"print":{"gcode_state":"IDLE","vir_slot":[{"id":"255","tray_type":"PETG","tray_color":"FF8800FF","remain":-1}]}}`,
 	} {
-		RemovePrinterState(name)
+		resetPrinterState(name)
 		handle(nil, fakeMessage{payload})
 		if st := GetPrinterState(name); st.ExternalSpool == nil || st.ExternalSpool2 != nil {
 			t.Fatalf("%s: right %+v, left %+v", payload, st.ExternalSpool, st.ExternalSpool2)
@@ -252,8 +252,8 @@ func TestSetFilament_RefusedBeforeSending(t *testing.T) {
 // costing the report, and an all-zero tag means the spool has none.
 func TestHandler_TrayIdentity(t *testing.T) {
 	const name = "tray-id-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	handle := makeHandler(Printer{Name: name, Serial: "TEST"})
 
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","bed_temper":30,"ams":{"tray_now":"0","ams":[{"id":"0","tray":[
@@ -330,8 +330,8 @@ func TestPairFilaments(t *testing.T) {
 func TestHandler_FilamentUseHistory(t *testing.T) {
 	const name = "filament-use-test"
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // history.Append writes here
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	snapLastTMu.Lock()
 	snapLastT[name] = time.Now().Unix() + 3600 // no camera snapshot
 	snapLastTMu.Unlock()

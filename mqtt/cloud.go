@@ -359,6 +359,7 @@ func (r *cloudRunner) setPrinters(printers []Printer, onIP func(serial, ip strin
 		if had && old.Name == np.Name {
 			continue
 		}
+		revivePrinter(np.Name) // added, or renamed to a name removed earlier
 		if client != nil {
 			if !had {
 				r.subscribeLocked(client, serial, np.Name)
@@ -386,6 +387,7 @@ func (r *cloudRunner) setPrinters(printers []Printer, onIP func(serial, ip strin
 
 // subscribeLocked subscribes one serial and asks for a state dump. Caller holds r.mu.
 func (r *cloudRunner) subscribeLocked(client mqtt.Client, serial, name string) {
+	revivePrinter(name)
 	tok := client.Subscribe(cloudReportTopic(serial), 0, r.handleMessage)
 	go r.awaitSubscribe(client, tok, serial)
 	r.pushallLocked(client, serial, name)
@@ -714,6 +716,13 @@ func (r *cloudRunner) nudgeSilent(client mqtt.Client) {
 				go r.awaitSubscribe(client, tok, serial)
 			}
 			continue
+		}
+		// A reconnect soon after the last pushall skips the new one (the
+		// once-a-minute limit), and a printer that only sends changes then
+		// stays at "connected" with no data. Ask once more for this session;
+		// pushallLocked still holds the limit.
+		if lp, ok := r.lastPushall[serial]; ok && lp.Before(baseline) && GetPrinterState(p.Name).Status == "connected" {
+			r.pushallLocked(client, serial, p.Name)
 		}
 		last, ok := r.lastMsg[serial]
 		if !ok {

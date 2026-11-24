@@ -339,7 +339,7 @@ FoxTrack takes .gcode and .gcode.3mf files up to 50 MB, and at most 50 files can
 
 Bambu Studio cannot send to it: Bambu Studio only talks to Bambu printers, not to OctoPrint hosts. Use OrcaSlicer for Bambu printers.
 
-The virtual printer listens on port 8090 by default; the Bridge log says if the port could not be opened.`,
+The virtual printer listens on port 8090 by default. Change it in the Port field on the card (1 to 65535) and press Save; the Bridge log says if the port could not be opened. A virtual printer that is on can be turned off even when the Bridge is no longer connected to FoxTrack.`,
 	},
 	{
 		ID:       "alarms",
@@ -449,7 +449,7 @@ Watch prints for failures (Settings > Assistant, needs camera access) has the as
 		ID:       "print-queue",
 		Title:    "Print queue: lining up the next prints",
 		Keywords: []string{"queue", "queued", "next", "up next", "start next", "line up", "batch", "farm", "after this print", "add to queue"},
-		Body: `The print queue lines up files that are already on a printer. It works on printers that can start a file: Bambu Lab in LAN mode, Klipper and OctoPrint.
+		Body: `The print queue lines up files that are already on a printer. It works on printers that can start a file: Bambu Lab in LAN mode, Klipper and OctoPrint. Bambu Cloud, PrusaLink and Home Assistant printers cannot.
 
 To add a file: open Start a print for the printer, type the name of a file on the printer, and click Add to queue. The printer's card then shows Up next with the first file. Open the list to move a file up or down or remove it. A printer holds up to 50 queued files.
 

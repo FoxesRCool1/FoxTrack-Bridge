@@ -83,7 +83,7 @@ func TestMaintenanceFlow(t *testing.T) {
 	if _, edited := postMaint(t, `{"id":"`+id+`","printer_id":"p2","name":"Oil the Z rod","interval_hours":75}`); len(edited) != 1 || edited[0].Name != "Oil the Z rod" || edited[0].IntervalHours != 75 || edited[0].LastDoneAt != 1000 {
 		t.Fatalf("edit: %+v", edited)
 	}
-	if n := len(cfg.Maintenance.Tasks); n != 7 {
+	if n := len(liveConfig().Maintenance.Tasks); n != 7 {
 		t.Fatalf("an edit must not add a task, have %d", n)
 	}
 
@@ -100,14 +100,14 @@ func TestMaintenanceFlow(t *testing.T) {
 	rec = serveHandler(handleMaintenanceTask, httptest.NewRequest("DELETE", "/api/maintenance/"+id, nil))
 	var gone config.MaintenanceTask
 	json.Unmarshal(rec.Body.Bytes(), &gone)
-	if rec.Code != 200 || gone.ID != id || gone.Name != "Oil the Z rod" || len(cfg.Maintenance.Tasks) != 6 {
+	if rec.Code != 200 || gone.ID != id || gone.Name != "Oil the Z rod" || len(liveConfig().Maintenance.Tasks) != 6 {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	if rec := serveHandler(handleMaintenanceTask, httptest.NewRequest("DELETE", "/api/maintenance/"+id, nil)); rec.Code != http.StatusNotFound {
 		t.Fatalf("second delete: %d, want 404", rec.Code)
 	}
 	body, _ := json.Marshal(gone)
-	if rec, back := postMaint(t, string(body)); rec.Code != 200 || len(back) != 1 || back[0].ID != id || back[0].LastDoneAt != gone.LastDoneAt || len(cfg.Maintenance.Tasks) != 7 {
+	if rec, back := postMaint(t, string(body)); rec.Code != 200 || len(back) != 1 || back[0].ID != id || back[0].LastDoneAt != gone.LastDoneAt || len(liveConfig().Maintenance.Tasks) != 7 {
 		t.Fatalf("undo: %d %s", rec.Code, rec.Body)
 	}
 	if rec := serveHandler(handleMaintenanceTask, httptest.NewRequest("POST", "/api/maintenance/nope/done", nil)); rec.Code != http.StatusNotFound {

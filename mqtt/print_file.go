@@ -214,7 +214,7 @@ func PrintPreflight(p Printer) error {
 		return errPrintNoClient
 	}
 	switch GetPrinterState(p.Name).Status {
-	case "idle", "finished", "error": // IDLE, FINISH, FAILED
+	case "idle", "finished", "error", "cancelled": // IDLE, FINISH, FAILED (cancelled: FAILED after the user's own stop)
 		return nil
 	case "", "connected":
 		return errPrintNoStatus
@@ -267,7 +267,7 @@ func waitForStart(ctx context.Context, name, baselineErr string) error {
 		switch GetPrinterState(name).Status {
 		case "printing", "paused", "PREPARE", "SLICING":
 			return nil
-		case "idle", "finished", "error":
+		case "idle", "finished", "error", "cancelled":
 			// A print error left over from an earlier failure is not news:
 			// only a different code counts.
 			switch code := lastReportedError(name); {
@@ -307,12 +307,12 @@ func watchPreparing(ctx context.Context, name, baselineErr string) error {
 		switch st {
 		case "printing":
 			return nil
-		case "paused", "idle", "finished", "error":
+		case "paused", "idle", "finished", "error", "cancelled":
 			if newErr {
 				return stoppedWhilePreparing(code, st == "paused")
 			}
 		}
-		if st == "idle" || st == "finished" || st == "error" {
+		if st == "idle" || st == "finished" || st == "error" || st == "cancelled" {
 			if stoppedAt.IsZero() {
 				stoppedAt = time.Now()
 			} else if time.Since(stoppedAt) >= startErrGrace {

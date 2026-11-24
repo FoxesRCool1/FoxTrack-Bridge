@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -224,5 +227,56 @@ func TestDiffState_AlarmsGroupedAndCleared(t *testing.T) {
 	}
 	if es := step(12*time.Minute + alarmQuietAgain); len(es) != 1 || es[0].Kind != events.PrinterAlarmCleared {
 		t.Fatalf("cleared after the quiet time: %+v", es)
+	}
+}
+
+// A change that cannot be written, or that fn refuses, must not stay in
+// memory: the dashboard would show it and the next restart would lose it.
+func TestMutateConfig_FailedSaveLeavesMemoryUnchanged(t *testing.T) {
+	configMutex.Lock()
+	old := configStore
+	configStore = &config.Config{Printers: []config.Printer{{ID: "p1", Name: "Fox"}}}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		configStore = old
+		configMutex.Unlock()
+	})
+
+	// The config folder cannot be made: a plain file sits in its place.
+	blocker := filepath.Join(t.TempDir(), "not-a-folder")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", blocker)
+	err := mutateConfig(func(c *config.Config) error {
+		c.Printers[0].Name = "Renamed"
+		c.Printers = append(c.Printers, config.Printer{ID: "p2", Name: "Owl"})
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a save that cannot be written returned no error")
+	}
+	configMutex.RLock()
+	name, n := configStore.Printers[0].Name, len(configStore.Printers)
+	configMutex.RUnlock()
+	if name != "Fox" || n != 1 {
+		t.Fatalf("after a failed save: name %q, %d printers; want Fox, 1", name, n)
+	}
+
+	// A refusal changes nothing either, and a good save lands.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	refuse := errors.New("refused")
+	if got := mutateConfig(func(c *config.Config) error { c.Printers[0].Name = "X"; return refuse }); got != refuse {
+		t.Fatalf("refusal = %v", got)
+	}
+	if err := mutateConfig(func(c *config.Config) error { c.Printers[0].Name = "Fox2"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	configMutex.RLock()
+	name = configStore.Printers[0].Name
+	configMutex.RUnlock()
+	if name != "Fox2" {
+		t.Fatalf("after a good save: name %q, want Fox2", name)
 	}
 }

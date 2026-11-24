@@ -249,6 +249,22 @@ func parseConfigBackup(body []byte) (*config.Config, error) {
 	return &cfg, nil
 }
 
+// safePrinterID reports an ID of letters, digits, "-", "_" and "." only, at
+// most 64 long. "" is safe: it means no ID yet.
+func safePrinterID(id string) bool {
+	if len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // resolveConfigImport builds the config an import would store. old is not
 // mutated. Like POST /api/config it refuses to replace saved printers with an
 // empty list unless confirmClear is set.
@@ -260,7 +276,7 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 	if len(cfg.Printers) == 0 && old != nil && len(old.Printers) > 0 && !confirmClear {
 		return nil, errRefuseClearPrinters
 	}
-	if err := rejectNewlyIntroducedDuplicateNames(nil, cfg.Printers); err != nil {
+	if err := rejectDuplicateNames(cfg.Printers); err != nil {
 		return nil, err
 	}
 	var oldPrinters []config.Printer
@@ -294,9 +310,14 @@ func resolveConfigImport(old *config.Config, body []byte, confirmClear bool) (*c
 		cfg.BambuCloud = old.BambuCloud
 		cfg.AI = mergeImportedAI(cfg.AI, old.AI)
 	} else {
+		// Nothing stored to merge: the file's own settings, keys included, stand.
 		cfg.Security, cfg.BambuCloud = nil, nil
-		if cfg.AI != nil {
-			cfg.AI.APIKey = ""
+	}
+	// A printer ID goes into URLs and page markup. One with other characters
+	// (a hand-edited file) is dropped here and replaced below.
+	for i := range cfg.Printers {
+		if !safePrinterID(cfg.Printers[i].ID) {
+			cfg.Printers[i].ID = ""
 		}
 	}
 	// After the secrets pass: a file from before printer IDs matches the stored
@@ -334,7 +355,9 @@ func keepAbsentFeatureBlocks(cfg, old *config.Config) {
 	}
 }
 
-// mergeImportedAI keeps the stored provider key only when the imported
+// mergeImportedAI keeps the key the imported file carries (a plain config.json
+// has one; an export never does, and it stays with the file's own provider).
+// Where the file has none, the stored key fills in only when the imported
 // settings point at the same provider, so the key never goes to a server it
 // was not saved for. A file without an assistant block keeps the current one.
 func mergeImportedAI(in, old *config.AI) *config.AI {
@@ -342,9 +365,8 @@ func mergeImportedAI(in, old *config.AI) *config.AI {
 		return old
 	}
 	out := *in
-	out.APIKey = ""
 	trim := func(s string) string { return strings.TrimRight(strings.TrimSpace(s), "/") }
-	if old != nil && old.Preset == in.Preset && trim(old.BaseURL) == trim(in.BaseURL) {
+	if out.APIKey == "" && old != nil && old.Preset == in.Preset && trim(old.BaseURL) == trim(in.BaseURL) {
 		out.APIKey = old.APIKey
 	}
 	return &out

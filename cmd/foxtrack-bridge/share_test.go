@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -217,5 +218,44 @@ func TestShareCameraStill_FailureCachedBriefly(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("snapshot called %d times, want 1 within the failure TTL", calls)
+	}
+}
+
+// A camera that hangs is fetched once, with a timeout of its own: the viewer
+// who started the fetch leaving does not cancel it, its failure is cached, and
+// a viewer who gave up while waiting does not start another fetch.
+func TestShareCameraStill_HangingCameraTriedOnce(t *testing.T) {
+	var calls atomic.Int32
+	withShareStills(t, func(ctx context.Context, p config.Printer) ([]byte, error) {
+		calls.Add(1)
+		<-ctx.Done() // hangs until its own timeout
+		return nil, ctx.Err()
+	})
+	prev := shareFetchTimeout
+	shareFetchTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { shareFetchTimeout = prev })
+	p := config.Printer{ID: "hang"}
+
+	// The first viewer leaves after 20 ms; the fetch runs on until its timeout.
+	gone, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := shareCameraStill(gone, p); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("hanging camera: err = %v, want the fetch timeout", err)
+	}
+	if time.Since(start) < 80*time.Millisecond {
+		t.Fatalf("the fetch was cancelled with the viewer's request (%v)", time.Since(start))
+	}
+
+	// A waiter whose request is already over starts nothing.
+	if _, err := shareCameraStill(gone, p); err == nil {
+		t.Fatal("a cancelled waiter got a picture")
+	}
+	// A new viewer gets the cached failure, not a second fetch.
+	if _, err := shareCameraStill(context.Background(), p); err == nil {
+		t.Fatal("want the cached camera error")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("snapshot called %d times, want 1", n)
 	}
 }

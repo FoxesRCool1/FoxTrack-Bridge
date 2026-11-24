@@ -62,8 +62,8 @@ func nextRelay(t *testing.T, sent chan sentRelay) sentRelay {
 // first real report afterwards re-arms it.
 func TestReportOffline_RepeatsEachHeartbeat(t *testing.T) {
 	const name = "offline-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 	sent := captureRelays(t)
 
 	p := Printer{Name: name, Serial: "OFFL", APIKey: "legacy", FoxTrack2APIKey: "v2"}
@@ -116,8 +116,8 @@ func TestReportOffline_RepeatsEachHeartbeat(t *testing.T) {
 func TestSession_SurvivesBridgeRestart(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	const name = "restart-test"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name) })
 
 	p := Printer{Name: name, Serial: "RST"} // no API keys: nothing is posted
 	start := func(file string, percent string) *printSession {
@@ -144,7 +144,7 @@ func TestSession_SurvivesBridgeRestart(t *testing.T) {
 	wantStart := first.StartTime - 5000
 
 	// The restart: all in-memory state is gone, the file stays.
-	RemovePrinterState(name)
+	resetPrinterState(name)
 	again := start("cube.gcode", "12")
 	if again.StartTime != wantStart {
 		t.Errorf("start after a restart = %d, want the original %d", again.StartTime, wantStart)
@@ -154,7 +154,7 @@ func TestSession_SurvivesBridgeRestart(t *testing.T) {
 	}
 
 	// A different file is a different print.
-	RemovePrinterState(name)
+	resetPrinterState(name)
 	other := start("vase.gcode", "12")
 	if other.StartTime == wantStart {
 		t.Error("another file must not take the old session")
@@ -165,5 +165,18 @@ func TestSession_SurvivesBridgeRestart(t *testing.T) {
 	var left savedSession
 	if history.LoadSession(sessionKey(p), &left) {
 		t.Errorf("an ended print left a saved session: %+v", left)
+	}
+	// The history record is written in the background. Wait for it, or the
+	// write races the removal of the temp dir.
+	deadline := time.Now().Add(3 * time.Second)
+	for last, stable := -1, 0; stable < 3 && time.Now().Before(deadline); {
+		recs, _ := history.ForPrinter(name)
+		if len(recs) > 0 && len(recs) == last {
+			stable++
+		} else {
+			stable = 0
+		}
+		last = len(recs)
+		time.Sleep(20 * time.Millisecond)
 	}
 }

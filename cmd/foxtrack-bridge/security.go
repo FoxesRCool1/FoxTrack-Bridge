@@ -339,6 +339,24 @@ func beginLogin(ip string, now time.Time) time.Duration {
 	return 0
 }
 
+// undoLoginTry takes back the try beginLogin counted, for a check that never
+// ran (errSignInBusy): it was not a wrong password.
+func undoLoginTry(ip string) {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	t := loginByIP[ip]
+	if t == nil {
+		return
+	}
+	// beginLogin only counts a try once any earlier lock has run out, so the
+	// lock that is set now came from this try alone.
+	t.fails--
+	t.until = time.Time{}
+	if t.fails <= 0 {
+		delete(loginByIP, ip)
+	}
+}
+
 func noteLogin(ip string, ok bool, now time.Time) {
 	loginMu.Lock()
 	defer loginMu.Unlock()
@@ -416,6 +434,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	ok, err := checkPassword(req.Password, sec.PasswordHash)
 	if err != nil {
+		undoLoginTry(ip)
 		w.Header().Set("Retry-After", "5")
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -535,6 +554,7 @@ func handleSecurity(w http.ResponseWriter, r *http.Request) {
 			}
 			ok, err := checkPassword(req.Current, prevHash)
 			if err != nil {
+				undoLoginTry(ip)
 				writeErr(w, http.StatusServiceUnavailable, err.Error())
 				return
 			}

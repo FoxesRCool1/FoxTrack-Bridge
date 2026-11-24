@@ -90,8 +90,8 @@ func TestControlBlocked_ExpiresAndClearsOnNewSession(t *testing.T) {
 
 func TestControlBlocked_ShownInStateOnlyWhileConnected(t *testing.T) {
 	const name = "cap-state"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name); clearControlBlocked(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name); clearControlBlocked(name) })
 
 	UpdatePrinterState(name, TelemetryData{Status: "idle"})
 	if GetPrinterState(name).ControlBlocked || GetPrintersState()[name].ControlBlocked {
@@ -122,8 +122,8 @@ func TestControlBlocked_ShownInStateOnlyWhileConnected(t *testing.T) {
 // gets keeps its shape: no control_blocked, alarm text only in message.
 func TestHandler_RefusalMarksPrinterAndRelayStaysUnchanged(t *testing.T) {
 	const name = "cap-handler"
-	RemovePrinterState(name)
-	t.Cleanup(func() { RemovePrinterState(name); clearControlBlocked(name) })
+	resetPrinterState(name)
+	t.Cleanup(func() { resetPrinterState(name); clearControlBlocked(name) })
 
 	sent := make(chan webhook.RelayPayload, 4)
 	prevSend := sendRelay

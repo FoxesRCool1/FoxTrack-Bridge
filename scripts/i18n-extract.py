@@ -3,7 +3,8 @@
 Usage, from the repo root: python3 scripts/i18n-extract.py . web/i18n/_source.json
 then translate the new keys into each web/i18n/<lang>.json and check them with
 python3 web/i18n/_check.py. Reads web/ui.html, web/login.html, web/share.html and
-web/features/*.js: HTML text, placeholder/title/aria-label, and JS strings.
+web/features/*.js: HTML text, placeholder/title/aria-label, and JS strings, plus
+the error sentences in cmd/foxtrack-bridge/*.go (see GO_FILES).
 """
 import glob, html.parser, json, os, re, sys
 
@@ -130,8 +131,35 @@ for f in sorted(glob.glob(os.path.join(ROOT, 'web/features/*.js'))):
         if not re.search(r"' \+|\+ '|\? '", t):
             add(t)
 
-# Drop markup and code fragments that slipped through.
-JUNK = re.compile(r'^#|:not\(|[<>=\[\]{}]|^["\'.,:;)\-]|^\w+_\w+$|@example|ftb_|ftk_|https?:')
-out = sorted(x for x in found if not JUNK.search(PH.sub('X', x)))
+# Error sentences the Go server sends and the dashboard shows as they are (a
+# toast, a field note). Only sentences are taken: a capital first letter, a
+# space, an end mark. "method not allowed" and the like are for programs and stay
+# out; so do the Assistant's tool replies, which are written for the model. A
+# Printf verb becomes a {0} slot, like the pattern keys in the dictionaries.
+GO_FILES = ('queue.go', 'security.go', 'skip_routes.go', 'timelapse_routes.go', 'metrics.go',
+            'maintenance_routes.go', 'spoolman_routes.go', 'server.go', 'costs_routes.go',
+            'notify_routes.go', 'server_ai.go', 'files_commands.go')
+GO_MSG = re.compile(
+    r'(?:writeErr\([^"\n]*|\bbad\(|badNotify\(|errors\.New\(|invalidPrinterEdit\(|refused = |gone := '
+    r'|enterKeyAgain = |Reason: |writeSkip\(w, false, |"error": |return "(?:bad_token|plan|offline|error)", )'
+    r'"((?:[^"\\\n]|\\.)*)"')
+go_found = set()
+for name in GO_FILES:
+    gsrc = open(os.path.join(ROOT, 'cmd/foxtrack-bridge', name)).read()
+    for m in GO_MSG.finditer(gsrc):
+        t = m.group(1).replace('\\"', '"')
+        if not re.match(r'[A-Z][^ ]* ', t) or not re.search(r'[.?!)]$', t) or t.startswith('Content-Type') or '"' in t:
+            continue
+        n = [0]
+        def verb(_):
+            n[0] += 1
+            return '{%d}' % (n[0] - 1)
+        go_found.add(re.sub(r'%[sdv]', verb, t))
+
+# Drop markup and code fragments that slipped through. A string that holds a
+# URL is dropped only when it is nothing but the URL (no spaces); a help
+# sentence that mentions an address ("For example http://...") is kept.
+JUNK = re.compile(r'^#|:not\(|[<>=\[\]{}]|^["\'.,:;)\-]|^\w+_\w+$|@example|ftb_|ftk_|^\S*https?:\S*$')
+out = sorted({x for x in found if not JUNK.search(PH.sub('X', x))} | go_found)
 json.dump(out, open(OUT, 'w'), indent=0, ensure_ascii=False)
 print(len(out), 'strings')

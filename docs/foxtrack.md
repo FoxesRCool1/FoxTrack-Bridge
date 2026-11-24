@@ -160,6 +160,23 @@ a product variant in FoxTrack and press **Print**. The Bridge does the rest:
 
 Pause, resume and stop keep working while a file is being sent.
 
+### Start a file that is already on the printer
+
+FoxTrack can also list the files stored on a printer (`list_files`) and start
+one of them (`print_printer_file`, with the file's name). This works on Bambu
+Lab printers in LAN mode, Klipper and OctoPrint. It does not work over Bambu
+Cloud, and not on PrusaLink or Home Assistant printers. The dashboard's
+**Start print** button and the print queue use the same path.
+
+### What the Bridge reports to FoxTrack
+
+- **A cancelled Bambu Lab print** is relayed with `gcode_state` `CANCELLED`, the
+  same as a cancelled PrusaLink or OctoPrint print, instead of `FAILED`. The
+  Bridge sees it as a cancel when the printer reports a user-cancel code or
+  alarm.
+- **An H2D's left external spool** is relayed as `external_spool_2`. The right
+  one stays `external_spool`.
+
 The Bridge keeps downloaded files in the `print-cache` folder, inside its config
 folder (next to `config.json`). It keeps at most 20 files and 1 GB, removes the
 oldest first, and reuses a file it already has instead of downloading it again.
@@ -176,6 +193,14 @@ another FoxTrack project, for example the beta one or a local Supabase stack
 (`http://127.0.0.1:54321`). It must start with `https://`, or be `http://` to
 `127.0.0.1` or `localhost`. Anything else is ignored with a warning in the log.
 The Bridge logs once at startup when the override is active.
+
+On a local Supabase stack, printing a file (`print_file`) has one more
+condition: the download link FoxTrack signs must use the same scheme, host and
+port as `FOXTRACK_SUPABASE_URL`. `127.0.0.1` and `localhost` count as different
+hosts. A stack that signs its links with an internal host (for example
+`http://kong:8000`) fails every print with "Bridge could not check the file
+link.", and the Bridge log says
+`refused: the download link is not on the FoxTrack host Bridge talks to`.
 
 ## Cameras
 

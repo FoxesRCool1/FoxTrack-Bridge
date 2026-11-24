@@ -85,7 +85,8 @@ function mxMount(sec) {
         }
     });
     document.getElementById('mxState').textContent = 'Checking…';
-    apiFetch('/api/metrics').then(r => { setSwitch('mxEnabled', !!r.enabled); state(!!r.enabled); })
-        .catch(e => { document.getElementById('mxState').textContent = "Could not load this setting. " + friendlyError(e.message); })
-        .finally(() => { sw.disabled = false; });
+    // The switch stays off until the current value has loaded: a failed read must not
+    // let a click save a guess.
+    apiFetch('/api/metrics').then(r => { setSwitch('mxEnabled', !!r.enabled); state(!!r.enabled); sw.disabled = false; })
+        .catch(e => { document.getElementById('mxState').textContent = "Could not load this setting. " + friendlyError(e.message); });
 }

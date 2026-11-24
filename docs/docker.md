@@ -37,6 +37,15 @@ Open the dashboard at [http://localhost:8080](http://localhost:8080).
 
 `--network host` lets the Bridge find Bambu printers: their SSDP broadcasts do not cross Docker's default bridge network. It is Linux-only and makes `-p` unnecessary; change the port with `-e FOXTRACK_BRIDGE_PORT=9000`. Without it (for example `-p 8080:8080`) the dashboard works, but printers must be added by address. The repository's `docker-compose.yml` sets this up for you.
 
+## Behind a reverse proxy
+
+To open the dashboard on your own domain through a reverse proxy (nginx, Caddy, Traefik and the like), the Bridge needs a few things:
+
+- **Allow the domain.** The Bridge answers only to names it knows, so a website cannot pretend to be it. Set `FOXTRACK_BRIDGE_ALLOWED_HOSTS` to the public host name, for example `bridge.example.com` (several names are separated by commas), and restart the Bridge. In `docker-compose.yml` this is the commented line under `environment:`; with `docker run`, add `-e FOXTRACK_BRIDGE_ALLOWED_HOSTS=bridge.example.com`. The Bridge reads the name from the request's `Host` header, so the proxy must pass it on as it received it. Until then, that name gets a "forbidden" page (or a JSON error from scripts). IP addresses, `localhost`, names with no dot and names ending in `.local`, `.lan`, `.home.arpa`, `.internal` or `.ts.net` (Tailscale) work without it.
+- **Send `X-Forwarded-Proto`.** The Bridge itself speaks plain HTTP, so it marks the session cookie it sets at sign-in `Secure` only when the proxy sends `X-Forwarded-Proto: https`. Without that header the cookie is not marked `Secure`.
+- **Use the root of a domain.** A sub-path such as `https://example.com/bridge/` does not work: the dashboard asks for `/api/...` and its other files by absolute path, so they would not go through the proxy.
+- **Set a password first.** Without one, anyone who can reach the proxy can open the dashboard and control your printers. A request that comes with `X-Forwarded-For`, `X-Real-Ip` or `Forwarded` is never treated as coming from the Bridge's own computer, so while no password is set, Back up and restore refuse it. Set the password under **Settings > Security**.
+
 ## Build from a fork or branch
 
 Docker can build directly from a GitHub repository:

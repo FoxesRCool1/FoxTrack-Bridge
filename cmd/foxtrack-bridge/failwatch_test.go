@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"foxtrack-bridge/config"
+	mqttpkg "foxtrack-bridge/mqtt"
 )
 
 func TestParseFailWatchReply(t *testing.T) {
@@ -43,6 +44,23 @@ func TestFailWatchRecord_TwoStrikesOneAlert(t *testing.T) {
 		if got := failWatchRecord(st, s.failed); got != s.alert {
 			t.Fatalf("step %d: alert = %v, want %v", i, got, s.alert)
 		}
+	}
+}
+
+// A link blip must not end a print's watch state, or the same failure alerts
+// again when the printer comes back; only a settled status ends it.
+func TestFailWatchHolds_OnlyASettledStatusEndsTheState(t *testing.T) {
+	for status, want := range map[string]bool{
+		"paused": true, "disconnected": true, "connected": true, "prepare": true,
+		"idle": false, "finished": false, "error": false, "cancelled": false,
+		"printing": false, // handled as a running print, not held
+	} {
+		if got := failWatchHolds(&mqttpkg.TelemetryData{Status: status}); got != want {
+			t.Errorf("failWatchHolds(%q) = %v, want %v", status, got, want)
+		}
+	}
+	if !failWatchHolds(nil) {
+		t.Error("a printer with no report yet must keep its state")
 	}
 }
 

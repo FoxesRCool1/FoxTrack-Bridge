@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"foxtrack-bridge/webhook"
 )
@@ -105,7 +106,11 @@ func mergeAlarms(prev []webhook.RelayAlarm, payload []byte) []webhook.RelayAlarm
 	}
 	if probe.Print.PrintError != nil {
 		if v := int64(*probe.Print.PrintError); v != 0 {
-			out = append(out, webhook.CodeAlarm(webhook.AlarmSourcePrintError, PrintErrorCode(v), webhook.AlarmSerious, printErrorText(v)))
+			severity := webhook.AlarmSerious
+			if userCancelCode(v) {
+				severity = webhook.AlarmInfo // the user's own stop: a note, not a fault
+			}
+			out = append(out, webhook.CodeAlarm(webhook.AlarmSourcePrintError, PrintErrorCode(v), severity, printErrorText(v)))
 		}
 	}
 	if probe.Print.HMS != nil {
@@ -117,6 +122,52 @@ func mergeAlarms(prev []webhook.RelayAlarm, payload []byte) []webhook.RelayAlarm
 		}
 	}
 	return out
+}
+
+// userCancelCode reports a print_error that means the user stopped the print:
+// 0300_400C "The task was canceled." and 0500_400E "Job was cancelled.". The
+// printer sends it with gcode_state FAILED.
+func userCancelCode(v int64) bool {
+	return v == 0x0300400C || v == 0x0500400E
+}
+
+// printErrorKinds reads the print_error alarm of an alarm list: cancel when
+// it is a user-cancel code, real when it is any other code.
+func printErrorKinds(alarms []webhook.RelayAlarm) (cancel, real bool) {
+	for _, a := range alarms {
+		if a.Source != webhook.AlarmSourcePrintError || a.Code == nil {
+			continue
+		}
+		if c := *a.Code; c == PrintErrorCode(0x0300400C) || c == PrintErrorCode(0x0500400E) {
+			cancel = true
+		} else {
+			real = true
+		}
+	}
+	return cancel, real
+}
+
+// userCancels holds the printers whose last print ended by the user's own
+// stop. It lives outside the telemetry, which a reconnect starts over.
+var (
+	userCancelMu sync.Mutex
+	userCancels  = map[string]bool{}
+)
+
+func setUserCancel(name string, on bool) {
+	userCancelMu.Lock()
+	defer userCancelMu.Unlock()
+	if on {
+		userCancels[name] = true
+	} else {
+		delete(userCancels, name)
+	}
+}
+
+func userCancel(name string) bool {
+	userCancelMu.Lock()
+	defer userCancelMu.Unlock()
+	return userCancels[name]
 }
 
 // alarmsChanged reports whether two alarm lists differ in any item.

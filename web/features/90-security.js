@@ -49,6 +49,7 @@
                 <div>
                     <label for="secNew" class="field-label flex items-center gap-1">${on ? 'New password' : 'Password'} ${tip('<span id="secNewHelp">At least 8 characters. Everyone else is signed out when it changes.</span>', 'About the new password')}</label>
                     <input id="secNew" type="password" class="field" autocomplete="new-password" minlength="8" aria-describedby="secNewHelp">
+                    <p class="mt-1.5 text-xs text-text-2">With a password set, direct control and the live camera from the FoxTrack website stop working; status and history still sync.</p>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2">
                     ${on ? '<button type="button" id="secRemove" class="btn-danger btn-lg">Remove password</button>' : ''}
@@ -190,13 +191,15 @@
                 const res = await apiFetch('/api/shares', { method: 'POST', body: JSON.stringify(body) });
                 shares = res.shares;
                 render(el);
+                const link = linkBase() + res.path;
                 const box = el.querySelector('#secNewShare');
                 box.classList.remove('hidden');
                 box.innerHTML = `<p class="text-xs text-text-2 mb-1.5">Copy it now. It is not shown again.</p>
-                    <div class="flex items-center gap-2"><input id="secShareVal" class="field field-mono flex-1 min-w-0" type="text" readonly value="${escHtml(location.origin + res.path)}">
-                    <button type="button" class="btn-outline shrink-0" id="secShareCopy" aria-label="Copy link"><i class="fas fa-copy"></i> Copy</button></div>`;
+                    <div class="flex items-center gap-2"><input id="secShareVal" class="field field-mono flex-1 min-w-0" type="text" readonly value="${escHtml(link)}">
+                    <button type="button" class="btn-outline shrink-0" id="secShareCopy" aria-label="Copy link"><i class="fas fa-copy"></i> Copy</button></div>
+                    <p class="mt-1.5 text-xs text-text-2">The link works on your network, or through your own proxy.</p>`;
                 box.querySelector('#secShareCopy').addEventListener('click', async () => {
-                    try { await navigator.clipboard.writeText(location.origin + res.path); toast('Link copied.'); }
+                    try { await navigator.clipboard.writeText(link); toast('Link copied.'); }
                     catch (_) { const v = box.querySelector('#secShareVal'); v.focus(); v.select(); toast('Select and copy it by hand.', 'info'); }
                 });
             } catch (err) { toast(err.message, 'error'); }
@@ -224,6 +227,13 @@
     registerSettingsTab({
         id: 'security', label: 'Security', group: 'Bridge', order: 10,
         mount(el) { render(el); load(el); },
-        onShow(el) { load(el); },
+        onShow(el) {
+            // A reload re-renders the section: it must not wipe a token or link that
+            // is shown only once, or a password someone is typing.
+            const secretShown = ['#secNewToken', '#secNewShare'].some(q => { const b = el.querySelector(q); return b && !b.classList.contains('hidden'); });
+            const typed = ['#secCurrent', '#secNew', '#secTokenName', '#secShareName'].some(q => { const f = el.querySelector(q); return f && f.value !== ''; });
+            if (secretShown || typed) return;
+            load(el);
+        },
     });
 })();

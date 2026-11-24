@@ -378,13 +378,22 @@ async function nfPost(channels, extra) {
     return apiFetch('/api/notifications', { method: 'POST', body: JSON.stringify({ channels, ...extra }) });
 }
 
-// nfPayload lists every saved channel (including ones with a delete that can
-// still be undone, so undo never loses a secret), with `swap` in place of its original.
-function nfPayload(swap) {
-    const list = [];
-    for (const c of NF.chs) {
-        if (c._draft && c !== swap.orig) continue;
-        list.push(c === swap.orig ? swap.req : nfReq(c));
+// nfMerge builds the list to save from the server's current channels, not from
+// this tab's copy, so a channel another tab added is kept. Only `change` is
+// applied on top: { id, req } puts req in place of that channel (a new channel
+// has no id and is appended), { id, patch } changes fields of the saved one,
+// { id, remove: true } drops it. Channels with a delete that can still be
+// undone are still on the server, so undo never loses a secret.
+async function nfMerge(change) {
+    const view = await apiFetch('/api/notifications');
+    const list = ((view && view.channels) || []).map(nfReq);
+    const i = change.id ? list.findIndex(c => c.id === change.id) : -1;
+    if (change.remove) {
+        if (i !== -1) list.splice(i, 1);
+    } else if (i !== -1) {
+        list[i] = change.patch ? { ...list[i], ...change.patch } : change.req;
+    } else if (change.req) {
+        list.push(change.req);
     }
     return list;
 }
@@ -486,7 +495,7 @@ async function nfToggle(ch, btn) {
     btn.setAttribute('aria-checked', on ? 'true' : 'false');
     NF.busy = true;
     try {
-        await nfPost(nfPayload({ orig: ch, req: { ...nfReq(ch), enabled: on } }));
+        await nfPost(await nfMerge({ id: ch.id, patch: { enabled: on } }));
         ch.enabled = on; // only the row changes, so an open editor keeps what was typed
     } catch (e) {
         btn.setAttribute('aria-checked', on ? 'false' : 'true');
@@ -509,7 +518,7 @@ async function nfSave(card, ch, btn) {
     out.className = 'nf-result mt-4 text-text-2';
     out.textContent = 'Saving…';
     try {
-        const view = await nfPost(nfPayload({ orig: ch, req }));
+        const view = await nfPost(await nfMerge({ id: ch.id, req }));
         const others = NF.chs.filter(c => c._draft && c !== ch);
         nfApply(view);
         NF.chs.push(...others);
@@ -566,10 +575,18 @@ function nfDelete(ch) {
         onCommit() {
             // Waits its turn behind a save in progress.
             (async () => {
+                if (pageLeaving) {
+                    // The page is going away: no time to wait for a save or to read the
+                    // list first. Send this tab's list without every channel whose
+                    // delete is pending (the keepalive request outlives the page).
+                    const left = NF.chs.filter(c => c.id !== id && !NF.pending.has(c.id) && !c._draft).map(nfReq);
+                    nfPost(left, left.length ? {} : { confirm_clear_channels: true }).catch(() => {});
+                    return;
+                }
                 while (NF.busy) await new Promise(r => setTimeout(r, 100));
                 NF.busy = true;
                 try {
-                    const keep = NF.chs.filter(c => c.id !== id && !c._draft).map(nfReq);
+                    const keep = await nfMerge({ id, remove: true });
                     await nfPost(keep, keep.length ? {} : { confirm_clear_channels: true });
                     NF.pending.delete(id);
                     NF.chs = NF.chs.filter(c => c.id !== id); // the card is already hidden

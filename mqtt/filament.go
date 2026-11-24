@@ -136,10 +136,12 @@ func relayExternalSpool(s *AmsSlot) *webhook.RelayAmsSlot {
 
 // spoolsAt lists every AMS slot plus the external spool: what a print
 // session records at its start and end.
-func spoolsAt(ams []AmsSlot, ext *AmsSlot) []AmsSlot {
+func spoolsAt(ams []AmsSlot, exts ...*AmsSlot) []AmsSlot {
 	out := append([]AmsSlot(nil), ams...)
-	if ext != nil {
-		out = append(out, *ext)
+	for _, ext := range exts {
+		if ext != nil {
+			out = append(out, *ext)
+		}
 	}
 	return out
 }
@@ -193,7 +195,7 @@ func historyFilaments(fs []webhook.HistoryFilament) []history.FilamentUse {
 // historyRemain is a slot's remain for the history: 0-100, -1 when unknown.
 // The external spool's 0 means unknown too (mergeExternalSpool folds -1 into 0).
 func historyRemain(s AmsSlot) int {
-	if s.Slot == ExternalSlot && s.Remaining == 0 {
+	if (s.Slot == ExternalSlot || s.Slot == ExternalSlot2) && s.Remaining == 0 {
 		return -1
 	}
 	return s.Remaining
@@ -212,9 +214,13 @@ func filamentChanged(prev, curr *TelemetryData) bool {
 			return true
 		}
 	}
-	if prev.ExternalSpool != nil {
-		a, b := prev.ExternalSpool, curr.ExternalSpool
-		return a.Color != b.Color || a.Material != b.Material
+	if (prev.ExternalSpool2 == nil) != (curr.ExternalSpool2 == nil) {
+		return true
+	}
+	for _, pair := range [][2]*AmsSlot{{prev.ExternalSpool, curr.ExternalSpool}, {prev.ExternalSpool2, curr.ExternalSpool2}} {
+		if a, b := pair[0], pair[1]; a != nil && (a.Color != b.Color || a.Material != b.Material) {
+			return true
+		}
 	}
 	return false
 }

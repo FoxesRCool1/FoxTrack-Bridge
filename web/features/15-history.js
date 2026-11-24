@@ -174,7 +174,7 @@ function exportHistoryCsv() {
          c.filament_known ? num(c.filament_cost, 2) : '', c.energy_known ? num(c.energy_cost, 2) : '',
          (c.filament_known || c.energy_known) ? num(c.total, 2) : '',
          r.note || '',
-        ].map(v => '"' + String(v ?? '').replace(/"/g,'""').replace(/^([=+\-@])/, "'$1") + '"').join(',');
+        ].map(v => '"' + String(v ?? '').replace(/"/g,'""').replace(/^([=+\-@\t\r])/, "'$1") + '"').join(',');
     }).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -253,9 +253,9 @@ async function refreshGlobalHistory() {
         for (const p of configuredPrinters) nameToId[p.name] = p.id;
 
         const cards = Object.keys(byPrinter).map(name => {
-            // %27 for ', which encodeURIComponent leaves in and which would
-            // end the quoted uid inside the onclick handlers below.
-            const enc = encodeURIComponent(name).replace(/'/g, '%27');
+            // encodePrinterId also escapes ', which would end the quoted uid
+            // inside the onclick handlers below.
+            const enc = encodePrinterId(name);
             const recs = byPrinter[name];
             // Per-printer mini stats
             const pFinished = recs.filter(r => r.result === 'finished').length;

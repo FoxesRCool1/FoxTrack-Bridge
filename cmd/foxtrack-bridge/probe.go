@@ -391,6 +391,9 @@ func probeBambuMQTT(addr, ip, serial, code string) probeResult {
 	client := paho.NewClient(opts)
 	token := client.Connect()
 	if !token.WaitTimeout(wait(6 * time.Second)) {
+		// The connect is still going (it ends at SetConnectTimeout): close the
+		// client when it does, or it may come up with nobody using it.
+		go func() { token.Wait(); client.Disconnect(0) }()
 		return probeUnreachableAt("the printer", ip, errors.New("connect timed out"), "Check that the printer is on and on the same network.")
 	}
 	if err := token.Error(); err != nil {
