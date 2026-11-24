@@ -1155,11 +1155,12 @@ function printerCantReachNoState(live) {
 }
 
 // A printer needs attention when it is in an error, has alarms, can't be
-// reached (its plug is not off), or is missing a required secret.
+// reached (its plug is not off), or is missing a required secret. An "info"
+// alarm is a note (the user's own stop of a print), not a fault.
 function printerNeedsAttention(p) {
     const live = liveStatus[p.id] || null;
     if (live && live.status === 'error') return true;
-    if (live && Array.isArray(live.alarms) && live.alarms.length) return true;
+    if (live && Array.isArray(live.alarms) && live.alarms.some(a => a && a.severity !== 'info')) return true;
     if (live && live.status === 'disconnected' && !(live.plug && live.plug.reachable && !live.plug.on)) return true;
     if (printerCantReachNoState(live)) return true;
     if (printerMissingSecret(p)) return true;

@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.6.6
+
+**Printers**
+
+- Showed a Bambu print you stopped as "Canceled", not as failed.
+- Added "Start print" and the print queue to Bambu LAN and OctoPrint printers.
+- Renamed printers that shared a name, and refused a second one.
+- Cleared a deleted printer's queue, share links and maintenance tasks.
+
+**FoxTrack**
+
+- Sent the left spool of an H2D to FoxTrack.
+- Stopped a command from FoxTrack running twice.
+
+**Settings**
+
+- Added a port field to "Virtual printer".
+- Turned "Auto-update" off where it cannot work, such as Docker.
+- Translated the error messages the Bridge sends.
+
+**Fixes**
+
+- Fixed a busy sign-in counting as a wrong password.
+- Fixed the Linux auto-update restarting on the wrong port.
+- Fixed settings from a newer version being lost when an older one opened them.
+
 ## v2.6.5
 
 **Settings**
