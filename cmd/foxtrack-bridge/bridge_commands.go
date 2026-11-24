@@ -27,7 +27,7 @@ type bridgeCommand struct {
 
 type bridgeCommandResult struct {
 	CommandID    string          `json:"command_id"`
-	Status       string          `json:"status"`                  // "running" (print_file only), "done" or "failed"
+	Status       string          `json:"status"`                  // "running" (commands that run off the poll loop), "done" or "failed"
 	ErrorMessage string          `json:"error_message,omitempty"` // driver error message when failed
 	Data         json.RawMessage `json:"data,omitempty"`          // list_files: the files; FoxTrack stores it in bridge_commands.result
 }
@@ -140,22 +140,7 @@ func pollBridgeCommandsUntil(stop <-chan struct{}) {
 					startConsoleCommand(apiKey, cmd)
 					continue
 				}
-				execErr := executeBridgeCommand(cmd)
-				if errors.Is(execErr, errNoMatchingPrinter) {
-					// Not our command. Leave it pending for another Bridge instance.
-					continue
-				}
-				result := bridgeCommandResult{CommandID: cmd.ID, Status: "done"}
-				if execErr != nil {
-					result.Status = "failed"
-					result.ErrorMessage = execErr.Error()
-					log.Printf("[bridge-commands] %s %s/%s failed: %v", cmd.ID, cmd.ExternalID, cmd.Command, execErr)
-				} else {
-					log.Printf("[bridge-commands] %s %s/%s done", cmd.ID, cmd.ExternalID, cmd.Command)
-				}
-				if err := ackBridgeCommand(apiKey, result); err != nil {
-					log.Printf("[bridge-commands] ack error for %s: %v", cmd.ID, err)
-				}
+				startQuickCommand(apiKey, cmd)
 			}
 		}()
 
@@ -166,6 +151,40 @@ func pollBridgeCommandsUntil(stop <-chan struct{}) {
 			return
 		}
 	}
+}
+
+// startQuickCommand runs a quick command (pause, resume, stop, the light, the
+// plug, set_filament) on the poll loop, once per command id. FoxTrack re-sends
+// a command on every poll until its ack lands, so without the dedupe a lost
+// ack ran it again about 5 seconds later: a stale plug_off after the user had
+// turned the plug back on. A command that failed to run is marked seen too:
+// its failed ack is retried, the command is not. The ack retries run off the
+// poll loop (ackWithRetry waits up to 3 minutes).
+func startQuickCommand(apiKey string, cmd bridgeCommand) {
+	if printJobs.hasSeen(cmd.ID) {
+		return
+	}
+	execErr := executeBridgeCommand(cmd)
+	if errors.Is(execErr, errNoMatchingPrinter) {
+		// Not our command. Leave it pending for another Bridge instance.
+		return
+	}
+	printJobs.markSeen(cmd.ID)
+	result := bridgeCommandResult{CommandID: cmd.ID, Status: "done"}
+	if execErr != nil {
+		result.Status = "failed"
+		result.ErrorMessage = execErr.Error()
+		log.Printf("[bridge-commands] %s %s/%s failed: %v", cmd.ID, cmd.ExternalID, cmd.Command, execErr)
+	} else {
+		log.Printf("[bridge-commands] %s %s/%s done", cmd.ID, cmd.ExternalID, cmd.Command)
+	}
+	printJobs.wg.Add(1)
+	go func() {
+		defer printJobs.wg.Done()
+		ackWithRetry(apiKey, result, func(format string, a ...interface{}) {
+			log.Printf("[bridge-commands] %s %s/%s: %s", cmd.ID, cmd.ExternalID, cmd.Command, fmt.Sprintf(format, a...))
+		})
+	}()
 }
 
 func fetchBridgeCommands(apiKey string) (bridgeCommandsReply, error) {
@@ -243,7 +262,7 @@ func isConsoleCommand(command string) bool {
 	return command == "home" || command == "set_nozzle_temp" || command == "set_bed_temp"
 }
 
-// startConsoleCommand runs on the poll loop: match, dedupe, go. Deduped on the
+// startConsoleCommand runs on the poll loop: match, dedupe, ack "running", go. Deduped on the
 // command id and acked with retries like the files commands, so a lost ack
 // never runs a second G28 or re-applies a temperature the user since changed.
 func startConsoleCommand(apiKey string, cmd bridgeCommand) {
@@ -254,7 +273,11 @@ func startConsoleCommand(apiKey string, cmd bridgeCommand) {
 	if !ok {
 		return // another Bridge's printer: leave it pending
 	}
-	printJobs.markSeen(cmd.ID)
+	// "running" first: a Klipper home can take longer than the 2 minutes
+	// FoxTrack leaves a command pending before it expires it.
+	if !acceptBridgeCommand(apiKey, cmd, p.Name) {
+		return
+	}
 	printJobs.wg.Add(1)
 	go func() {
 		defer printJobs.wg.Done()

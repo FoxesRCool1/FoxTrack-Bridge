@@ -113,6 +113,14 @@ func printerTelemetry(name string) *mqttpkg.TelemetryData {
 	return lanCtrl.GetStates()[name]
 }
 
+// failWatchHolds reports whether a printer that is not printing keeps its
+// watch state. Only a settled status (idle, finished, error, cancelled) ends a
+// print's state. Paused, a link blip ("disconnected", "connected"), PREPARE or
+// no report yet keep it, so one failure does not alert twice.
+func failWatchHolds(t *mqttpkg.TelemetryData) bool {
+	return t == nil || (t.Status != "printing" && !mqttpkg.Settled(t.Status))
+}
+
 func failWatchLoop() {
 	states := map[string]*failWatchState{}
 	for range time.Tick(failWatchTick) {
@@ -128,11 +136,11 @@ func failWatchLoop() {
 		now := time.Now()
 		for _, p := range printers {
 			t := printerTelemetry(p.Name)
-			if t != nil && t.Status == "paused" {
-				seen[p.ID] = true // keep its state, so a resume does not alert twice
+			if failWatchHolds(t) {
+				seen[p.ID] = true
 				continue
 			}
-			if t == nil || t.Status != "printing" || p.CameraHidden {
+			if t.Status != "printing" || p.CameraHidden {
 				continue
 			}
 			seen[p.ID] = true

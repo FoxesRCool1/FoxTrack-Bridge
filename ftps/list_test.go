@@ -111,3 +111,17 @@ func TestDownload_FetchesFileCapsSizeAndReportsMissing(t *testing.T) {
 		t.Fatalf("missing: err = %v", err)
 	}
 }
+
+// On a plain data channel a dropped connection looks like a clean end of file,
+// so a file whose control reply never comes is an error, not a short download.
+func TestDownload_PlainChannelWithoutFinalReplyIsAnError(t *testing.T) {
+	s := newFakeServer(t)
+	s.files = map[string][]byte{"/cache/a.3mf": bytes.Repeat([]byte("0123456789"), 5000)}
+	s.retrCut = true
+	cfg := s.config()
+	cfg.ClearData = true
+	dst := filepath.Join(t.TempDir(), "out.3mf")
+	if err := Download(context.Background(), cfg, "/cache/a.3mf", dst, 1<<20); err == nil {
+		t.Fatal("a half file with no final reply was accepted")
+	}
+}

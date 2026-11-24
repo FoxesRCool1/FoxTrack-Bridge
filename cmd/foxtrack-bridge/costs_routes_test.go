@@ -29,6 +29,14 @@ func withBridgeConfig(t *testing.T, cfg *config.Config) {
 	})
 }
 
+// liveConfig is the stored config now. mutateConfig swaps in a fresh copy on
+// every save, so the pointer given to withBridgeConfig goes stale after one.
+func liveConfig() *config.Config {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return configStore
+}
+
 func serveHandler(h http.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	h(rec, req)
@@ -54,13 +62,13 @@ func TestCostsSettingsRoundTrip(t *testing.T) {
 	if v.Currency != "EUR" || v.FilamentPerKg != 20 || v.EnergyPerKWh != 0.3 || v.MaterialPerKg["PLA"] != 18 || v.MaterialPerKg["PETG"] != 25 {
 		t.Fatalf("saved view = %+v", v)
 	}
-	if len(cfg.Printers) != 1 || cfg.Printers[0].Name != "Fox" {
-		t.Fatalf("saving prices touched the printers: %+v", cfg.Printers)
+	if len(liveConfig().Printers) != 1 || liveConfig().Printers[0].Name != "Fox" {
+		t.Fatalf("saving prices touched the printers: %+v", liveConfig().Printers)
 	}
 
 	// A field left out keeps what is stored.
 	serveHandler(handleCosts, jsonPost("/api/costs", `{"currency":"$"}`))
-	if c := cfg.Costs; c.Currency != "$" || c.FilamentPerKg != 20 || len(c.MaterialPerKg) != 2 {
+	if c := liveConfig().Costs; c.Currency != "$" || c.FilamentPerKg != 20 || len(c.MaterialPerKg) != 2 {
 		t.Fatalf("partial update changed other fields: %+v", c)
 	}
 }

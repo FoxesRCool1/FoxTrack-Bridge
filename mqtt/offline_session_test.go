@@ -166,4 +166,17 @@ func TestSession_SurvivesBridgeRestart(t *testing.T) {
 	if history.LoadSession(sessionKey(p), &left) {
 		t.Errorf("an ended print left a saved session: %+v", left)
 	}
+	// The history record is written in the background. Wait for it, or the
+	// write races the removal of the temp dir.
+	deadline := time.Now().Add(3 * time.Second)
+	for last, stable := -1, 0; stable < 3 && time.Now().Before(deadline); {
+		recs, _ := history.ForPrinter(name)
+		if len(recs) > 0 && len(recs) == last {
+			stable++
+		} else {
+			stable = 0
+		}
+		last = len(recs)
+		time.Sleep(20 * time.Millisecond)
+	}
 }

@@ -50,8 +50,14 @@ func TestPlugCommand_BambuCloudPrinter(t *testing.T) {
 	oldCfg := configStore
 	configStore = &config.Config{Printers: printers}
 	configMutex.Unlock()
+	// A private manager: Stop on the shared one would stay stopped for the
+	// next test or the next -count run.
+	oldPlugs := plugs
+	plugs = plug.NewManager()
 	t.Cleanup(func() {
 		plugs.Stop() // wait for the pollers: they read configStore, restored below
+		plugs = oldPlugs
+		wirePlugs()
 		configMutex.Lock()
 		configStore = oldCfg
 		configMutex.Unlock()

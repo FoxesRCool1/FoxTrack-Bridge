@@ -54,3 +54,10 @@ func WithPlugCaps(caps []string, hasPlug bool) []string {
 	}
 	return append(append([]string(nil), caps...), "plug_on", "plug_off")
 }
+
+// OfflineRelayPayload is the OFFLINE report the offline chain sends for a
+// Bambu printer (reportOffline), for the plug-only report: both post the same
+// body, so FoxTrack's stored status does not change between them.
+func OfflineRelayPayload(p Printer) webhook.RelayPayload {
+	return offlineRelayPayload(p)
+}

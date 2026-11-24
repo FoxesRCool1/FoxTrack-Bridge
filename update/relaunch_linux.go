@@ -18,7 +18,9 @@ func relaunchDetached(exePath string) error {
 	}
 	defer devNull.Close()
 
-	cmd := exec.Command(exePath)
+	// Same arguments as this run (--port). The new process waits for the port
+	// this one still holds: see listenWithRetry in the server.
+	cmd := exec.Command(exePath, os.Args[1:]...)
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull

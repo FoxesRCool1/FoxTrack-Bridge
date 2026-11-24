@@ -395,17 +395,39 @@ func configPath() string {
 // a directory in the way) must not cost the user a good file.
 var ErrCorrupt = errors.New("config file is corrupt")
 
+// legacyConfigAbsent reports whether reading the old location failed because no
+// config can be there: the file is missing, or something that is not a folder
+// sits where its "config" folder would be (a program named "config" next to the
+// binary, say). Any other failure means a file that exists but cannot be read.
+func legacyConfigAbsent(legacyPath string, err error) bool {
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	fi, statErr := os.Stat(filepath.Dir(legacyPath))
+	return statErr == nil && !fi.IsDir()
+}
+
 func LoadConfig() (*Config, error) {
 	preferredPath := configPath()
 	legacyPath := legacyConfigPath()
+	// fromLegacy: the config in memory came from the old location, so it has to
+	// be written to the preferred one.
+	fromLegacy := false
 	data, err := os.ReadFile(preferredPath)
 	if errors.Is(err, os.ErrNotExist) {
 		legacyData, legacyErr := os.ReadFile(legacyPath)
 		if legacyErr != nil {
-			return nil, err
+			if legacyConfigAbsent(legacyPath, legacyErr) {
+				return nil, err // no config anywhere: a fresh install
+			}
+			// The old config is there but cannot be read (permissions). Saying
+			// "no config" would start the Bridge empty, and the next save would
+			// then leave the user's printers behind in the old location.
+			return nil, legacyErr
 		}
 		data = legacyData
 		err = nil
+		fromLegacy = true
 	}
 	if err != nil {
 		return nil, err
@@ -424,6 +446,7 @@ func LoadConfig() (*Config, error) {
 			return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
 		}
 		log.Printf("ERROR: %s failed to load (%v); it was backed up to %s and the older config at %s is used instead", preferredPath, err, backup, legacyPath)
+		fromLegacy = true
 	}
 
 	backfilled := false
@@ -434,9 +457,20 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	// Best-effort migration so future updates keep using the stable user config path.
-	if err := SaveConfig(&cfg); err != nil && backfilled {
-		log.Printf("WARNING: failed to persist backfilled printer IDs (%v); IDs will be regenerated on next restart until this config can be saved; printer identity will not be stable across restarts", err)
+	// Write only when what is in memory differs from the preferred file: a
+	// config moved over from the old location (best-effort migration, so future
+	// updates keep using the stable user config path) or one whose printers
+	// just got their IDs. Rewriting an unchanged file would drop every key this
+	// build does not know, which costs the user their settings when an older
+	// build opens a config a newer one wrote.
+	if fromLegacy || backfilled {
+		if err := SaveConfig(&cfg); err != nil && backfilled {
+			log.Printf("WARNING: failed to persist backfilled printer IDs (%v); IDs will be regenerated on next restart until this config can be saved; printer identity will not be stable across restarts", err)
+		}
+	} else {
+		// Not rewritten, so make sure a file an older build or the user left
+		// readable by others is private: it holds access codes. Best effort.
+		_ = os.Chmod(preferredPath, 0600)
 	}
 
 	return &cfg, nil

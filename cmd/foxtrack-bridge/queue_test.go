@@ -17,10 +17,15 @@ func withQueue(t *testing.T) {
 	t.Helper()
 	configMutex.Lock()
 	saved := configStore
-	configStore = &config.Config{Printers: []config.Printer{{ID: "p1", Name: "Monsieur"}, {ID: "p2", Name: "Sherlock"}}}
+	configStore = &config.Config{Printers: []config.Printer{
+		{ID: "p1", Name: "Monsieur", MoonrakerURL: "http://192.168.1.6:7125"},
+		{ID: "p2", Name: "Sherlock", MoonrakerURL: "http://192.168.1.7:7125"},
+		{ID: "p3", Name: "Prusa", PrusaLinkURL: "http://192.168.1.8"},
+	}}
 	configMutex.Unlock()
 	printQueue.Lock()
 	printQueue.loaded = false
+	printQueue.lastStart = nil
 	printQueue.Unlock()
 	os.Remove(queuePath())
 	t.Cleanup(func() {
@@ -144,7 +149,17 @@ func TestQueue_StartNext(t *testing.T) {
 	if q := queueSnapshot(); names(q["p1"]) != "b.3mf" {
 		t.Fatalf("after start = %s", names(q["p1"]))
 	}
+	// Right after an accepted start the printer still reads idle: a double
+	// click must not start and drop the next file.
+	if _, err := queueStartNext("p1", ok, start); !errors.Is(err, errQueueBusy) {
+		t.Fatalf("second start inside the gap: err = %v", err)
+	}
+	if q := queueSnapshot(); names(q["p1"]) != "b.3mf" || len(started) != 1 {
+		t.Fatalf("the gap must keep the next file: %s, started %v", names(q["p1"]), started)
+	}
+	clearQueueStartGap()
 	queueStartNext("p1", ok, start)
+	clearQueueStartGap()
 	if _, err := queueStartNext("p1", ok, start); !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("empty: err = %v", err)
 	}
@@ -248,5 +263,43 @@ func TestQueue_CorruptFileMovedAside(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("corrupt queue.json must be kept as queue.json.corrupt-*")
+	}
+}
+
+// clearQueueStartGap forgets the accepted starts, as if the gap had passed.
+func clearQueueStartGap() {
+	printQueue.Lock()
+	printQueue.lastStart = nil
+	printQueue.Unlock()
+}
+
+func TestPrinterCanStartFile(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		p    config.Printer
+		want bool
+	}{
+		{"bambu lan", config.Printer{Serial: "01P00A000000001", IP: "192.168.1.5", LANCode: "12345678"}, true},
+		{"bambu cloud", config.Printer{Serial: "01P00A000000001", Connection: config.ConnectionCloud}, false},
+		{"bambu without its code", config.Printer{Serial: "01P00A000000001", IP: "192.168.1.5"}, false},
+		{"octoprint", config.Printer{OctoPrintURL: "http://192.168.1.9"}, true},
+		{"prusalink", config.Printer{PrusaLinkURL: "http://192.168.1.8"}, false},
+		{"home assistant", config.Printer{HomeAssistantURL: "http://192.168.1.10:8123"}, false},
+		{"klipper", config.Printer{MoonrakerURL: "http://192.168.1.6:7125"}, true},
+	} {
+		if got := printerCanStartFile(c.p); got != c.want {
+			t.Errorf("%s: printerCanStartFile = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A printer that cannot start a stored file takes no queue.
+func TestQueue_AddRefusedForAKindThatCannotStart(t *testing.T) {
+	withQueue(t)
+	if code, _ := queueCall(t, "POST", "/api/queue/p3", `{"file_name":"a.gcode"}`); code != 400 {
+		t.Fatalf("PrusaLink add: code = %d, want 400", code)
+	}
+	if _, q := queueCall(t, "GET", "/api/queue", ""); len(q["p3"]) != 0 {
+		t.Fatalf("refused add was stored: %v", q["p3"])
 	}
 }

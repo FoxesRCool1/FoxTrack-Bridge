@@ -497,6 +497,55 @@ func TestExecuteAITool_CameraRefusedWhenNotAllowed(t *testing.T) {
 	}
 }
 
+// A hidden camera is off limits to the assistant too, and list_printers must
+// not offer it.
+func TestExecuteAITool_CameraHiddenIsNoCamera(t *testing.T) {
+	printers := aiPrinters()
+	printers[0].CameraHidden = true
+	configMutex.Lock()
+	configStore = &config.Config{Printers: printers, AI: &config.AI{Enabled: true, AllowCamera: true}}
+	configMutex.Unlock()
+
+	got := toolValue(t, "view_printer_camera", `{"printer_name":"Monsieur"}`)
+	if got["error"] != "no_camera" {
+		t.Errorf("error = %v, want no_camera", got["error"])
+	}
+	list := toolValue(t, "list_printers", `{}`)
+	for _, r := range list["printers"].([]any) {
+		row := r.(map[string]any)
+		if row["name"] == "Monsieur" && row["camera_available"] != false {
+			t.Errorf("hidden camera: camera_available = %v, want false", row["camera_available"])
+		}
+	}
+}
+
+// The provider is not a place for a printer's login: list_printers and the
+// connection test show the address without user:pass@.
+func TestExecuteAITool_PrinterURLCarriesNoLogin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	login := strings.Replace(srv.URL, "http://", "http://bob:hunter2@", 1)
+	configMutex.Lock()
+	configStore = &config.Config{Printers: []config.Printer{{ID: "p9", Name: "Loginjet", MoonrakerURL: login}}}
+	configMutex.Unlock()
+
+	for _, tool := range []string{"list_printers", "test_printer_connection"} {
+		args := `{"printer_name":"Loginjet"}`
+		if tool == "list_printers" {
+			args = `{}`
+		}
+		raw, _ := json.Marshal(toolValue(t, tool, args))
+		if strings.Contains(string(raw), "hunter2") || strings.Contains(string(raw), "bob") {
+			t.Errorf("%s leaks the login: %s", tool, raw)
+		}
+		if !strings.Contains(string(raw), strings.TrimPrefix(srv.URL, "http://")) {
+			t.Errorf("%s lost the address: %s", tool, raw)
+		}
+	}
+}
+
 func TestToolsFor_CameraToolOnlyOfferedWhenAllowed(t *testing.T) {
 	has := func(tools []ai.Tool, name string) bool {
 		for _, tool := range tools {

@@ -80,6 +80,11 @@ func Download(ctx context.Context, cfg Config, remoteName, localPath string, max
 	if truncated && (rerr != nil || (code != 226 && code != 250)) {
 		return fmt.Errorf("read file: %w", readErr)
 	}
+	// A plain data channel has no close_notify: a dropped connection reads as
+	// a clean end, so the control reply is the only proof the file is whole.
+	if cfg.ClearData && rerr != nil {
+		return fmt.Errorf("read file: no reply after the transfer: %w", rerr)
+	}
 	if rerr == nil && code != 226 && code != 250 {
 		return fmt.Errorf("RETR ended with %d %s", code, msg)
 	}

@@ -46,9 +46,9 @@ func TestHandler_ErrorCodeSurvivesDeltas(t *testing.T) {
 	if st := GetPrinterState(name); st.Error != "" {
 		t.Fatalf("a delta set error %q", st.Error)
 	}
-	handle(nil, fakeMessage{`{"print":{"gcode_state":"FAILED","mc_print_error_code":"50348044"}}`})
+	handle(nil, fakeMessage{`{"print":{"gcode_state":"FAILED","mc_print_error_code":"50348041"}}`})
 	handle(nil, fakeMessage{`{"print":{"nozzle_temper":31}}`})
-	if st := GetPrinterState(name); st.Error != "50348044" {
+	if st := GetPrinterState(name); st.Error != "50348041" {
 		t.Fatalf("a delta wiped the error: %q", st.Error)
 	}
 	handle(nil, fakeMessage{`{"print":{"gcode_state":"IDLE","mc_print_error_code":"0"}}`})

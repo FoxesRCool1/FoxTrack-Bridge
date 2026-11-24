@@ -37,6 +37,10 @@ const (
 	shareStillFailTTL = 5 * time.Second
 )
 
+// shareFetchTimeout limits one camera fetch. The fetch does not use the
+// request's context, so one viewer leaving cannot cancel it for the rest.
+var shareFetchTimeout = 12 * time.Second
+
 func init() {
 	http.HandleFunc("/share/", handleSharePage)
 	http.HandleFunc("/api/shares", handleShares)
@@ -262,7 +266,8 @@ type shareStill struct {
 
 // shareCameraStill returns a cached still or fetches a new one. A failure is
 // remembered for shareStillFailTTL, so a dead camera is not retried on every
-// request, but a caller that gave up does not poison the cache.
+// request. The fetch has its own timeout and its result is always cached, also
+// a failure: a camera that hangs is tried once, not once per waiting viewer.
 func shareCameraStill(ctx context.Context, p config.Printer) ([]byte, error) {
 	shareStills.Lock()
 	if shareStills.byPrinter == nil {
@@ -277,17 +282,21 @@ func shareCameraStill(ctx context.Context, p config.Printer) ([]byte, error) {
 
 	s.Lock()
 	defer s.Unlock()
+	// A viewer that waited here and gave up meanwhile does not start a fetch.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s.err != nil && time.Since(s.at) < shareStillFailTTL {
 		return nil, s.err
 	}
 	if s.err == nil && s.jpg != nil && time.Since(s.at) < shareStillTTL {
 		return s.jpg, nil
 	}
-	jpg, err := shareSnapshot(ctx, p)
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shareFetchTimeout)
+	defer cancel()
+	jpg, err := shareSnapshot(fetchCtx, p)
 	if err != nil {
-		if ctx.Err() == nil {
-			s.at, s.jpg, s.err = time.Now(), nil, err
-		}
+		s.at, s.jpg, s.err = time.Now(), nil, err
 		return nil, err
 	}
 	s.at, s.jpg, s.err = time.Now(), jpg, nil

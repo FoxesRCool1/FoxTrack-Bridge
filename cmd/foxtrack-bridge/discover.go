@@ -124,14 +124,19 @@ func runDiscovery(ctx context.Context, d time.Duration) discoverResult {
 	wg.Wait()
 
 	found := bambu.printers
+	var others []discoveredPrinter
 	for _, p := range lanFound {
 		if p.Type == "bambu" {
 			found = append(found, p)
+		} else {
+			others = append(others, p)
 		}
 	}
+	// The remembered Bambu printers carry the merged TCP finds; the raw ones
+	// must not come back after them and overwrite the announced name.
 	bambu.printers = rememberBambu(found, time.Now())
 	res := discoverResult{
-		Printers: dedupeSort(append(bambu.printers, lanFound...)),
+		Printers: dedupeSort(append(bambu.printers, others...)),
 		Notes:    []string{},
 	}
 	if bambu.noSocket {
@@ -161,22 +166,41 @@ type bambuSighting struct {
 const bambuSeenFor = 10 * time.Minute
 
 // rememberBambu records this scan's Bambu printers and returns every one seen
-// in the last bambuSeenFor. A TCP find has no name or connect mode, so it keeps
-// those an earlier announcement gave.
+// in the last bambuSeenFor, oldest sighting first (so dedupeSort lets this
+// scan's finds win on a shared IP). A TCP find has no name, model or connect
+// mode (its name is its IP), so it keeps those an earlier announcement gave.
 func rememberBambu(found []discoveredPrinter, now time.Time) []discoveredPrinter {
 	for _, p := range found {
 		key := strings.ToLower(p.Serial)
-		if old, ok := bambuSeen[key]; ok && p.Name == "" {
-			p.Name, p.Connect = old.printer.Name, old.printer.Connect
+		if old, ok := bambuSeen[key]; ok && (p.Name == "" || p.Name == p.IP) {
+			if n := old.printer.Name; n != "" && n != old.printer.IP {
+				p.Name = n
+			}
+			if old.printer.Model != "" {
+				p.Model = old.printer.Model
+			}
+			if old.printer.Connect != "" {
+				p.Connect = old.printer.Connect
+			}
 		}
 		bambuSeen[key] = bambuSighting{p, now}
 	}
-	var out []discoveredPrinter
+	var seen []bambuSighting
 	for serial, s := range bambuSeen {
 		if now.Sub(s.at) > bambuSeenFor {
 			delete(bambuSeen, serial)
 			continue
 		}
+		seen = append(seen, s)
+	}
+	sort.Slice(seen, func(i, j int) bool {
+		if !seen[i].at.Equal(seen[j].at) {
+			return seen[i].at.Before(seen[j].at)
+		}
+		return seen[i].printer.Serial < seen[j].printer.Serial
+	})
+	var out []discoveredPrinter
+	for _, s := range seen {
 		out = append(out, s.printer)
 	}
 	return out

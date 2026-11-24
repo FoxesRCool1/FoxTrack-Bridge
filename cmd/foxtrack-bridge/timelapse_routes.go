@@ -187,11 +187,16 @@ func timelapseTick(now time.Time) {
 }
 
 func timelapseCapture(rec *timelapse.Recorder, p config.Printer, interval time.Duration) {
+	took := false // the camera was asked; Capture is a no-op until a picture is due
 	err := rec.Capture(p.ID, interval, func() ([]byte, error) {
+		took = true
 		ctx, cancel := context.WithTimeout(context.Background(), timelapseSnapTimeout)
 		defer cancel()
 		return printerSnapshot(ctx, p)
 	})
+	if !took {
+		return // not due, busy or no recording: nothing new to count
+	}
 	tlMu.Lock()
 	defer tlMu.Unlock()
 	if err == nil {

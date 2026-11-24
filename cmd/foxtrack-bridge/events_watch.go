@@ -405,6 +405,10 @@ func printerSnapshot(ctx context.Context, p config.Printer) ([]byte, error) {
 	if useRTSP(p) {
 		return rtspSnapshot(ctx, p, ip)
 	}
+	// A caller that already gave up must not start a connection nobody waits for.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	type result struct {
 		b   []byte
 		err error
@@ -423,14 +427,19 @@ func printerSnapshot(ctx context.Context, p config.Printer) ([]byte, error) {
 }
 
 // mutateConfig changes the stored config under the lock and writes it. fn
-// may refuse by returning an error, and then nothing is saved.
+// works on a copy: it may refuse by returning an error, and a failed save
+// both leave the stored config as it was. The save runs under the lock so two
+// changes cannot overwrite each other.
 func mutateConfig(fn func(c *config.Config) error) error {
 	configMutex.Lock()
-	if err := fn(configStore); err != nil {
-		configMutex.Unlock()
+	defer configMutex.Unlock()
+	next := configStore.Clone()
+	if err := fn(next); err != nil {
 		return err
 	}
-	cfg := configStore.Clone()
-	configMutex.Unlock()
-	return config.SaveConfig(cfg)
+	if err := config.SaveConfig(next); err != nil {
+		return err
+	}
+	configStore = next
+	return nil
 }

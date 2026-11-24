@@ -17,6 +17,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -166,8 +167,44 @@ func StartServer(port int) {
 	http.HandleFunc("/api/virtual-printer", handleVirtualPrinter) // GET: virtual printer address and key
 
 	printStartupBanner(port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), guardWrites(requireAuth(http.DefaultServeMux))); err != nil {
+	// No WriteTimeout: the camera and event streams stay open. The header
+	// timeout stops a client that opens a connection and never sends a request.
+	srv := &http.Server{
+		Handler:           guardWrites(requireAuth(http.DefaultServeMux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	ln, err := listenWithRetry(fmt.Sprintf(":%d", port), 8*time.Second)
+	if err != nil {
 		log.Printf("Server error: %v", err)
+		return
+	}
+	if err := srv.Serve(ln); err != nil {
+		log.Printf("Server error: %v", err)
+	}
+}
+
+// printerNameFor lets the control, camera and history URLs take a printer ID
+// in place of the name: it returns the name of the printer with that ID, or
+// token itself when no printer has it. The drivers below are keyed by name.
+func printerNameFor(token string) string {
+	if p, ok := printerByID(token); ok && token != "" {
+		return p.Name
+	}
+	return token
+}
+
+// listenWithRetry opens the port, waiting up to wait while it is still in
+// use: after a self-update the new Bridge starts while the old one is on its
+// way out and still holds the port for a moment.
+func listenWithRetry(addr string, wait time.Duration) (net.Listener, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil || !errors.Is(err, syscall.EADDRINUSE) || time.Now().After(deadline) {
+			return ln, err
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
@@ -703,7 +740,9 @@ func handleUpdateRestart(w http.ResponseWriter, r *http.Request) {
 
 // handleControl handles printer control commands.
 // URL: /api/control/{printerName}/{command}
-// Commands: pause, resume, stop, light_on, light_off
+// Commands: pause, resume, stop, start (optionally with a file_name), light_on
+// and light_off, the smart plug commands, and whatever else the printer's
+// driver accepts (runControl routes each one).
 func handleControl(w http.ResponseWriter, r *http.Request) {
 	jsonHeaders(w)
 	allowWebOrigin(w, r)
@@ -726,6 +765,7 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid printer name")
 		return
 	}
+	printerName = printerNameFor(printerName)
 	command := parts[1]
 
 	var args map[string]interface{}
@@ -745,12 +785,14 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	idem := controlKey(printerName, command, r.Header.Get("Idempotency-Key"))
-	if seenControlKey(idem, time.Now()) {
-		// The same click again (a retry of one that worked): done already.
+	if !reserveControlKey(idem, time.Now()) {
+		// The same click again (a retry of one that worked, or a second request
+		// while the first is still running): it runs once.
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "command": command, "printer": printerName})
 		return
 	}
 	if err := runControl(printerName, command, args); err != nil {
+		releaseControlKey(idem) // a failed command may be retried
 		code := http.StatusBadRequest
 		if errors.Is(err, errControlBlocked) {
 			code = http.StatusConflict
@@ -759,7 +801,6 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	rememberControlKey(idem, time.Now()) // only a command that ran: a failed one may be retried
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "command": command, "printer": printerName})
 }
@@ -768,6 +809,15 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 // the Bambu MQTT session, or the LAN driver. /api/control and the Home
 // Assistant MQTT export both go through it.
 func runControl(printerName, command string, args map[string]interface{}) error {
+	// A start with a file name takes the complete file-start path (upload
+	// check, remote print for the printer's kind), not the driver's bare start.
+	if command == "start" {
+		if file, _ := args["file_name"].(string); strings.TrimSpace(file) != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			return startStoredFile(ctx, printerName, file)
+		}
+	}
 	switch {
 	case isPlugCommand(command):
 		return runPlugCommand(printerName, command)
@@ -801,22 +851,20 @@ func controlKey(printer, command, key string) string {
 	return printer + "\x00" + command + "\x00" + key
 }
 
-func seenControlKey(key string, now time.Time) bool {
+// reserveControlKey claims key for a command about to run. It reports false
+// when the key was already claimed in the last 10 minutes: that request is a
+// repeat and must not run again. Claiming before the command runs, under one
+// lock, is what stops two in-flight requests with the same key from both
+// running. An empty key is never a repeat.
+func reserveControlKey(key string, now time.Time) bool {
 	if key == "" {
+		return true
+	}
+	controlKeysMu.Lock()
+	defer controlKeysMu.Unlock()
+	if t, ok := controlKeys[key]; ok && now.Sub(t) < 10*time.Minute {
 		return false
 	}
-	controlKeysMu.Lock()
-	defer controlKeysMu.Unlock()
-	t, ok := controlKeys[key]
-	return ok && now.Sub(t) < 10*time.Minute
-}
-
-func rememberControlKey(key string, now time.Time) {
-	if key == "" {
-		return
-	}
-	controlKeysMu.Lock()
-	defer controlKeysMu.Unlock()
 	if len(controlKeys) > 500 {
 		for k, t := range controlKeys {
 			if now.Sub(t) >= 10*time.Minute {
@@ -825,6 +873,18 @@ func rememberControlKey(key string, now time.Time) {
 		}
 	}
 	controlKeys[key] = now
+	return true
+}
+
+// releaseControlKey gives a claim back when its command failed, so the
+// dashboard's retry with the same key runs.
+func releaseControlKey(key string) {
+	if key == "" {
+		return
+	}
+	controlKeysMu.Lock()
+	defer controlKeysMu.Unlock()
+	delete(controlKeys, key)
 }
 
 // handleCamera proxies the BambuLab MJPEG camera stream.
@@ -841,6 +901,7 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 	if decodedName, err := url.PathUnescape(printerName); err == nil {
 		printerName = decodedName
 	}
+	printerName = printerNameFor(printerName)
 
 	// Find the printer config. Copy it by value while holding the lock: the
 	// delete handler compacts configStore.Printers in place, so a pointer into
@@ -903,7 +964,8 @@ func handleCamera(w http.ResponseWriter, r *http.Request) {
 // followed by that many bytes of JPEG data.
 //
 // Only the A1 and P1 series serve this protocol. The X1 and H2 series stream
-// RTSP on port 322 instead, which the Bridge does not read.
+// RTSP on port 322 instead: handleCamera sends those models to rtspCameraStream
+// (camera_rtsp.go) before this function is reached.
 func bambuCameraStream(w http.ResponseWriter, ip, lanCode, printerName string) {
 	proxyBambuCamera(w, net.JoinHostPort(ip, "6000"), lanCode, printerName)
 }
@@ -1735,7 +1797,22 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	if !matchByID {
+		// A name two printers share does not say which one to delete.
+		sameName := 0
+		for _, p := range configStore.Printers {
+			if p.Name == token {
+				sameName++
+			}
+		}
+		if sameName > 1 {
+			configMutex.Unlock()
+			writeErr(w, http.StatusConflict, "Two printers have this name. Rename one of them first.")
+			return
+		}
+	}
 	var removedNames []string
+	removedIDs := map[string]bool{}
 	printers := configStore.Printers[:0]
 	for _, p := range configStore.Printers {
 		matches := p.Name == token
@@ -1744,6 +1821,9 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		}
 		if matches {
 			removedNames = append(removedNames, p.Name)
+			if p.ID != "" {
+				removedIDs[p.ID] = true
+			}
 			continue
 		}
 		printers = append(printers, p)
@@ -1757,9 +1837,13 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	configStore.Printers = printers
+	forgetPrinterIDs(configStore, removedIDs)
 	cfg := configStore.Clone()
 	configMutex.Unlock()
 	saveErr := config.SaveConfig(cfg)
+	if saveErr == nil {
+		queueForget(removedIDs) // a delete that was not saved comes back on restart, with its queue
+	}
 	// Stop whichever connection type each removed printer had. Both calls
 	// are no-ops for names they don't manage, so no need to know which type
 	// it was.
@@ -1996,9 +2080,39 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 	if blank(edit.HomeAssistantToken) {
 		p.HomeAssistantToken = ""
 	}
-	keepPrinterSecrets(p, old.Printers[idx])
+	prev := old.Printers[idx]
+	keepPrinterSecrets(p, prev)
+	// keepPrinterSecrets drops a secret whose machine changed. Where a blank
+	// secret leaves the printer unusable, refuse the edit instead of saving it
+	// (Klipper's key is optional, so it is not checked).
+	if isBambuPrinterConfig(prev) && !prev.IsCloud() && strings.TrimSpace(p.Serial) != "" && strings.TrimSpace(p.LANCode) == "" {
+		return nil, -1, invalidPrinterEdit("Enter the access code again when you change the serial number.")
+	}
+	switch prev.Kind() {
+	case config.KindPrusaLink, config.KindOctoPrint:
+		if prev.APIKey != "" && p.APIKey == "" {
+			return nil, -1, invalidPrinterEdit(enterKeyAgain)
+		}
+	case config.KindHomeAssistant:
+		if prev.HomeAssistantToken != "" && p.HomeAssistantToken == "" {
+			return nil, -1, invalidPrinterEdit(enterKeyAgain)
+		}
+	}
 	return cfg, idx, nil
 }
+
+// enterKeyAgain is shown when an edit moves a printer to a new address and the
+// saved key or token (which belongs to the old address) was not typed again.
+const enterKeyAgain = "Enter the key or token again when you change the address."
+
+// invalidPrinterEdit is an errInvalidPrinterEdit whose text is msg alone, so
+// the dashboard shows the sentence as written.
+func invalidPrinterEdit(msg string) error { return printerEditError(msg) }
+
+type printerEditError string
+
+func (e printerEditError) Error() string        { return string(e) }
+func (e printerEditError) Is(target error) bool { return target == errInvalidPrinterEdit }
 
 // addPreviousName records oldName in a printer's rename history. A name the
 // printer takes back is dropped from the history, so it never lists its own
@@ -2096,8 +2210,11 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 		if renamed {
 			mqttpkg.RemovePrinterState(before.Name)
 		}
-	case isBambuPrinterConfig(after):
-		if !renamed && mqttPrinter(before, cfg) == mqttPrinter(after, cfg) {
+	case isBambuPrinterConfig(before) || isBambuPrinterConfig(after):
+		// A printer that stops being a usable Bambu LAN printer (its access
+		// code went blank) still has a session under its old name to close.
+		bambuNow := isBambuPrinterConfig(after)
+		if bambuNow && isBambuPrinterConfig(before) && !renamed && mqttPrinter(before, cfg) == mqttPrinter(after, cfg) {
 			return
 		}
 		log.Printf("[%s] printer edited; restarting MQTT connection", after.Name)
@@ -2106,7 +2223,9 @@ func reconnectEditedPrinter(before, after config.Printer, cfg *config.Config) {
 			mqttpkg.RenameSession(before.Name, after.Name)
 			mqttpkg.RemovePrinterState(before.Name)
 		}
-		mqttpkg.ConnectPrinter(mqttPrinter(after, cfg))
+		if bambuNow {
+			mqttpkg.ConnectPrinter(mqttPrinter(after, cfg))
+		}
 	default:
 		if !renamed && httpConnFields(before) == httpConnFields(after) {
 			return
@@ -2193,6 +2312,21 @@ func syncPrinterConnections(oldCfg, cfg *config.Config) {
 
 	lanCtrl.SyncPrinters(cfg.Printers, cfg.APIKey, cfg.FoxTrack2APIKey)
 	syncCloud(cfg)
+	// Cloud printers no longer in cfg: syncCloud has unsubscribed them, so
+	// their state can go without a late report bringing it back.
+	if oldCfg != nil {
+		stillBambu := map[string]bool{}
+		for _, p := range cfg.Printers {
+			if isBambuPrinterConfig(p) {
+				stillBambu[p.Name] = true
+			}
+		}
+		for _, p := range oldCfg.Printers {
+			if isBambuPrinterConfig(p) && p.IsCloud() && !stillBambu[p.Name] {
+				mqttpkg.RemovePrinterState(p.Name)
+			}
+		}
+	}
 	plugs.Sync(cfg.Printers)
 	syncVirtualPrinter(cfg)
 }
@@ -2262,6 +2396,7 @@ func handleHistoryByPrinter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "missing printer name")
 		return
 	}
+	name = printerNameFor(name)
 	records, err := printerHistory(name)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

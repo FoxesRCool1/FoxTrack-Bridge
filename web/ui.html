@@ -584,12 +584,12 @@
     </div>
 </div>
 
-<!-- Start Print Modal (Klipper) -->
+<!-- Start Print Modal (Bambu LAN, Klipper, OctoPrint) -->
 <div id="startPrintModal" class="fixed inset-0 z-50 hidden overlay-tint backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeStartPrint()">
     <div class="floating w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="startPrintTitle">
         <h3 id="startPrintTitle" class="font-heading text-xl font-medium leading-tight">Start a print</h3>
         <p id="startPrintSubtitle" class="mt-1 mb-4 text-sm leading-relaxed text-text-2"></p>
-        <label for="startPrintFile" class="field-label flex items-center gap-1">File name on the printer <button type="button" class="info-tip" aria-label="About the file name" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">A file already in the printer's gcodes folder, like benchy.gcode. To send a new file, use Print in FoxTrack.</span></label>
+        <label for="startPrintFile" class="field-label flex items-center gap-1">File name on the printer <button type="button" class="info-tip" aria-label="About the file name" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">A file already stored on the printer, like benchy.gcode. To send a new file, use Print in FoxTrack.</span></label>
         <input type="text" id="startPrintFile" autocomplete="off" class="field" placeholder="benchy.gcode" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStartPrint()}">
         <div class="mt-5 flex gap-2 justify-end">
             <button type="button" onclick="closeStartPrint()" class="btn-outline btn-lg">Cancel</button>
@@ -864,6 +864,13 @@
                     <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Send files from OrcaSlicer or PrusaSlicer to FoxTrack.
                         <button type="button" class="info-tip" aria-label="How to set up the slicer" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">In the slicer, add a printer host of type OctoPrint with the address and API key below. Files you send land in FoxTrack under Printers, From the slicer. Print them from there.</span>
                     </p>
+                    <div class="mt-5">
+                        <label for="vpPort" class="field-label">Port</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="vpPort" min="1" max="65535" step="1" inputmode="numeric" autocomplete="off" class="field field-mono w-32" placeholder="8090" onkeydown="if(event.key==='Enter'){event.preventDefault();saveVirtualPrinterPort()}">
+                            <button type="button" onclick="saveVirtualPrinterPort()" class="btn-outline shrink-0">Save</button>
+                        </div>
+                    </div>
                     <p id="vpStandalone" class="hidden mt-5 text-sm text-text-2">Connect FoxTrack first. <button type="button" onclick="showSettingsTab('foxtrack')" class="text-link hover:underline underline-offset-4">Open FoxTrack settings</button></p>
                     <div id="vpDetails" class="hidden mt-5 space-y-4">
                         <div>
@@ -1001,7 +1008,7 @@
                         <h2 class="font-heading text-xl font-medium leading-tight">Back up and restore</h2>
                         <p class="mt-1.5 text-sm text-text-2">Download your printers and settings as one file, or restore them from a backup. Passwords, access codes and keys are left out of the file. Restoring on this computer keeps the ones you already entered; on a new computer, enter them again, and each printer that needs one says so. A restore never changes your dashboard password, API tokens, share links or Bambu account, and keeps the assistant key unless the backup uses a different AI provider. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.</p>
                         <div class="mt-5 flex items-center gap-3">
-                            <a href="/api/config/export" download class="btn-outline">Download backup</a>
+                            <button type="button" onclick="downloadBackup(this)" class="btn-outline">Download backup</button>
                             <button type="button" onclick="pickBackupFile()" class="btn-outline">Restore from file…</button>
                             <input id="restoreFileInput" type="file" accept=".json,application/json" class="hidden" onchange="restoreFromFile(this.files[0])">
                         </div>
@@ -1197,8 +1204,8 @@ function lastReportLine(p) {
 // The FoxTrack line of a card, only when the Bridge is linked to FoxTrack.
 function foxtrackCardLine(p) {
     if (!foxtrackLinked()) return '';
-    if (relayProblem && relayProblem.printer === p.name)
-        return { text: fill('FoxTrack refused this printer: {0}', relayProblem.message), warn: true };
+    if (relayProblemInfo && relayProblemInfo.printer === p.name)
+        return { text: fill('FoxTrack refused this printer: {0}', relayProblemInfo.message), warn: true };
     if (relayDelivered) return { text: 'Sending to FoxTrack', warn: false };
     return { text: 'Not in FoxTrack yet', warn: false };
 }
@@ -1275,6 +1282,16 @@ function printerBrand(p) {
     return (p && p.serial) ? 'bambu' : 'klipper';
 }
 
+// Pause, resume and stop can be sent to this printer. Over Bambu Cloud only the
+// light works, and Home Assistant printers are read-only. The cards and the
+// command menu both ask this, so they never disagree.
+function canControlPrinter(p) { return !isCloudPrinter(p) && printerBrand(p) !== 'home_assistant'; }
+
+// "Start print" and "Add to queue" work on Bambu LAN, Klipper and OctoPrint:
+// the Bridge starts a file that is already stored on the printer. Bambu Cloud,
+// PrusaLink and Home Assistant cannot do this.
+function canStartFile(p) { return ['bambu', 'klipper', 'octoprint'].includes(printerBrand(p)); }
+
 const BRAND_LABELS = { bambu_cloud: 'Bambu cloud', bambu: 'Bambu', klipper: 'Klipper', prusalink: 'PrusaLink', octoprint: 'OctoPrint', home_assistant: 'Home Assistant' };
 function printerTypeLabel(p) { return BRAND_LABELS[printerBrand(p)]; }
 
@@ -1343,10 +1360,15 @@ function undoBar(text, name, { onUndo, onCommit, ms = 8000 } = {}) {
 }
 
 // Leaving the page inside an undo window: the deletes still happen.
+// Their requests are sent with keepalive (apiFetch reads pageLeaving), so the
+// browser finishes them after the page is gone.
+let pageLeaving = false;
 function flushUndo() {
+    pageLeaving = true;
     while (undoBars.length) undoBars[0].commit();
 }
 window.addEventListener('pagehide', flushUndo);
+window.addEventListener('pageshow', () => { pageLeaving = false; });   // back from the bfcache
 
 
 // With a dashboard password set, a session can run out while the page is
@@ -1370,6 +1392,8 @@ async function apiFetch(url, options = {}) {
     // Every write carries a JSON Content-Type and a body, even an empty one: the
     // server refuses cross-site writes that lack them.
     if ((options.method || 'GET').toUpperCase() !== 'GET' && options.body == null) options = { ...options, body: '{}' };
+    // keepalive lets a request outlive the page (a delete committed on unload).
+    if (options.keepalive == null && pageLeaving) options = { ...options, keepalive: true };
     try { res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options }); }
     catch (_) { throw new Error("Can't reach the Bridge. Is it still running?"); }
     if (!res.ok) {
@@ -1621,11 +1645,11 @@ function toggleSettingsMore(fold) {
 // settingsNavGroups is the nav as shown: [{ group, tabs, more, fold }], in
 // order. Pure, so the test can run it: linked is foxtrackLinked(), hasPrinters
 // is configuredPrinters.length > 0, cloudInUse a Bambu Cloud printer or a
-// signed-in Bambu account.
-function settingsNavGroups(tabs, { linked = false, hasPrinters = true, cloudInUse = false } = {}) {
+// signed-in Bambu account, virtualOn the virtual printer is switched on.
+function settingsNavGroups(tabs, { linked = false, hasPrinters = true, cloudInUse = false, virtualOn = false } = {}) {
     const drop = new Set();
     if (!hasPrinters) PRINTER_TABS.forEach(id => drop.add(id));
-    if (!linked) drop.add('virtual');
+    if (!linked && !virtualOn) drop.add('virtual'); // still reachable while on, so it can be turned off
     const keep = tabs.filter(t => !drop.has(t.id));
     const advanced = new Set(ADVANCED_TABS.filter(id => !(id === 'cloud' && cloudInUse)));
     const more = linked ? new Set(MORE_TABS) : new Set();
@@ -1647,6 +1671,7 @@ function settingsNavOpts() {
         linked: foxtrackLinked(),
         hasPrinters: configuredPrinters.length > 0,
         cloudInUse: configuredPrinters.some(isCloudPrinter) || !!(cloudStatus && cloudStatus.linked),
+        virtualOn: !!(virtualPrinterInfo && virtualPrinterInfo.enabled),
     };
 }
 
@@ -1741,19 +1766,31 @@ function toggleAdvancedMode() {
     renderPrinters();
 }
 
+// True when /api/update/check says this install cannot replace its own binary
+// (Docker, a read-only folder). The switch then shows off and cannot be used,
+// but autoUpdateEnabled keeps the stored value, so no save changes it.
+let autoUpdateUnavailable = false;
+
 function applyAutoUpdateState(on) {
     autoUpdateEnabled = on;
     const toggle = document.getElementById('autoUpdateToggle');
-    if (toggle) toggle.setAttribute('aria-checked', on); // .switch styles follow aria-checked
+    if (toggle) toggle.setAttribute('aria-checked', on && !autoUpdateUnavailable); // .switch styles follow aria-checked
 }
 
-function applyDevBuildState(isDev) {
+function applyDevBuildState(isDev, canAutoInstall) {
     const toggle = document.getElementById('autoUpdateToggle');
     const desc = document.getElementById('autoUpdateDesc');
-    if (toggle) toggle.disabled = isDev;
+    // Only an explicit false from a finished check counts; a failed or missing check leaves the switch alone.
+    autoUpdateUnavailable = !isDev && canAutoInstall === false;
+    if (toggle) {
+        toggle.disabled = isDev || autoUpdateUnavailable;
+        toggle.setAttribute('aria-checked', autoUpdateEnabled && !autoUpdateUnavailable);
+    }
     if (desc) desc.textContent = isDev
         ? 'Off in development builds.'
-        : 'Installs new versions and restarts.';
+        : autoUpdateUnavailable
+            ? 'Not available on this install (Docker or a read-only folder). Pull the new image or replace the file yourself.'
+            : 'Installs new versions and restarts.';
 }
 
 async function toggleAutoUpdate() {
@@ -1780,10 +1817,18 @@ async function toggleLightEncoded(enc) {
     const entry = printerCardEls.get(id);
     const btn = entry && entry.hooks.lightBtn;
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Light'; }
+    // Safety: clear pending after 10s in case a poll never confirms the state
+    const safetyTimer = setTimeout(() => {
+        if (pendingLightTarget[id] === expected) {
+            delete pendingLightTarget[id];
+            renderPrinters();
+        }
+    }, 10000);
     try {
-        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/toggle_light', { method:'POST', body:'{}' });
+        await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(id)) + '/toggle_light', { method:'POST', body:'{}', headers: controlHeaders() });
         pollStatus();
     } catch (e) {
+        clearTimeout(safetyTimer);
         toast("Could not switch the light: " + friendlyError(e.message), 'error');
         delete pendingLightTarget[id];
         renderPrinters();
@@ -1979,6 +2024,7 @@ async function unlinkFoxTrack() {
     foxtrackCheckSeq++;   // a check started before the unlink must not rewrite the line
     foxtrackCheckState = null;
     relayProblem = false;
+    relayProblemInfo = null;
     relayDelivered = false;
     setFoxTrackStatus('', '', '');
     await loadConfig();
@@ -2632,6 +2678,7 @@ function onTokenInput(e, el, save) {
 
 let foxtrackCheckState = null;   // last /api/foxtrack/check state; 'unknown' when it gave no verdict; null before the first check
 let relayProblem = false;        // /api/relay-health says FoxTrack is refusing the Bridge's data
+let relayProblemInfo = null;     // the problem object itself: {message, since, printer}
 let relayDelivered = false;      // /api/relay-health: FoxTrack accepted at least one report since the Bridge started
 let lastFtStatus = { dotCls: '', textCls: '', text: '' };
 
@@ -2836,7 +2883,9 @@ async function testPlug() {
 let virtualPrinterInfo = null;
 
 async function loadVirtualPrinter() {
+    const wasOn = !!(virtualPrinterInfo && virtualPrinterInfo.enabled);
     try { virtualPrinterInfo = await apiFetch('/api/virtual-printer'); } catch (_) { virtualPrinterInfo = null; }
+    if (wasOn !== !!(virtualPrinterInfo && virtualPrinterInfo.enabled) && !foxtrackLinked()) renderSettingsNav();
     renderVirtualPrinterCard();
 }
 
@@ -2848,10 +2897,13 @@ function renderVirtualPrinterCard() {
     const connected = !!(vp && vp.connected);
     const enabled = !!(vp && vp.enabled);
     if (toggle) {
-        toggle.setAttribute('aria-checked', enabled && connected);
-        toggle.disabled = !connected;
-        toggle.title = connected ? '' : 'Connect the Bridge to FoxTrack first';
+        toggle.setAttribute('aria-checked', enabled);
+        // Only turning it on needs the link: a feature that is already on can always be turned off.
+        toggle.disabled = !connected && !enabled;
+        toggle.title = (connected || enabled) ? '' : 'Connect the Bridge to FoxTrack first';
     }
+    const portInput = document.getElementById('vpPort');
+    if (portInput && document.activeElement !== portInput) portInput.value = vp && vp.port ? vp.port : '';
     document.getElementById('vpStandalone').classList.toggle('hidden', connected);
     document.getElementById('vpDetails').classList.toggle('hidden', !(connected && enabled));
     if (!(connected && enabled)) return;
@@ -2871,12 +2923,39 @@ function renderVirtualPrinterCard() {
 
 async function toggleVirtualPrinter() {
     const vp = virtualPrinterInfo || {};
-    if (!vp.connected) return;
     const enabled = !vp.enabled;
+    if (enabled && !vp.connected) return; // turning it off never needs the link
+    await saveVirtualPrinter(enabled, enabled ? 'Virtual printer on' : 'Virtual printer off');
+}
+
+// The port the slicer connects to: 1 to 65535, empty means the default 8090.
+function virtualPrinterPortValue() {
+    const raw = (document.getElementById('vpPort').value || '').trim();
+    if (!raw) return 8090;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
+}
+
+async function saveVirtualPrinterPort() {
+    const vp = virtualPrinterInfo || {};
+    await saveVirtualPrinter(!!vp.enabled, 'Port saved');
+}
+
+async function saveVirtualPrinter(enabled, doneText) {
+    const vp = virtualPrinterInfo || {};
+    const input = document.getElementById('vpPort');
+    const port = virtualPrinterPortValue();
+    if (port === null) {
+        markField('vpPort', true);
+        toast('Enter a port from 1 to 65535', 'error');
+        return;
+    }
+    markField('vpPort', false);
     try {
-        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ virtual_printer: { enabled, port: vp.port || 8090 } }) });
-        toast(enabled ? 'Virtual printer on' : 'Virtual printer off');
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ virtual_printer: { enabled, port } }) });
+        toast(doneText);
     } catch (e) { toast("Could not save: " + friendlyError(e.message), 'error'); }
+    if (input) input.blur();
     await loadVirtualPrinter();
 }
 
@@ -2904,6 +2983,16 @@ async function loadNetwork() {
 
 function networkUrls() {
     return networkInfo && Array.isArray(networkInfo.urls) ? networkInfo.urls.filter(u => typeof u === 'string' && u) : [];
+}
+
+// The address to put in a link for another device. Opened as localhost, the bar
+// shows an address only this machine understands, so use the first LAN address
+// instead. Inside Docker the listed addresses belong to the container, so they
+// do not help. Falls back to the address in the bar (also while the list is
+// still loading).
+function linkBase() {
+    const lan = isLocalPage() && !(networkInfo && networkInfo.in_docker) ? networkUrls()[0] : '';
+    return lan || location.origin;
 }
 
 function renderDeviceCard() {
@@ -3160,9 +3249,31 @@ function readPrinterForm({ forTest = false } = {}) {
         if (!editingPrinterId) { markField('pHaToken', !ha.home_assistant_token); if (!ha.home_assistant_token) invalid = true; }
     }
 
+    // The saved access code or key belongs to the saved serial or address: when
+    // that changes, the blank field can no longer mean "keep it".
+    let secretMsg = '';
+    const saved = editingPrinterId ? configuredPrinters.find(p => p.id === editingPrinterId) : null;
+    if (saved) {
+        const hostOf = u => {
+            u = (u || '').trim();
+            try { return new URL(u.includes('://') ? u : 'http://' + u).host.toLowerCase(); } catch (e) { return u.toLowerCase(); }
+        };
+        let secretId = '', isSet = false, changed = false;
+        if (brand === 'bambu') { secretId = 'pLanCode'; isSet = !!saved.lan_code_set; changed = serial !== (saved.serial || ''); }
+        else if (brand === 'prusalink') { secretId = 'pKlipperKey'; isSet = !!saved.api_key_set; changed = hostOf(prusaLinkUrl) !== hostOf(saved.prusalink_url); }
+        else if (brand === 'octoprint') { secretId = 'pKlipperKey'; isSet = !!saved.api_key_set; changed = hostOf(octoPrintUrl) !== hostOf(saved.octoprint_url); }
+        else if (brand === 'home_assistant') { secretId = 'pHaToken'; isSet = !!saved.home_assistant_token_set; changed = hostOf(ha.home_assistant_url) !== hostOf(saved.home_assistant_url); }
+        else if (brand === 'klipper') { secretId = 'pKlipperKey'; isSet = !!saved.api_key_set; changed = hostOf(moonrakerUrl) !== hostOf(saved.moonraker_url); }
+        if (secretId && isSet && changed && !val(secretId)) {
+            markField(secretId, true);
+            invalid = true;
+            secretMsg = 'Enter the access code, key or token again when the serial number or address changes';
+        }
+    }
+
     let payload;
     if (editingPrinterId) {
-        if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return null; }
+        if (invalid) { showAddPrinterError(secretMsg || 'Please fill in the highlighted fields'); return null; }
         // Only the fields the printer's type uses (PUT /api/printers/{id}). The
         // server keeps the saved access code or API key when the field is blank.
         payload = { name };
@@ -3420,13 +3531,23 @@ async function confirmBulkRemove() {
 
 // ── Printer rendering ─────────────────────────────────────────────────────────
 
+// Ids go into single-quoted inline handlers: encodeURIComponent leaves ' ( )
+// as they are, so those are escaped too and a crafted id cannot end the string.
+function encodePrinterId(id) {
+    return encodeURIComponent(id).replace(/'/g, '%27').replace(/\(/g, '%28').replace(/\)/g, '%29');
+}
 function decodePrinterId(enc) { try { return decodeURIComponent(enc||''); } catch(_){ return enc||''; } }
 
-// Control and camera endpoints are still name-based server-side (mqtt.go/lan.go stay
-// name-keyed internally), so any URL built for those must resolve id -> current name.
+// Live state is keyed by name, so name lookups stay for display and state.
 function printerNameForId(id) {
     const p = configuredPrinters.find(p => p.id === id);
     return p ? p.name : '';
+}
+// The control, camera and history endpoints take the printer's id (a name still
+// works, but two printers can share one). Use this in those URLs.
+function printerApiRef(id) {
+    const p = configuredPrinters.find(p => p.id === id);
+    return (p && (p.id || p.name)) || id || '';
 }
 
 function sendControlEncoded(enc,cmd,payload) { sendControl(decodePrinterId(enc),cmd,payload); }
@@ -3440,19 +3561,24 @@ const CONTROL_DONE = { pause:'Print paused', resume:'Print resumed', stop:'Print
 // is in flight is dropped here, and the Idempotency-Key lets the Bridge drop a
 // retry of the same click.
 const controlInFlight = new Set();
+// One fresh key per user action: the Bridge drops a retry of the same click.
+function controlHeaders() {
+    return { 'Content-Type': 'application/json', 'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) };
+}
 async function sendControl(id, command, payload) {
     const key = id + '|' + command + '|' + JSON.stringify(payload || {});
     if (controlInFlight.has(key)) return false;
     controlInFlight.add(key);
     try {
-        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/' + encodeURIComponent(command), {
+        await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(id)) + '/' + encodeURIComponent(command), {
             method: 'POST', body: JSON.stringify(payload || {}),
-            headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) },
+            headers: controlHeaders(),
         });
         toast(CONTROL_DONE[command] || 'Command sent');
         setTimeout(pollStatus, 800);
         return true;
     } catch (e) { toast("Could not send the command: " + friendlyError(e.message), 'error'); return false; }
+    finally { controlInFlight.delete(key); }
 }
 
 let _pendingStopId = null;
@@ -3521,7 +3647,7 @@ function queueBlockHtml(printer, live) {
     const id = printer.id;
     const items = queueMap[id] || [];
     if (!items.length) return '';
-    const enc = encodeURIComponent(id);
+    const enc = encodePrinterId(id);
     const status = live && live.status ? live.status : 'connecting';
     const canStart = (status === 'idle' || status === 'finished') && !removeMode;
     const expanded = !!queueExpanded[id];
@@ -3693,7 +3819,7 @@ async function saveFilament() {
     btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Save';
     try {
         // Bridge waits for the printer to confirm, so this can take several seconds.
-        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(t.id)) + '/set_filament', { method:'POST', body:JSON.stringify({ slot: t.slot, material, color }) });
+        await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(t.id)) + '/set_filament', { method:'POST', body:JSON.stringify({ slot: t.slot, material, color }), headers: controlHeaders() });
         if (_filamentTarget === t) closeFilamentEditor();
         toast(t.slot === EXTERNAL_SPOOL_SLOT ? fill('External spool set to {0}', material)
             : t.slot === EXTERNAL_SPOOL_LEFT_SLOT ? fill('Left external spool set to {0}', material)
@@ -3818,7 +3944,7 @@ function cardOuterClass(printer) {
 // Full structural (re)build of a card's content, used on create and whenever
 // removeMode/advancedMode toggles change the card's shape, never on a plain poll.
 function applyCardShell(el, printer) {
-    const enc = encodeURIComponent(printer.id);
+    const enc = encodePrinterId(printer.id);
     el.className = cardOuterClass(printer);
     if (removeMode) { el.style.cursor = 'pointer'; el.onclick = () => togglePrinterSelectionEncoded(enc); }
     else { el.style.cursor = ''; el.onclick = null; }
@@ -3852,7 +3978,7 @@ function collectHooks(el) {
         resumeBtn: el.querySelector('.resume-btn'),
         stopBtn: el.querySelector('.stop-btn'),
         skipBtn: el.querySelector('.skip-btn'), // Bambu LAN and Klipper only
-        startBtn: el.querySelector('.start-btn'), // Klipper only; null on Bambu cards
+        startBtn: el.querySelector('.start-btn'), // Bambu LAN, Klipper, OctoPrint; null on other cards
         lightBtn: el.querySelector('.light-btn'),
         camBtn: el.querySelector('.cam-btn'),
         camHideBtn: el.querySelector('.cam-hide-btn'),
@@ -3883,7 +4009,7 @@ function collectHooks(el) {
 
 function createPrinterCard(printer) {
     const el = document.createElement('article');
-    el.id = 'pcard-' + encodeURIComponent(printer.id);
+    el.id = 'pcard-' + encodePrinterId(printer.id);
     applyCardShell(el, printer);
     return { el, hooks: collectHooks(el) };
 }
@@ -3914,7 +4040,7 @@ function patchCard(entry, printer) {
     const status = live && live.status ? live.status : 'connecting';
     const meta = statusMeta(status, live && live.plug);
     const isCloud = isCloudPrinter(printer);
-    const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
+    const isBambu = isCloud || printerBrand(printer) === 'bambu';
     const dis = (status === 'disconnected' || status === 'connecting');
 
     if (hooks.printerName) hooks.printerName.textContent = printer.name;
@@ -3975,7 +4101,7 @@ function patchCard(entry, printer) {
         const missing = printerMissingSecret(printer);
         const html = missing
             ? escHtml(fill('{0} missing. Edit the printer to enter it.', missing))
-              + ' <button onclick="openEditPrinterModalEncoded(\'' + encodeURIComponent(printer.id) + '\')" class="btn-ghost btn-xs">Edit</button>'
+              + ' <button onclick="openEditPrinterModalEncoded(\'' + encodePrinterId(printer.id) + '\')" class="btn-ghost btn-xs">Edit</button>'
             : '';
         if (hooks.missingSecret._html !== html) { hooks.missingSecret.innerHTML = html; hooks.missingSecret._html = html; }
         hooks.missingSecret.classList.toggle('hidden', !missing);
@@ -4062,7 +4188,7 @@ function patchCard(entry, printer) {
         const ext = live && live.external_spool ? live.external_spool : null;
         const ext2 = live && live.external_spool_2 ? live.external_spool_2 : null;
         hooks.amsContainer.classList.toggle('hidden', amsSlots.length === 0 && !ext && !ext2);
-        const html = amsSlotsInnerHTML(amsSlots, ext, ext2, isBambu && !isCloud && !dis, encodeURIComponent(printer.id), printer.name);
+        const html = amsSlotsInnerHTML(amsSlots, ext, ext2, isBambu && !isCloud && !dis, encodePrinterId(printer.id), printer.name);
         // Skip identical rewrites so a focused slot button keeps focus across polls.
         if (hooks.amsContainer._html !== html) { hooks.amsContainer._html = html; hooks.amsContainer.innerHTML = html; }
     }
@@ -4225,9 +4351,9 @@ function cardInnerHTML(printer, live) {
     const lightOn = !!(live && live.light_on);
     const coolingFanPct = live && live.cooling_fan_pct > 0 ? live.cooling_fan_pct : null;
     const filamentUsedMM = live && live.filament_used_mm > 0 ? live.filament_used_mm : null;
-    const enc = encodeURIComponent(printer.id);
+    const enc = encodePrinterId(printer.id);
     const isCloud = isCloudPrinter(printer);
-    const isBambu = isCloud || !!(printer.serial && (printer.lan_code || printer.lan_code_set) && !printer.moonraker_url);
+    const isBambu = isCloud || printerBrand(printer) === 'bambu';
     const typeLabel = printerTypeLabel(printer);
     // PrusaLink and OctoPrint: pause, resume and stop only. Home Assistant: read-only.
     const brand = printerBrand(printer);
@@ -4253,8 +4379,8 @@ function cardInnerHTML(printer, live) {
     const extSpool2 = live && live.external_spool_2 ? live.external_spool_2 : null;
 
     // Camera visibility is a stored per-printer preference (camera_hidden), not a
-    // live state: it only hides the camera on this dashboard and never affects the
-    // snapshots sent to FoxTrack. Hidden cards drop the Camera button and its panel
+    // live state: hiding the camera also stops timelapse, failure watch and the
+    // camera on share links for that printer. Hidden cards drop the Camera button and its panel
     // entirely and offer a single button to bring them back, so the preference is
     // always reversible from the card it applies to.
     const camHidden = !!printer.camera_hidden;
@@ -4270,7 +4396,7 @@ function cardInnerHTML(printer, live) {
           + (cameraLoading.has(enc) ? '<i class="fas fa-circle-notch fa-spin mr-1"></i>' : '<i class="fas fa-camera mr-1"></i>')
           + 'Camera</button>'
           + '<button onclick="toggleCameraHiddenEncoded(\'' + enc + '\')" class="btn-ghost cam-hide-btn"'
-          + ' title="Hide this camera on the dashboard" aria-label="Hide camera on the dashboard">'
+          + ' title="' + escHtml(i18n('Hide this camera. This also stops timelapse, failure watch and the camera on share links for this printer.')) + '" aria-label="Hide camera on the dashboard">'
           + '<i class="fas fa-video-slash"></i></button>'
           + '</span>';
 
@@ -4343,7 +4469,7 @@ function cardInnerHTML(printer, live) {
         + '<div class="flex flex-wrap gap-1.5">'
         // Cloud printers: current Bambu firmware only honours the light over the
         // cloud, so pause/stop/fan/speed/G-code are LAN-only buttons.
-        + ((isCloud || readOnly) ? '' :
+        + (!canControlPrinter(printer) ? '' :
             '<button onclick="sendControlEncoded(\'' + enc + '\',\'pause\')" class="pause-btn btn-outline' + (status === 'printing' ? '' : ' hidden') + '">Pause</button>'
             + '<button onclick="sendControlEncoded(\'' + enc + '\',\'resume\')" class="resume-btn btn-outline' + (status === 'paused' ? '' : ' hidden') + '">Resume</button>'
             + '<button ' + dis + 'onclick="confirmStopEncoded(\'' + enc + '\')" class="stop-btn btn-danger' + ((status === 'printing' || status === 'paused') ? '' : ' hidden') + '">Stop</button>')
@@ -4361,7 +4487,8 @@ function cardInnerHTML(printer, live) {
                     ? '<button onclick="toggleSpeed(\'' + enc + '\')" class="btn-outline"><i class="fas fa-gauge-high mr-1"></i>Speed</button>'
                       + '<button onclick="toggleGcode(\'' + enc + '\')" class="btn-outline"><i class="fas fa-terminal mr-1"></i>G-code</button>'
                     : '')
-                : '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline' + ((status === 'printing' || status === 'paused') ? ' hidden' : '') + '">Start print</button>'))
+                : ''))
+        + (canStartFile(printer) ? '<button ' + dis + 'onclick="startPrintEncoded(\'' + enc + '\')" class="start-btn btn-outline' + ((status === 'printing' || status === 'paused') ? ' hidden' : '') + '">Start print</button>' : '')
         + '</div>'
         + amsPanel
         + '</div>';
@@ -4370,10 +4497,11 @@ function cardInnerHTML(printer, live) {
         '<div id="cam-' + enc + '" class="cam-panel hidden border-t border-border bg-panel-2">'
         + '<img class="cam-img" src="" alt="Camera" style="display:block;width:100%;max-height:300px;object-fit:contain;">'
         + '<div class="cam-unavailable hidden p-4 text-center text-xs text-text-2"><i class="fas fa-video-slash mr-1"></i>'
+        + '<span class="cam-why hidden"></span><span class="cam-generic">'
         + (isBambu
             ? 'No camera. Works on A1 and P1 printers: check the IP address and access code.'
             : (brand === 'octoprint' ? 'No camera. Check OctoPrint\'s webcam settings, or set a webcam URL on this printer.' : 'No camera. Check the webcam service or URL.'))
-        + '</div>'
+        + '</span></div>'
         + '</div>';
 
     const gcodePanel = (isBambu && !removeMode && !isCloud) ?
@@ -4493,6 +4621,7 @@ async function pollRelayHealth() {
         // Without a token there is no FoxTrack connection to be wrong about.
         const problem = configEverLoaded && !foxtrackLinked() ? null : (data && data.problem);
         relayProblem = !!problem;
+        relayProblemInfo = problem || null;
         relayDelivered = !!(data && data.delivered);
         refreshFoxTrackUi();
         renderPrinters(); // the card's FoxTrack line follows this poll
@@ -4513,12 +4642,62 @@ async function pollRelayHealth() {
         // The bridge itself is unreachable; the header status dot already says so.
         wrap.classList.add('hidden');
         relayProblem = false;
+        relayProblemInfo = null;
         refreshFoxTrackUi();
         renderPrinters();
     }
 }
 
 // ── Camera ────────────────────────────────────────────────────────────────────
+
+const cameraAttempt = new Map(); // enc -> counter, so a late answer about an older attempt is ignored
+
+// How long to wait for the first picture. The A1 and P1 send JPEG frames
+// straight away; the other Bambu models (X1, H2, P2S) stream RTSP through
+// ffmpeg, which needs a while to start. Same split as the server's modelCamera.
+// An unknown model gets the long wait.
+function cameraWaitMs(printer) {
+    if (!(isCloudPrinter(printer) || printerBrand(printer) === 'bambu')) return 15000;
+    const model = String((liveStatus[printer.id] || {}).printer_model || '').trim().toUpperCase().replace(/^BAMBU LAB /, '').split(' ')[0];
+    return ['A1', 'A1M', 'P1P', 'P1S'].includes(model) ? 15000 : 30000;
+}
+
+// The camera URL answers a failure with JSON {"error": "..."} that names the
+// cause (ffmpeg missing, Liveview off). An <img> cannot read it, so ask once
+// more. Plain fetch, not apiFetch: if the camera has come back, the answer is
+// an endless picture stream, which apiFetch would read to the end. Here it is
+// dropped as soon as the headers arrive. Returns '' when there is no JSON error.
+async function cameraFailureReason(url) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (res.ok || !/json/i.test(res.headers.get('Content-Type') || '')) return '';
+        const body = await res.json();
+        return body && typeof body.error === 'string' ? body.error.trim().slice(0, 300) : '';
+    } catch (_) {
+        return '';
+    } finally {
+        clearTimeout(timer);
+        ctrl.abort();
+    }
+}
+
+// Swaps the generic "No camera" line for the server's reason, if the panel is
+// still showing that attempt's failure.
+async function showCameraReason(id, enc, url, attempt) {
+    const why = await cameraFailureReason(url);
+    if (!why || cameraAttempt.get(enc) !== attempt) return;
+    const entry = printerCardEls.get(id);
+    const box = entry && entry.hooks.camUnavailable;
+    if (!box || box.classList.contains('hidden')) return;
+    const generic = box.querySelector('.cam-generic');
+    const reason = box.querySelector('.cam-why');
+    if (!generic || !reason) return;
+    reason.textContent = why;
+    reason.classList.remove('hidden');
+    generic.classList.add('hidden');
+}
 
 // Panels/buttons are never destroyed by a poll under keyed patch rendering, so a
 // failed load must self-heal by re-arming on reopen rather than relying on the
@@ -4529,6 +4708,8 @@ function toggleCamera(enc) {
     if (!entry) return;
     const { camPanel, camImg, camUnavailable, camBtn } = entry.hooks;
     if (!camPanel) return;
+    const attempt = (cameraAttempt.get(enc) || 0) + 1;
+    cameraAttempt.set(enc, attempt);
     if (camPanel.classList.contains('hidden')) {
         camPanel.classList.remove('hidden');
         cameraLoading.add(enc);
@@ -4538,8 +4719,15 @@ function toggleCamera(enc) {
             // the panel is opened, regardless of whether the last attempt failed.
             // camImg carries its own inline display style (not the "hidden" class,
             // which an inline style would silently override), so toggle that instead.
-            if (camUnavailable) camUnavailable.classList.add('hidden');
+            if (camUnavailable) {
+                camUnavailable.classList.add('hidden');
+                const reason = camUnavailable.querySelector('.cam-why');
+                const generic = camUnavailable.querySelector('.cam-generic');
+                if (reason) { reason.textContent = ''; reason.classList.add('hidden'); }
+                if (generic) generic.classList.remove('hidden');
+            }
             camImg.style.display = 'block';
+            const camUrl = '/api/camera/' + encodeURIComponent(printerApiRef(id));
             camImg.onload = () => {
                 clearCameraTimer(enc);
                 cameraLoading.delete(enc);
@@ -4551,9 +4739,11 @@ function toggleCamera(enc) {
                 if (camBtn) camBtn.innerHTML = '<i class="fas fa-camera mr-1"></i>Camera';
                 camImg.style.display = 'none';
                 if (camUnavailable) camUnavailable.classList.remove('hidden');
+                showCameraReason(id, enc, camUrl, attempt);
             };
-            camImg.src = '/api/camera/' + encodeURIComponent(printerNameForId(id));
-            // No first frame after 15 s: stop the spinner and say so.
+            camImg.src = camUrl;
+            // No first frame in time: stop the spinner and say so.
+            const printer = configuredPrinters.find(p => p.id === id);
             clearCameraTimer(enc);
             cameraTimers.set(enc, setTimeout(() => {
                 cameraTimers.delete(enc);
@@ -4566,7 +4756,8 @@ function toggleCamera(enc) {
                 if (h.camBtn) h.camBtn.innerHTML = '<i class="fas fa-camera mr-1"></i>Camera';
                 if (h.camImg) h.camImg.style.display = 'none';
                 if (h.camUnavailable) h.camUnavailable.classList.remove('hidden');
-            }, 15000));
+                showCameraReason(id, enc, camUrl, attempt);
+            }, cameraWaitMs(printer)));
         }
     } else {
         clearCameraTimer(enc);
@@ -4578,7 +4769,7 @@ function toggleCamera(enc) {
 
 // Hide or show one printer's camera on this dashboard. The preference is stored
 // server-side (PATCH /api/printers/{id}) so it survives a reload and applies to
-// every browser, and it never affects the snapshots sent to FoxTrack.
+// every browser. Hiding the camera also stops timelapse, failure watch and share-link cameras.
 //
 // Hiding changes the card's button row, which patchCard cannot produce, so the
 // one affected card is rebuilt. refreshCardContent tears the live stream down
@@ -4637,7 +4828,7 @@ async function setFanSpeedEncoded(enc, pct) {
         }
     }, 10000);
     try {
-        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/fan_speed', { method: 'POST', body: JSON.stringify({ pct }) });
+        await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(id)) + '/fan_speed', { method: 'POST', body: JSON.stringify({ pct }), headers: controlHeaders() });
         setTimeout(pollStatus, 1500);
     } catch (e) {
         clearTimeout(safetyTimer);
@@ -4670,7 +4861,7 @@ async function setTempEncoded(enc, cmd) {
         return;
     }
     try {
-        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/' + cmd, { method:'POST', body:JSON.stringify({ celsius: Number(text) }) });
+        await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(id)) + '/' + cmd, { method:'POST', body:JSON.stringify({ celsius: Number(text) }), headers: controlHeaders() });
         const bedCmd = cmd === 'set_bed_temp';
         toast(Number(text) === 0
             ? (bedCmd ? 'Bed heater off' : 'Nozzle heater off')
@@ -4701,7 +4892,7 @@ async function sendGcodeEncoded(enc) {
     const line = inp.value.trim();
     if (!line) return;
     try {
-        await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(id)) + '/gcode', { method:'POST', body:JSON.stringify({ line }) });
+        await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(id)) + '/gcode', { method:'POST', body:JSON.stringify({ line }), headers: controlHeaders() });
         toast('G-code sent: ' + line, 'info');
         inp.value = '';
     } catch (e) { toast("Could not send the G-code: " + friendlyError(e.message), 'error'); }
@@ -4763,7 +4954,7 @@ async function checkForUpdate() {
     try { const vi=await apiFetch('/api/version'); setFooterVersion(vi&&vi.version?vi.version:'dev'); } catch(_){ setFooterVersion('dev'); }
     try {
         const info=await apiFetch('/api/update/check');
-        applyDevBuildState(!!(info && info.devBuild));
+        applyDevBuildState(!!(info && info.devBuild), info ? info.canAutoInstall : undefined);
         if(info&&(info.available||info.pendingRestart)) {
             if (info.pendingRestart || getDismissedUpdate() !== info.latestVersion) showUpdateModal(info);
         }
@@ -4814,6 +5005,38 @@ const MAX_BACKUP_BYTES = 4 * 1024 * 1024; // matches the server's import limit
 
 function pickBackupFile() {
     document.getElementById('restoreFileInput').click();
+}
+
+// The backup is fetched, not opened as a link, so a refusal shows the server's
+// reason (no dashboard password set and the page is not on the Bridge computer,
+// or the request came through a proxy) instead of a failed or empty download.
+// fetch, not apiFetch: the answer is a file, not JSON to parse.
+async function downloadBackup(btn) {
+    if (btn) btn.disabled = true;
+    try {
+        let res;
+        try { res = await fetch('/api/config/export', { cache: 'no-store' }); }
+        catch (_) { toast("Can't reach the Bridge. Is it still running?", 'error'); return; }
+        if (!res.ok) {
+            let msg = '';
+            try { const b = JSON.parse(await res.text()); if (b && typeof b.error === 'string') msg = b.error; } catch (_) {}
+            toast(msg || 'Could not download the backup.', 'error');
+            return;
+        }
+        const blob = await res.blob();
+        const name = /filename="?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name ? name[1] : 'foxtrack-bridge-backup.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (_) {
+        toast('Could not download the backup.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 async function restoreFromFile(file) {
@@ -4876,9 +5099,12 @@ async function restoreFromFile(file) {
             } catch (_) {}
             throw new Error(msg || fill('The Bridge refused the file (HTTP {0}).', res.status));
         }
-        const out = await res.json();
+        // The restore has worked once the status is OK; a body that is not JSON
+        // only means the printer count comes from the file.
+        let out = null;
+        try { out = await res.json(); } catch (_) {}
         input.value = '';
-        const restored = out.printers == null ? n : out.printers;
+        const restored = !out || out.printers == null ? n : out.printers;
         await loadConfig();
         const missing = configuredPrinters.filter(p => printerMissingSecret(p));
         if (missing.length) {
@@ -5020,6 +5246,7 @@ document.addEventListener('visibilitychange', () => {
 let aiSettings = null;          // the redacted view from /api/ai/settings
 let assistantOpen = false;
 let assistantBusy = false;
+let assistantChat = 0;           // bumped by "New", so a reply to the old chat is dropped
 let assistantTurns = [];        // [{role:'user'|'assistant', content:string}]
 
 async function loadAISettings() {
@@ -5201,8 +5428,10 @@ function toggleAssistant() {
 }
 
 function newAssistantChat() {
+    assistantChat++;
     assistantTurns = [];
     renderAssistantWelcome();
+    setAssistantBusy(false);   // an answer still on its way belongs to the old chat
 }
 
 function renderAssistantWelcome() {
@@ -5250,6 +5479,7 @@ async function sendAssistantMessage() {
 
     input.value = '';
     autoGrowAssistantInput();
+    const chat = assistantChat;
     assistantTurns.push({ role: 'user', content: text });
     renderAssistantTurns();
     setAssistantBusy(true);
@@ -5261,16 +5491,21 @@ async function sendAssistantMessage() {
             body: JSON.stringify({ messages: assistantTurns })
         });
         const data = await res.json().catch(() => ({}));
+        if (chat !== assistantChat) return;   // "New" was pressed meanwhile
         if (!res.ok) throw new Error(data.error || 'The assistant could not answer.');
         assistantTurns.push({ role: 'assistant', content: data.reply || '' });
         renderAssistantTurns();
     } catch (e) {
-        // The failed question stays in the transcript so it can be retried by
-        // asking again, but the error is not a turn: sending it back to the
-        // model as history would have it apologise for our bug.
+        if (chat !== assistantChat) return;
+        // The failed question leaves the history (the model would see a question
+        // with no answer, and the error is not a turn either) and goes back in the
+        // box, so asking again is one press.
+        assistantTurns.pop();
+        input.value = text;
+        autoGrowAssistantInput();
         renderAssistantTurns(e.message);
     } finally {
-        setAssistantBusy(false);
+        if (chat === assistantChat) setAssistantBusy(false);
     }
 }
 

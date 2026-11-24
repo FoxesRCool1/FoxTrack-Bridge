@@ -715,6 +715,13 @@ func (r *cloudRunner) nudgeSilent(client mqtt.Client) {
 			}
 			continue
 		}
+		// A reconnect soon after the last pushall skips the new one (the
+		// once-a-minute limit), and a printer that only sends changes then
+		// stays at "connected" with no data. Ask once more for this session;
+		// pushallLocked still holds the limit.
+		if lp, ok := r.lastPushall[serial]; ok && lp.Before(baseline) && GetPrinterState(p.Name).Status == "connected" {
+			r.pushallLocked(client, serial, p.Name)
+		}
 		last, ok := r.lastMsg[serial]
 		if !ok {
 			last = baseline

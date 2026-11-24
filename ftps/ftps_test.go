@@ -35,6 +35,7 @@ type fakeServer struct {
 	listing  map[string][]string // LIST <dir> -> ls -l lines
 	files    map[string][]byte   // RETR <path> -> content
 	cutList  string              // non-empty: LIST ends with a cut-off TLS record, no close_notify, then this reply
+	retrCut  bool                // RETR sends half the file, closes the data connection and the control one, no reply
 
 	mu       sync.Mutex
 	stored   map[string][]byte
@@ -270,6 +271,11 @@ func (s *fakeServer) serve(c net.Conn, dataCfg *tls.Config) {
 					continue
 				}
 				tc = tt
+			}
+			if s.retrCut {
+				tc.Write(body[:len(body)/2])
+				tc.Close()
+				return // the control connection closes too: no final reply
 			}
 			tc.Write(body)
 			tc.Close()

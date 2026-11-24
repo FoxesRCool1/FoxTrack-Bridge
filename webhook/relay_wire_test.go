@@ -177,7 +177,7 @@ func TestSendHistoryAndSnapshot_SkippedIsAProblemNotRetried(t *testing.T) {
 		t.Fatalf("a skipped history post must not be retried, got %v", err)
 	}
 	p := RelayHealth()
-	if p == nil || p.Kind != "unknown_printer" || p.Printer != "Prusa" || !strings.Contains(p.Message, "link it in FoxTrack") {
+	if p == nil || p.Kind != "unknown_printer" || p.Printer != "Prusa" || !strings.Contains(p.Message, "has no device for this printer yet") {
 		t.Fatalf("expected an unknown_printer problem for Prusa, got %+v", p)
 	}
 

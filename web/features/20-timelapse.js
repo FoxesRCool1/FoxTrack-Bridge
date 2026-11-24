@@ -137,16 +137,23 @@ function tlOnShow() {
 function tlRenderPrinters(selected) {
     const box = document.getElementById('tlPrinters');
     if (!box) return;
-    const list = (typeof configuredPrinters !== 'undefined' ? configuredPrinters : []).filter(p => !p.camera_hidden);
+    // A printer whose camera is hidden cannot be newly picked, but one that is
+    // already selected stays in the list (shown, disabled) and in the saved
+    // selection, so a save does not silently drop it.
+    const list = (typeof configuredPrinters !== 'undefined' ? configuredPrinters : []).filter(p => !p.camera_hidden || selected.includes(p.id));
     box.innerHTML = list.length
-        ? list.map(p => '<label class="tl-check"><input type="checkbox" value="' + escHtml(p.id) + '"' + (selected.includes(p.id) ? ' checked' : '') + (tl.filled ? '' : ' disabled') + '> <span class="min-w-0 truncate" data-no-i18n>' + escHtml(p.name) + '</span></label>').join('')
+        ? list.map(p => {
+            const hid = !!p.camera_hidden;
+            return '<label class="tl-check"><input type="checkbox" value="' + escHtml(p.id) + '"' + (selected.includes(p.id) ? ' checked' : '') + (hid ? ' data-cam-hidden="1"' : '') + (tl.filled && !hid ? '' : ' disabled') + '> <span class="min-w-0 truncate" data-no-i18n>' + escHtml(p.name) + '</span>'
+                + (hid ? ' <span class="text-xs text-text-2">Camera hidden</span>' : '') + '</label>';
+        }).join('')
         : '<p class="text-xs text-text-2 py-2">No printer has its camera shown on the dashboard.</p>';
 }
 
 // Until the saved settings have loaded, Save would post the defaults over them.
 function tlLock(on) {
     ['tlSave', 'tlEnabled', 'tlInterval', 'tlKeep', 'tlAll'].forEach(id => { document.getElementById(id).disabled = on; });
-    document.querySelectorAll('#tlPrinters input').forEach(i => { i.disabled = on; });
+    document.querySelectorAll('#tlPrinters input').forEach(i => { i.disabled = on || !!i.dataset.camHidden; });
 }
 
 function tlSelectedIds() {

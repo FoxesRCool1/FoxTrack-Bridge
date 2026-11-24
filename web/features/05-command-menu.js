@@ -36,11 +36,13 @@
         for (const p of (configuredPrinters || [])) {
             const s = (liveStatus || {})[p.id] || {};
             const st = s.status || '';
-            const enc = encodeURIComponent(p.id);
-            out.push({ group: 'Printers', label: p.name, raw: true, sub: st ? statusWord(st) : '', run: () => showView('printers').then(() => scrollToPrinter(p.id)) });
-            if (st === 'printing') out.push({ group: 'Printers', label: fill('Pause {0}', p.name), run: () => sendControl(p.id, 'pause') });
-            if (st === 'paused') out.push({ group: 'Printers', label: fill('Resume {0}', p.name), run: () => sendControl(p.id, 'resume') });
-            if (st === 'printing' || st === 'paused') out.push({ group: 'Printers', label: fill('Stop {0}…', p.name), run: () => confirmStop(p.id) });
+            const enc = encodePrinterId(p.id);
+            out.push({ group: 'Printers', label: p.name, raw: true, sub: statusMeta(st, s.plug).label, run: () => showView('printers').then(() => scrollToPrinter(p.id)) });
+            // Cloud and Home Assistant printers cannot be paused or stopped, so the menu does not offer it.
+            const canControl = canControlPrinter(p);
+            if (canControl && st === 'printing') out.push({ group: 'Printers', label: fill('Pause {0}', p.name), run: () => sendControl(p.id, 'pause') });
+            if (canControl && st === 'paused') out.push({ group: 'Printers', label: fill('Resume {0}', p.name), run: () => sendControl(p.id, 'resume') });
+            if (canControl && (st === 'printing' || st === 'paused')) out.push({ group: 'Printers', label: fill('Stop {0}…', p.name), run: () => confirmStop(p.id) });
             if (typeof s.light_on === 'boolean' && st && st !== 'disconnected') out.push({ group: 'Printers', label: fill(s.light_on ? 'Light off: {0}' : 'Light on: {0}', p.name), run: () => toggleLightEncoded(enc) });
             out.push({ group: 'Printers', label: fill('Edit {0}', p.name), run: () => openEditPrinterModal(p.id) });
         }
@@ -53,12 +55,13 @@
     // printer at a time.
     const IDLE_PLUG_STATUSES = ['idle', 'finished', 'error', 'disconnected'];
     // plug: a plug is switched by the Bridge itself, so a printer that refuses
-    // print commands (control_blocked) still counts.
+    // print commands (control_blocked, or one that cannot be controlled at all)
+    // still counts.
     function bulkPrinters(predicate, plug) {
         const out = [];
         for (const p of (configuredPrinters || [])) {
             const s = (liveStatus || {})[p.id] || {};
-            if ((plug || !s.control_blocked) && predicate(s)) out.push(p);
+            if ((plug || (canControlPrinter(p) && !s.control_blocked)) && predicate(s)) out.push(p);
         }
         return out;
     }
@@ -85,14 +88,14 @@
             const targets = [];
             for (const p of printers) {
                 const s = (liveStatus || {})[p.id] || {};
-                if ((command === 'plug_off' || !s.control_blocked) && predicate(s)) targets.push(p);
+                if ((command === 'plug_off' || (canControlPrinter(p) && !s.control_blocked)) && predicate(s)) targets.push(p);
             }
             if (!targets.length) { toast('No printers match anymore', 'info'); return; }
             const done = [];
             const failed = [];
             for (const p of targets) {
                 try {
-                    await apiFetch('/api/control/' + encodeURIComponent(printerNameForId(p.id)) + '/' + encodeURIComponent(command), {
+                    await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(p.id)) + '/' + encodeURIComponent(command), {
                         method: 'POST', body: JSON.stringify({}),
                         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) },
                     });
@@ -137,9 +140,6 @@
         const plugs = bulkPrinters(idlePlugOn, true);
         if (plugs.length) cmds.push({ group: 'Actions', label: fill('Turn off idle plugs ({0})', plugs.length), icon: 'fa-plug', run: bulkPlugsOff });
         return cmds;
-    }
-    function statusWord(st) {
-        return ({ printing: 'Printing', paused: 'Paused', idle: 'Idle', finished: 'Finished', error: 'Error', disconnected: 'Offline', connected: 'Connecting' })[st] || st;
     }
     function scrollToPrinter(id) {
         const entry = (typeof printerCardEls !== 'undefined') && printerCardEls.get(id);

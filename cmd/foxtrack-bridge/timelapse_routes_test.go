@@ -266,3 +266,35 @@ func TestTimelapseEvents(t *testing.T) {
 		t.Error("recorded a printer whose camera is hidden")
 	}
 }
+
+// The failure count that throttles the log must survive the ticks where no
+// picture is due: only a picture that was really taken ends it.
+func TestTimelapseCapture_FailureCountSurvivesNotDueTicks(t *testing.T) {
+	timelapseTestConfig(t)
+	rec := timelapseRecorder()
+	rec.Start(timelapse.Printer{ID: "p1", Name: "Monsieur"}, "cube.3mf", false)
+	t.Cleanup(func() {
+		rec.End("p1", "cancelled")
+		tlMu.Lock()
+		delete(tlFailing, "p1")
+		tlMu.Unlock()
+	})
+	failing := func() int {
+		tlMu.Lock()
+		defer tlMu.Unlock()
+		return tlFailing["p1"]
+	}
+	// A hidden camera answers at once with an error, so the first tick fails.
+	p := config.Printer{ID: "p1", Name: "Monsieur", CameraHidden: true}
+	timelapseCapture(rec, p, 10*time.Minute)
+	if n := failing(); n != 1 {
+		t.Fatalf("after the first failed picture: count = %d, want 1", n)
+	}
+	// The next ticks find no picture due (the interval is 10 minutes).
+	for i := 0; i < 3; i++ {
+		timelapseCapture(rec, p, 10*time.Minute)
+	}
+	if n := failing(); n != 1 {
+		t.Fatalf("after ticks with no picture due: count = %d, want 1", n)
+	}
+}

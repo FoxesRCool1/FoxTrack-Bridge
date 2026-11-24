@@ -126,12 +126,12 @@ func TestSpoolmanNewURLClearsSlots(t *testing.T) {
 		}
 	}
 	post(`{"url":"http://127.0.0.1:7912"}`)
-	if len(cfg.Spoolman.Slots) != 2 {
-		t.Fatalf("the same address cleared the slots: %+v", cfg.Spoolman.Slots)
+	if len(liveConfig().Spoolman.Slots) != 2 {
+		t.Fatalf("the same address cleared the slots: %+v", liveConfig().Spoolman.Slots)
 	}
 	post(`{"url":"http://127.0.0.1:7913","slots":{"p1/1":4}}`)
-	if len(cfg.Spoolman.Slots) != 1 || cfg.Spoolman.Slots["p1/1"] != 4 {
-		t.Errorf("slots after a new address = %+v, want only the one sent with it", cfg.Spoolman.Slots)
+	if len(liveConfig().Spoolman.Slots) != 1 || liveConfig().Spoolman.Slots["p1/1"] != 4 {
+		t.Errorf("slots after a new address = %+v, want only the one sent with it", liveConfig().Spoolman.Slots)
 	}
 }
 

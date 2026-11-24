@@ -119,6 +119,8 @@ func CheckLatest(ctx context.Context) (CheckResult, error) {
 	if time.Since(cachedAt) < 15*time.Minute && !cachedAt.IsZero() {
 		res := cachedResult
 		cacheMu.Unlock()
+		// Not cached: an update installed since the check must show at once.
+		res.PendingRestart = HasPendingRestart()
 		return res, nil
 	}
 	cacheMu.Unlock()
