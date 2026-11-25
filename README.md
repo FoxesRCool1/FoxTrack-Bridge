@@ -11,9 +11,9 @@
 
 <p><strong>All your 3D printers on one dashboard.</strong></p>
 
-<p>With FoxTrack, the Bridge runs on a computer on your printers' network and sends their live status to FoxTrack (Pro or Farm plan), so you see them from anywhere. Setup guide: <a href="docs/foxtrack.md">docs/foxtrack.md</a>.</p>
+<p>FoxTrack Bridge is a local dashboard for your printers, and it needs no account. It shows Bambu Lab, Klipper, OctoPrint and PrusaLink printers side by side, with live cameras, phone alerts, a print queue, timelapses and print costs. It is free and open source, and it runs on a computer on your own network.</p>
 
-<p>On its own, it is a local dashboard for your printers, with no account needed. Bambu Lab, Klipper, OctoPrint and PrusaLink side by side, with live cameras, phone alerts, a print queue, timelapses and print costs. Free, open source, and it runs on your own network.</p>
+<p>If you use FoxTrack, the Bridge can also send your printers' live status there, so you see them from anywhere. Setup guide: <a href="docs/foxtrack.md">docs/foxtrack.md</a>.</p>
 
 [![Latest release](https://img.shields.io/github/v/release/FoxesRCool1/FoxTrack-Bridge?label=release&color=c2410c)](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/FoxesRCool1/FoxTrack-Bridge/total?color=c2410c)](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases)
@@ -56,7 +56,7 @@
 ## 🌟 Highlights
 
 - **One dashboard for every printer.** Bambu Lab, Klipper (Moonraker), OctoPrint, PrusaLink and printers Home Assistant already knows.
-- **Control, not just status.** Pause, resume, stop, temperatures, fans, speed, the light, skip a failed part, and start a file on the printer.
+- **Control from the dashboard.** Pause, resume, stop, temperatures, fans, speed, the light, skip a failed part, and start a file on the printer.
 - **A print queue.** Line up the next files and start each one when you have cleared the bed.
 - **Alerts on your phone.** Discord, Slack, Telegram, ntfy, Pushover, Gotify, email or any webhook, with a camera picture.
 - **History that adds up.** Every print with its time, filament, energy, cost and your notes, exportable as CSV.
@@ -236,7 +236,7 @@ Printers that aren't in LAN mode can be added through your Bambu account. See **
 
 **OctoPrint:** create an API key under **Settings > Application Keys** (or copy the global key under **Settings > API**). Choose **OctoPrint** and enter the address, for example `http://octopi.local`, and the key. The webcam is read from OctoPrint's own settings.
 
-**PrusaLink:** turn on PrusaLink in the printer's network settings. Choose **Prusa (PrusaLink)** and enter the printer's address and the API key from its PrusaLink screen. Only API key sign-in is supported (not HTTP Digest), only plain `.gcode` files can be printed (not `.bgcode`), and there is no fan control. PrusaLink has no camera stream, so enter a separate webcam URL if you have one.
+**PrusaLink:** turn on PrusaLink in the printer's network settings. Choose **Prusa (PrusaLink)** and enter the printer's address and the API key from its PrusaLink screen. Only API key sign-in is supported (not HTTP Digest), there is no fan control, and the dashboard cannot start a file that is on the printer. A print sent from FoxTrack must be a plain `.gcode` file (not `.bgcode`). PrusaLink has no camera stream, so enter a separate webcam URL if you have one.
 
 The network scan finds Klipper, OctoPrint and PrusaLink on your local /24 subnet. Printers on another subnet or VLAN can be added by address.
 
@@ -517,7 +517,7 @@ The Bridge works on its own. If you also use the [FoxTrack](https://foxtrack.stu
 
 ## 🗺️ What's new and known limits
 
-New since the last release (full list in the [changelog](CHANGELOG.md)):
+New in version 2.6 (full list in the [changelog](CHANGELOG.md)):
 
 - [x] Print queue with **Start next**
 - [x] Read-only share links
@@ -533,7 +533,7 @@ New since the last release (full list in the [changelog](CHANGELOG.md)):
 Known limits:
 
 - **Bambu Cloud printers** can't be paused, stopped or sent files. Bambu's firmware refuses those commands from third-party software, so use LAN mode with Developer Mode for full control.
-- **PrusaLink** has no fan control, can't print `.bgcode` files and only supports API key sign-in.
+- **PrusaLink** has no fan control, only supports API key sign-in, and the dashboard can't start a file on it. A print sent from FoxTrack must be plain `.gcode`, not `.bgcode`.
 - **Home Assistant printers** are read-only.
 - **Docker** installs update with `docker compose pull`, not from the dashboard.
 
