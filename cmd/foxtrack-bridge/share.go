@@ -19,7 +19,7 @@ import (
 	"foxtrack-bridge/web"
 )
 
-// Read-only share links (Settings, Security).
+// Read-only share links (Settings, Security and sharing).
 //
 // A share link shows one printer's progress, temperatures and, when the owner
 // allows it, a camera still to anyone who has the link and can reach this

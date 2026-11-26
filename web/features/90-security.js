@@ -1,4 +1,4 @@
-// Settings, Security: the optional dashboard password and API tokens.
+// Settings, Security and sharing: the optional dashboard password and API tokens.
 (function () {
     const S = '#settings-security';
     const style = document.createElement('style');
@@ -25,7 +25,7 @@
 
     function render(el) {
         if (!view) {
-            el.innerHTML = '<h2 class="font-heading text-xl font-medium leading-tight">Security</h2>'
+            el.innerHTML = '<h2 class="font-heading text-xl font-medium leading-tight">Security and sharing</h2>'
                 + '<div class="mt-5 space-y-2" aria-busy="true"><div class="sec-skel"></div><div class="sec-skel"></div></div>';
             return;
         }
@@ -34,7 +34,7 @@
         const shareList = shares || [];
         const printers = (typeof configuredPrinters !== 'undefined' && Array.isArray(configuredPrinters)) ? configuredPrinters : [];
         el.innerHTML = `
-            <h2 class="font-heading text-xl font-medium leading-tight">Security</h2>
+            <h2 class="font-heading text-xl font-medium leading-tight">Security and sharing</h2>
             <p class="mt-1.5 text-sm text-text-2">${on
                 ? 'The dashboard and API need the password. Scripts and Home Assistant can use an API token instead.'
                 : 'Anyone on your network can open this dashboard and control your printers. Set a password to stop that.'}</p>
@@ -224,14 +224,14 @@
 
     async function load(el) {
         try { view = await apiFetch('/api/security'); }
-        catch (err) { el.innerHTML = '<h2 class="font-heading text-xl font-medium leading-tight">Security</h2><p class="mt-3 text-sm text-danger">' + escHtml(friendlyError(err.message)) + '</p>'; return; }
+        catch (err) { el.innerHTML = '<h2 class="font-heading text-xl font-medium leading-tight">Security and sharing</h2><p class="mt-3 text-sm text-danger">' + escHtml(friendlyError(err.message)) + '</p>'; return; }
         try { shares = await apiFetch('/api/shares'); }
         catch (_) { shares = []; }
         render(el);
     }
 
     registerSettingsTab({
-        id: 'security', label: 'Security', group: 'Bridge', order: 10,
+        id: 'security', label: 'Security and sharing', group: 'Bridge', order: 10,
         mount(el) { render(el); load(el); },
         onShow(el) {
             // A reload re-renders the section: it must not wipe a token or link that

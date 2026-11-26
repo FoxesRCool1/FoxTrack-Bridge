@@ -68,6 +68,11 @@ type discoveredPrinter struct {
 	Connect string `json:"connect,omitempty"` // Bambu only: lan or cloud
 	URL     string `json:"url,omitempty"`     // Klipper and PrusaLink only
 	Added   bool   `json:"added"`
+	// Moved: a saved printer with this serial has another IP saved, so the
+	// printer got a new address. SavedID and SavedName name that printer.
+	Moved     bool   `json:"moved,omitempty"`
+	SavedID   string `json:"saved_id,omitempty"`
+	SavedName string `json:"saved_name,omitempty"`
 }
 
 type discoverResult struct {
@@ -250,9 +255,14 @@ func indexByIP(out []discoveredPrinter, ip string) int {
 }
 
 // markAdded flags the printers a saved printer already covers, matched by IP,
-// by serial, or by the host of its Moonraker, PrusaLink or OctoPrint URL.
+// by serial, or by the host of its Moonraker, PrusaLink or OctoPrint URL. A
+// printer found by serial at another IP than the one saved is also flagged as
+// moved, with the saved printer's ID and name, so the dashboard can offer to
+// edit it. The config is left as it is. Saved printers with no IP (Bambu
+// Cloud) never count as moved.
 func markAdded(found []discoveredPrinter, saved []config.Printer) {
 	hosts, serials := map[string]bool{}, map[string]bool{}
+	withIP := map[string][]config.Printer{} // by serial, saved printers that have an IP
 	for _, p := range saved {
 		for _, h := range []string{p.IP, urlHost(p.MoonrakerURL), urlHost(p.PrusaLinkURL), urlHost(p.OctoPrintURL)} {
 			h = strings.ToLower(strings.TrimSpace(h))
@@ -261,12 +271,38 @@ func markAdded(found []discoveredPrinter, saved []config.Printer) {
 			}
 		}
 		if p.Serial != "" {
-			serials[strings.ToLower(p.Serial)] = true
+			s := strings.ToLower(p.Serial)
+			serials[s] = true
+			if strings.TrimSpace(p.IP) != "" && !p.IsCloud() {
+				withIP[s] = append(withIP[s], p)
+			}
 		}
 	}
 	for i := range found {
-		found[i].Added = hosts[strings.ToLower(strings.TrimSpace(found[i].IP))] || (found[i].Serial != "" && serials[strings.ToLower(found[i].Serial)])
+		f := &found[i]
+		f.Added = hosts[strings.ToLower(strings.TrimSpace(f.IP))] || (f.Serial != "" && serials[strings.ToLower(f.Serial)])
+		if f.Serial == "" || strings.TrimSpace(f.IP) == "" {
+			continue
+		}
+		if p, ok := movedFrom(f.IP, withIP[strings.ToLower(f.Serial)]); ok {
+			f.Moved, f.SavedID, f.SavedName = true, p.ID, p.Name
+		}
 	}
+}
+
+// movedFrom returns the first of same, the saved printers with the found
+// printer's serial, when none of them is saved at ip.
+func movedFrom(ip string, same []config.Printer) (config.Printer, bool) {
+	ip = strings.TrimSpace(ip)
+	for _, p := range same {
+		if strings.EqualFold(strings.TrimSpace(p.IP), ip) {
+			return config.Printer{}, false
+		}
+	}
+	if len(same) == 0 {
+		return config.Printer{}, false
+	}
+	return same[0], true
 }
 
 // urlHost returns the host of a saved URL; a bare "ip:port" counts too.

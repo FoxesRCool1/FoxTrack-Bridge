@@ -42,12 +42,13 @@ func TestAppend_CapsRecordsAndSamples(t *testing.T) {
 	if last.StartTime != 99999 {
 		t.Fatalf("the new record must be last, got start %d", last.StartTime)
 	}
-	if len(last.TempSamples) != MaxTempSamples {
-		t.Fatalf("kept %d samples, want %d", len(last.TempSamples), MaxTempSamples)
+	// The newest MaxTempSamples are kept, then thinned to MaxStoredTempSamples.
+	if len(last.TempSamples) != MaxStoredTempSamples {
+		t.Fatalf("kept %d samples, want %d", len(last.TempSamples), MaxStoredTempSamples)
 	}
-	if last.TempSamples[0].NozzleTemp != 10 || last.TempSamples[MaxTempSamples-1].NozzleTemp != float64(MaxTempSamples+9) {
+	if last.TempSamples[0].NozzleTemp != 10 || last.TempSamples[MaxStoredTempSamples-1].NozzleTemp != float64(MaxTempSamples+9) {
 		t.Errorf("the oldest samples should be the ones dropped: first=%v last=%v",
-			last.TempSamples[0].NozzleTemp, last.TempSamples[MaxTempSamples-1].NozzleTemp)
+			last.TempSamples[0].NozzleTemp, last.TempSamples[MaxStoredTempSamples-1].NozzleTemp)
 	}
 }
 

@@ -86,11 +86,28 @@ var mu sync.Mutex
 
 // The history file is rewritten whole on every append, so it is kept small:
 // the newest MaxRecords prints, and per print the newest MaxTempSamples
-// temperature samples (one a minute, so 24 hours).
+// temperature samples (one a minute, so 24 hours). A new record then keeps at
+// most MaxStoredTempSamples of those, spread evenly over the print; records
+// already in the file are written back as they are.
 const (
-	MaxRecords     = 5000
-	MaxTempSamples = 1440
+	MaxRecords           = 5000
+	MaxTempSamples       = 1440
+	MaxStoredTempSamples = 300
 )
+
+// thinSamples returns at most limit samples picked evenly from s, always the
+// first and the last, in their order. With limit or fewer it returns s as is.
+func thinSamples(s []TempSample, limit int) []TempSample {
+	n := len(s)
+	if n <= limit || limit < 2 {
+		return s
+	}
+	out := make([]TempSample, limit)
+	for i := range out {
+		out[i] = s[i*(n-1)/(limit-1)] // strictly increasing, since n > limit
+	}
+	return out
+}
 
 // ErrNotFound is returned by SetNote when no record matches the printer and
 // start time.
@@ -169,6 +186,7 @@ func Append(r Record) error {
 	if n := len(r.TempSamples); n > MaxTempSamples {
 		r.TempSamples = slices.Clone(r.TempSamples[n-MaxTempSamples:]) // the oldest go
 	}
+	r.TempSamples = thinSamples(r.TempSamples, MaxStoredTempSamples) // only the new record
 	records = append(records, r)
 	if n := len(records); n > MaxRecords {
 		records = slices.Clone(records[n-MaxRecords:]) // the oldest go

@@ -154,7 +154,7 @@ Saving reconnects only that printer, and only if a connection detail changed. Ot
 
 A printer cannot be renamed during a print, because the running print is tracked under its name and its history record would be lost. The IP address can be changed during a print. Local print history from before a rename stays with the printer.
 
-In FoxTrack, a renamed printer keeps its link: a Bambu printer because FoxTrack follows the serial number, a Klipper, PrusaLink, OctoPrint or Home Assistant printer because FoxTrack follows a fixed ID the Bridge gives it. Changing a Bambu serial number makes FoxTrack see a new device. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Detected on your network, not linked" in the Fleet view. The old device stays under "Detected on your network, not linked" and shows as offline. A FoxTrack owner or admin can clear it with its Remove button, which appears once the device is offline.`,
+In FoxTrack, a renamed printer keeps its link: a Bambu printer because FoxTrack follows the serial number, a Klipper, PrusaLink, OctoPrint or Home Assistant printer because FoxTrack follows a fixed ID the Bridge gives it. Changing a Bambu serial number makes FoxTrack see a new device. To move the link: in FoxTrack, click the printer, set its Bridge device section to Unlinked, then link the new device from "Bridge devices to link". The old device stays under "Bridge devices to link" and shows as offline. A FoxTrack owner or admin can clear it with its Remove button, which appears once the device is offline.`,
 	},
 	{
 		ID:       "connection-problems",
@@ -367,13 +367,13 @@ In FoxTrack, a fatal or serious alarm rings the bell and sends the printer error
 
 To link: in FoxTrack, open Settings > Integrations > FoxTrack Bridge and create a Bridge token (it starts with ftb_ and is shown once). In the Bridge, open Settings, paste it into the Bridge token field, and click Save. The line under the field then says Connected to FoxTrack, or what to fix. The Bridge integration needs the FoxTrack Pro or Farm plan, and creating a token needs the owner or admin role.
 
-Once linked, the Bridge relays telemetry, print history and camera snapshots to FoxTrack so printers can be monitored remotely. Each printer then appears on the FoxTrack Printers page: in the Live view, and in the Fleet view under "Detected on your network, not linked". Pick a FoxTrack printer in its "Link to printer" menu to link them.
+Once linked, the Bridge relays telemetry, print history and camera snapshots to FoxTrack so printers can be monitored remotely. Each printer then appears on the FoxTrack Printers page: in the Live view, and under "Bridge devices to link". Pick a FoxTrack printer in its "Link to printer…" menu to link them.
 
 Printers that already exist in FoxTrack should be linked, not deleted. Deleting a printer in FoxTrack also deletes its maintenance schedules, maintenance log and installed hardware. FoxTrack recognizes a Bambu printer by its serial number and every other printer by a fixed ID the Bridge gives it, so the names do not have to match.
 
 If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the Bridge token was revoked, it was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.
 
-A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Farm). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Detected on your network, not linked", and click Remove.
+A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Farm). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Bridge devices to link", and click Remove.
 
 Pause, resume, stop and light commands sent from FoxTrack reach the Bridge within a few seconds (up to 30 seconds right after the page is opened), and FoxTrack shows the result. Home Assistant printers are read-only, so FoxTrack cannot send them commands. A command the Bridge does not pick up within 2 minutes expires, so it never fires late.`,
 	},
@@ -441,7 +441,7 @@ The camera tool is off by default. When it is switched on, the assistant can fet
 
 The assistant can only read. It cannot add, change or delete a printer, cannot start, pause or stop a print, and cannot change any setting. It can only tell you what to press.
 
-Unless a dashboard password is set in Settings > Security, anyone who can reach the dashboard on your network can use the assistant and spend credit on the configured key.
+Unless a dashboard password is set in Settings > Security and sharing, anyone who can reach the dashboard on your network can use the assistant and spend credit on the configured key.
 
 Watch prints for failures (Settings > Advanced > Assistant, needs camera access) has the assistant look at each printing printer's camera every few minutes (5 by default, 2 to 60), starting 5 minutes into a print. After two checks in a row that look like a failed print, the channels that have "Failure spotted by camera watch" ticked get one notification for that print. It never pauses or stops a print. Each check sends a picture to the provider, which can cost money with a paid provider.`,
 	},
@@ -461,7 +461,7 @@ The queue is saved in queue.json next to config.json and survives a restart. Rem
 		ID:       "share-links",
 		Title:    "Share links: a read-only view of one printer",
 		Keywords: []string{"share", "link", "share link", "watch", "family", "friend", "read-only", "public", "view only", "revoke"},
-		Body: `A share link lets someone watch one printer without access to anything else. Make one in Settings > Security > Share links: pick the printer, give it a name, and tick Show the camera if the page may show a camera picture (it refreshes every 10 seconds).
+		Body: `A share link lets someone watch one printer without access to anything else. Make one in Settings > Security and sharing > Share links: pick the printer, give it a name, and tick Show the camera if the page may show a camera picture (it refreshes every 10 seconds).
 
 The page shows the printer's status, file, progress, time left and temperatures. It has no controls, shows no other printer, and never shows addresses, access codes or file lists. It works without the dashboard password, for anyone who can reach the Bridge's address, so it is meant for people on your network (or who can reach it some other way you set up).
 

@@ -365,7 +365,7 @@ scrape_configs:
       credentials: ftk_your_token
 ```
 
-**Your own scripts.** Two read-only endpoints return JSON. With a dashboard password set, send an API token (**Settings > Security**) as `Authorization: Bearer ftk_...`, as above; with none, no header is needed.
+**Your own scripts.** Two read-only endpoints return JSON. With a dashboard password set, send an API token (**Settings > Security and sharing**) as `Authorization: Bearer ftk_...`, as above; with none, no header is needed.
 
 - `GET /api/printers` lists your printers as an array: `id`, `name`, the address or serial, `connection` and so on. Access codes, API keys and tokens are never returned: `lan_code_set` and `api_key_set` only say whether one is saved.
 - `GET /api/history/<printer name>` returns `{"records": [...]}`, the print history of that printer (percent-encode the name, and a renamed printer keeps its older records). Each record has `printer_name`, `file_name`, `start_time` and `end_time` (Unix seconds), `duration` (seconds), `result` (`finished`, `cancelled` or `error`), `nozzle_temp` and `bed_temp`, plus `percent_at_end`, `filament_mm`, `filaments`, `energy_wh`, `temp_samples` and `note` when known. A printer with no history gives an empty list.
@@ -382,7 +382,7 @@ curl -H "Authorization: Bearer ftk_your_token" "http://192.168.1.20:8080/api/his
 <details>
 <summary><b>Password, API tokens and share links</b></summary>
 
-Out of the box, anyone on your network can open the dashboard and control your printers, as with most printer interfaces. Set a password under **Settings > Security** and every page and API call then needs a signed-in browser or an API token (`Authorization: Bearer ftk_...`). Passwords are stored as salted PBKDF2 hashes and tokens as SHA-256 hashes. After five wrong passwords, sign-in slows down.
+Out of the box, anyone on your network can open the dashboard and control your printers, as with most printer interfaces. Set a password under **Settings > Security and sharing** and every page and API call then needs a signed-in browser or an API token (`Authorization: Bearer ftk_...`). Passwords are stored as salted PBKDF2 hashes and tokens as SHA-256 hashes. After five wrong passwords, sign-in slows down.
 
 **Share links**, on the same page, give one person a read-only view of one printer: its progress, time left, temperatures and, if you tick **Show the camera**, a camera picture that refreshes every 10 seconds. The link works without the password, for anyone who can reach the Bridge's address, and shows nothing else: no controls, no other printers, no addresses or codes. Like API tokens, a link is shown once when you make it and only its hash is stored. **Revoke** stops it at once, and removing the printer stops it too.
 

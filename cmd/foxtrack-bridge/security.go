@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -308,12 +309,47 @@ var (
 	loginByIP = map[string]*loginTries{}
 )
 
+// clientIP is the address the sign-in throttle counts tries against, and
+// nothing else: it never decides whether a request is trusted (that is
+// loopbackClient). It goes by the connection, except behind a reverse proxy on
+// this computer: there every visitor arrives from loopback, so one visitor's
+// wrong passwords would lock everyone out, the owner too. For a loopback
+// connection it takes the last X-Forwarded-For entry, the one that proxy
+// added itself; the entries before it come from the client and are ignored.
+// From any other address the header is ignored, so a LAN client cannot dodge
+// its own lock by sending one.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if a, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil && a.Unmap().IsLoopback() {
+		if fwd := lastForwardedFor(r.Header.Values("X-Forwarded-For")); fwd != "" {
+			return fwd
+		}
 	}
 	return host
+}
+
+// lastForwardedFor returns the last entry of the last X-Forwarded-For line as
+// a bare IP address, or "" when there is none or it is not an IP address.
+func lastForwardedFor(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	s := lines[len(lines)-1]
+	if i := strings.LastIndexByte(s, ','); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.TrimSpace(s)
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+	a, err := netip.ParseAddr(strings.TrimSuffix(strings.TrimPrefix(s, "["), "]"))
+	if err != nil {
+		return ""
+	}
+	return a.Unmap().WithZone("").String()
 }
 
 func loginLockedFor(ip string, now time.Time) time.Duration {
@@ -704,7 +740,7 @@ func resetPasswordFromCLI() error {
 	if err := config.SaveConfig(cfg); err != nil {
 		return err
 	}
-	fmt.Println("The dashboard password was removed. Start the Bridge again (stop it first if it is running) and set a new one in Settings, Security.")
+	fmt.Println("The dashboard password was removed. Start the Bridge again (stop it first if it is running) and set a new one in Settings, Security and sharing.")
 	return nil
 }
 

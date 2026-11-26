@@ -52,7 +52,7 @@ const TABS = [
   { id: 'homeassistant', label: 'MQTT (Home Assistant)', group: 'Connect', order: 20 },
   { id: 'spoolman', label: 'Spoolman', group: 'Connect', order: 30 },
   { id: 'metrics', label: 'Prometheus', group: 'Connect', order: 40 },
-  { id: 'security', label: 'Security', group: 'Bridge', order: 10 },
+  { id: 'security', label: 'Security and sharing', group: 'Bridge', order: 10 },
 ];
 
 function navGroups(opts = {}) {

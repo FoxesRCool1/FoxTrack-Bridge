@@ -59,16 +59,14 @@ needs.
 Within a few seconds, each printer shows up in FoxTrack on the **Printers** page:
 
 - The **Live** view shows a tile for every printer the Bridge reports.
-- The **Fleet** view lists new ones at the bottom under **Detected on your
-  network, not linked**.
+- The **Bridge devices to link** section lists new ones.
 
 To link one, pick a FoxTrack printer in its **Link to printer…** menu. A linked
 printer shows live status, the camera and the controls in its detail view. You
 can change or remove the link later from the printer's **Bridge device**
 section.
 
-If you have not added the printer in FoxTrack yet, add it under **Fleet** first,
-then link it.
+If the printer is not in FoxTrack yet, choose **Add as new printer**.
 
 ## I already have printers in FoxTrack
 
@@ -120,11 +118,10 @@ linked yet. So unlink the old device first:
 
 1. In FoxTrack, open **Printers** and click the printer.
 2. In its **Bridge device** section, choose **Unlinked**.
-3. In the **Fleet** view, find the new device under **Detected on your network,
-   not linked**, and link it to the printer.
+3. Under **Bridge devices to link**, find the new device and link it to the
+   printer.
 
-The old device stays under **Detected on your network, not linked** and shows as
-offline. An owner or admin can clear it with its **Remove** button. The button
+The old device stays under **Bridge devices to link** and shows as offline. An owner or admin can clear it with its **Remove** button. The button
 appears once the device is offline. Its print history in FoxTrack stays.
 
 ## Print a file from FoxTrack
@@ -228,7 +225,7 @@ FoxTrack shows a camera picture in two ways:
   does not update. For Klipper printers, the Bridge sends snapshots only when
   **Webcam URL** is set on the printer.
 
-With a dashboard password set (Settings, Security), FoxTrack can no longer talk
+With a dashboard password set (Settings, Security and sharing), FoxTrack can no longer talk
 to the Bridge directly from your browser. Live pictures stop, and pause, resume
 and stop go through FoxTrack's command queue instead, which takes a few seconds
 longer. Snapshots and everything else keep working.
@@ -284,7 +281,7 @@ the result under the buttons.
 Your FoxTrack plan limits how many Bridge printers a workspace can have (5 on
 Pro, unlimited on Farm). Printers you renamed or removed still count while
 their old device is in FoxTrack. In FoxTrack, open **Printers**, find the old
-device under **Detected on your network, not linked**, and click **Remove**.
+device under **Bridge devices to link**, and click **Remove**.
 
 ### A print that finished while the Bridge was off is missing
 

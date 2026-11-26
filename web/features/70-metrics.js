@@ -12,7 +12,7 @@ function mxScrapeConfig() {
         + (https ? '    scheme: https\n' : '')
         + '    static_configs:\n'
         + "      - targets: ['" + location.host + "']\n"
-        + '    # With a dashboard password, add an API token from Security:\n'
+        + '    # With a dashboard password, add an API token from Security and sharing:\n'
         + '    # authorization:\n'
         + '    #   credentials: YOUR_API_TOKEN\n';
 }
@@ -52,7 +52,7 @@ function mxMount(sec) {
 
 <div class="mt-5">
     <div class="flex items-center justify-between gap-3 mb-2">
-        <span class="field-label flex items-center gap-1" style="margin:0" id="mxSnipLabel">Sample prometheus.yml ${tip('If you set a dashboard password, create an API token in Security and add it as a bearer token in your scrape config.', 'About the sample prometheus.yml')}</span>
+        <span class="field-label flex items-center gap-1" style="margin:0" id="mxSnipLabel">Sample prometheus.yml ${tip('If you set a dashboard password, create an API token in Security and sharing, and add it as a bearer token in your scrape config.', 'About the sample prometheus.yml')}</span>
         <button id="mxCopySnip" type="button" class="btn-outline btn-lg" aria-label="Copy the sample prometheus.yml"><i class="fas fa-copy mr-1"></i>Copy</button>
     </div>
     <div class="rounded-md bg-panel-2 p-3 overflow-x-auto"><pre id="mxSnip" class="font-mono" tabindex="0" aria-labelledby="mxSnipLabel">${escHtml(mxScrapeConfig())}</pre></div>
