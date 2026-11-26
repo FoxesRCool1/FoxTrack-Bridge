@@ -2,9 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +19,48 @@ import (
 
 	"foxtrack-bridge/config"
 )
+
+// A Bambu printer found by its MQTT certificate has no announced name. The
+// name stays blank so the dashboard offers the model, not the IP address.
+func TestDiscoverHost_BambuByCertificateHasNoName(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := pkix.Name{CommonName: "01P00C580801716", Organization: []string{"BBL Technologies Co., Ltd"}}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: name, Issuer: name, NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			c.(*tls.Conn).Handshake()
+			c.Close()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	setBambuPort(t, port)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p, ok := discoverHost(ctx, testClient(), "127.0.0.1", func(port int) bool { return port == 8883 })
+	if !ok {
+		t.Fatal("printer with a Bambu certificate not found")
+	}
+	if p.Name != "" || p.Model != "P1S" || p.Serial != "01P00C580801716" || p.IP != "127.0.0.1" || p.Type != "bambu" {
+		t.Errorf("found %+v, want a blank name, model P1S and the serial", p)
+	}
+}
 
 func TestParseBambuSSDP_Notify(t *testing.T) {
 	data := "NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nLocation: 192.168.1.42\r\n" +
@@ -253,10 +300,29 @@ func TestDiscoverKlipper(t *testing.T) {
 		t.Errorf("moonraker: got %q, %v", host, ok)
 	}
 
+	// Moonraker with authorization on answers 401 to a scan with no key.
+	locked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/printer/info" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error": {"code": 401, "message": "Unauthorized", "traceback": ""}}`))
+	}))
+	defer locked.Close()
+	if host, ok := discoverKlipper(context.Background(), testClient(), locked.URL); !ok || host != "" {
+		t.Errorf("moonraker with authorization: got %q, %v; want listed with no hostname", host, ok)
+	}
+
 	for name, h := range map[string]http.HandlerFunc{
 		"404":       func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) },
 		"html":      func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("<html>hi</html>")) },
 		"no result": func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"error":{"code":401}}`)) },
+		"basic auth login page": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="router"`)
+			http.Error(w, "<html>login</html>", http.StatusUnauthorized)
+		},
 	} {
 		srv := httptest.NewServer(h)
 		if _, ok := discoverKlipper(context.Background(), testClient(), srv.URL); ok {

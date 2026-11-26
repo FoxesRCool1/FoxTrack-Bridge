@@ -371,7 +371,7 @@
             <div id="fieldBrand">
                 <div class="field-label flex items-center gap-1"><label for="pBrand">Printer type</label><span id="brandInstructions" class="hidden inline-flex"></span></div>
                 <div class="select-wrap">
-                    <select id="pBrand" onchange="onBrandChange()" class="field">
+                    <select id="pBrand" onchange="onBrandChange()" class="field" data-i18n-options>
                         <option value="">Select type…</option>
                         <option value="bambu">Bambu Lab, on your network (LAN)</option>
                         <option value="bambu_cloud">Bambu Lab, through Bambu Cloud (experimental)</option>
@@ -479,7 +479,7 @@
                         <div>
                             <label for="pPlugKind" class="field-label">Type</label>
                             <div class="select-wrap">
-                                <select id="pPlugKind" class="field" onchange="onPlugKindChange()">
+                                <select id="pPlugKind" class="field" onchange="onPlugKindChange()" data-i18n-options>
                                     <option value="">None</option>
                                     <option value="shelly">Shelly</option>
                                     <option value="tasmota">Tasmota</option>
@@ -589,7 +589,7 @@
     <div class="floating w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="startPrintTitle">
         <h3 id="startPrintTitle" class="font-heading text-xl font-medium leading-tight">Start a print</h3>
         <p id="startPrintSubtitle" class="mt-1 mb-4 text-sm leading-relaxed text-text-2"></p>
-        <label for="startPrintFile" class="field-label flex items-center gap-1">File name on the printer <button type="button" class="info-tip" aria-label="About the file name" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only">A file already stored on the printer, like benchy.gcode. To send a new file, use Print in FoxTrack.</span></label>
+        <label for="startPrintFile" class="field-label flex items-center gap-1">File name on the printer <button type="button" class="info-tip" aria-label="About the file name" aria-expanded="false"><i class="fas fa-info"></i></button><span id="startPrintTip" class="tip-text sr-only">A file already stored on the printer, like benchy.gcode. To send a new file, use Print in FoxTrack.</span></label>
         <input type="text" id="startPrintFile" autocomplete="off" class="field" placeholder="benchy.gcode" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStartPrint()}">
         <div class="mt-5 flex gap-2 justify-end">
             <button type="button" onclick="closeStartPrint()" class="btn-outline btn-lg">Cancel</button>
@@ -898,7 +898,7 @@
                         </button>
                     </div>
                     <p id="aiOffHint" class="hidden mt-2 text-xs text-text-2">The assistant is off. Turn it on, pick a provider and save to ask about your printers.</p>
-                    <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Ask about your printers, or why a print failed. It can only read.
+                    <p class="mt-1.5 text-sm text-text-2 flex items-center gap-1">Ask about your printers, or why a print failed.
                         <button type="button" class="info-tip" aria-label="About the assistant" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only"><span class="block">You bring the AI provider and pay for it; the Bridge ships with none. Requests go from this machine straight to the provider, never through FoxTrack.</span><span class="block mt-1.5">It cannot change a setting or control a print.</span></span>
                     </p>
 
@@ -1005,8 +1005,10 @@
                         <p id="deviceDocker" class="hidden mt-3 text-xs text-text-2">Running in Docker: use the host's address and the mapped port.</p>
                     </section>
                     <section class="rounded-lg border border-border bg-panel p-6">
-                        <h2 class="font-heading text-xl font-medium leading-tight">Back up and restore</h2>
-                        <p class="mt-1.5 text-sm text-text-2">Download your printers and settings as one file, or restore them from a backup. Passwords, access codes and keys are left out of the file. Restoring on this computer keeps the ones you already entered; on a new computer, enter them again, and each printer that needs one says so. A restore never changes your dashboard password, API tokens, share links or Bambu account, and keeps the assistant key unless the backup uses a different AI provider. The Bridge also keeps a daily copy of config.json and history.json in the backups folder next to them.</p>
+                        <h2 class="font-heading text-xl font-medium leading-tight flex items-center gap-2">Back up and restore
+                            <button type="button" class="info-tip" aria-label="About backup and restore" aria-expanded="false"><i class="fas fa-info"></i></button><span class="tip-text sr-only font-sans"><span class="block">A restore keeps the codes and keys of printers still in the list. On a new computer, enter them again. Print history is not in the file: copy history.json while the Bridge is stopped.</span></span>
+                        </h2>
+                        <p class="mt-1.5 text-sm text-text-2">Passwords, access codes and keys are not in the file.</p>
                         <div class="mt-5 flex items-center gap-3">
                             <button type="button" onclick="downloadBackup(this)" class="btn-outline">Download backup</button>
                             <button type="button" onclick="pickBackupFile()" class="btn-outline">Restore from file…</button>
@@ -1069,6 +1071,7 @@ let selectedForRemoval = new Set(); // ids
 let advancedMode = false;
 let autoUpdateEnabled = false;
 const pendingLightTarget = {}; // id -> expected light_on boolean; cleared when poll confirms state
+const lightSafetyTimers = {}; // id -> timer that gives up waiting for that confirmation
 const pendingFanTarget = {}; // id -> expected cooling_fan_pct (0–100); cleared when poll confirms
 const cameraLoading = new Set(); // enc values whose camera stream is still loading
 const cameraTimers = new Map(); // enc -> timer that gives up on a stream that never starts
@@ -1216,6 +1219,9 @@ function foxtrackCardLine(p) {
 function fill(text, ...values) { return text.replace(/\{(\d)\}/g, (_, i) => values[i]); }
 // Text that never reaches the page (browser notifications) or is built from translated pieces.
 function i18n(text) { return window.bridgeT ? window.bridgeT(text) : text; }
+// "Could not do it: reason", each part translated alone: the reason often
+// comes from the Bridge in English, and a joined text matches no key.
+function withReason(prefix, reason) { return i18n(prefix) + ' ' + i18n(reason); }
 
 function formatRemaining(minutes) {
     const m = Number(minutes || 0);
@@ -1315,6 +1321,7 @@ function toast(msg, type = 'success') {
 // Undo bars: one shared stack for every "Deleted … Undo". The bar is removed
 // when it runs out and onCommit runs; Undo cancels the timer and runs onUndo.
 const undoBars = [];
+// text is a sentence with the name in it when it holds {0}: “{0}” marked done.
 function undoBar(text, name, { onUndo, onCommit, ms = 8000 } = {}) {
     let stack = document.getElementById('undoStack');
     if (!stack) {
@@ -1327,7 +1334,8 @@ function undoBar(text, name, { onUndo, onCommit, ms = 8000 } = {}) {
     const bar = document.createElement('div');
     bar.className = 'floating undo-bar px-4 py-2.5 rounded-lg text-sm border bg-surface border-border text-text shadow-xl';
     const label = document.createElement('span');
-    label.textContent = text;
+    const inSentence = text.includes('{0}');
+    label.textContent = inSentence ? fill(text, name || '') : text;
     const quoted = document.createElement('span');
     quoted.setAttribute('data-no-i18n', '');
     quoted.textContent = '“' + (name || '') + '”.';
@@ -1337,7 +1345,8 @@ function undoBar(text, name, { onUndo, onCommit, ms = 8000 } = {}) {
     btn.textContent = 'Undo';
     const msg = document.createElement('span');
     msg.className = 'undo-msg';
-    msg.append(label, ' ', quoted);
+    if (inSentence) msg.append(label);
+    else msg.append(label, ' ', quoted);
     bar.append(msg, btn);
     stack.appendChild(bar);
     const entry = { bar, timer: null, done: false };
@@ -1406,7 +1415,9 @@ async function apiFetch(url, options = {}) {
             try { const b = JSON.parse(raw); if (b && b.error) errText = b.error; }
             catch (_) { if (raw && raw[0] !== '<') errText = raw.slice(0, 200); }
         } catch (_) {}
-        throw new Error(errText || 'HTTP ' + res.status);
+        const err = new Error(errText || 'HTTP ' + res.status);
+        err.status = res.status;
+        throw err;
     }
     if (res.status === 204) return null;
     const text = await res.text();
@@ -1805,7 +1816,7 @@ async function toggleAutoUpdate() {
         await apiFetch('/api/config', { method:'POST', body:JSON.stringify({ auto_update: !previous }) });
     } catch (e) {
         applyAutoUpdateState(previous);
-        toast("Could not save the setting: " + e.message, 'error');
+        toast(withReason("Could not save the setting:", e.message), 'error');
     }
 }
 
@@ -1819,10 +1830,11 @@ async function toggleLightEncoded(enc) {
     const btn = entry && entry.hooks.lightBtn;
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Light'; }
     // Safety: clear pending after 10s in case a poll never confirms the state
-    const safetyTimer = setTimeout(() => {
+    const safetyTimer = lightSafetyTimers[id] = setTimeout(() => {
         if (pendingLightTarget[id] === expected) {
             delete pendingLightTarget[id];
             renderPrinters();
+            toast('The printer did not change the light.', 'error');
         }
     }, 10000);
     try {
@@ -1830,7 +1842,7 @@ async function toggleLightEncoded(enc) {
         pollStatus();
     } catch (e) {
         clearTimeout(safetyTimer);
-        toast("Could not switch the light: " + friendlyError(e.message), 'error');
+        toast(withReason("Could not switch the light:", friendlyError(e.message)), 'error');
         delete pendingLightTarget[id];
         renderPrinters();
     }
@@ -1998,7 +2010,7 @@ async function saveApiKeys() {
             document.getElementById('apiKey').value = '';
             document.getElementById('foxtrack2ApiKey').value = '';
             await loadConfig();
-        } catch (e) { toast("Could not save settings: " + e.message, 'error'); return; }
+        } catch (e) { toast(withReason("Could not save settings:", e.message), 'error'); return; }
         let state = null;
         if (foxtrackTokenSet || typedToken) state = await checkFoxTrack();
         else setFoxTrackStatus('', '', '');
@@ -2076,14 +2088,14 @@ function renderCloudStatus() {
             mq.querySelector('.cloud-text').textContent = labels[m.state] || m.state || 'Off';
         }
         let detail = m.detail || '';
-        if (s.token_expired) detail = 'The Bambu sign-in has expired. Unlink and sign in again to reconnect cloud printers.';
+        if (s.token_expired) detail = 'Your Bambu sign-in has expired. Sign in again in Settings.';
         else if (m.state === 'off' && n === 0) detail = 'Add a printer with the type "Bambu Lab, through Bambu Cloud (experimental)" to start the connection.';
         const detailEl = document.getElementById('cloudDetail');
         if (detailEl) { detailEl.textContent = detail; detailEl.classList.toggle('hidden', !detail); }
         const retry = document.getElementById('cloudRetryBtn');
         if (retry) retry.classList.toggle('hidden', !(m.state === 'backoff' || m.state === 'held'));
         if (m.state === 'held' || m.state === 'auth_failed') noticeText = (m.detail && m.detail.indexOf('Bambu Cloud') === 0) ? m.detail : 'Bambu Cloud: ' + (m.detail || labels[m.state]);
-        else if (s.token_expired) noticeText = 'Bambu Cloud: the sign-in has expired. Link the account again in Settings.';
+        else if (s.token_expired) noticeText = 'Your Bambu sign-in has expired. Sign in again in Settings.';
         else if (s.token_expires_at && (s.token_expires_at * 1000 - Date.now()) < 7 * 86400000) noticeText = fill('Bambu Cloud: the sign-in expires on {0}. Sign in again in Settings before then.', fmtDate(s.token_expires_at));
     } else if (mq) {
         mq.classList.add('hidden');
@@ -2184,7 +2196,7 @@ async function cloudUnlink() {
         toast('Bambu account unlinked', 'info');
         await loadCloudStatus();
         pollStatus();
-    } catch (e) { toast("Could not unlink the account: " + e.message, 'error'); }
+    } catch (e) { toast(withReason("Could not unlink the account:", e.message), 'error'); }
 }
 
 async function cloudRetry() {
@@ -2435,7 +2447,8 @@ function renderModalScan() {
     } else if (d.failed) {
         list.innerHTML = '<p class="text-xs text-text-2">Could not search your network. Fill in the details below.</p>';
     } else if (d.at) {
-        list.innerHTML = '<p class="text-xs text-text-2">No new printers found on your network. Fill in the details below.</p>';
+        list.innerHTML = '<p class="text-xs text-text-2">No new printers found. Fill in the details below.</p>'
+            + (d.notes.length ? '<p class="mt-1 text-xs leading-relaxed text-text-2">' + escHtml(d.notes[0]) + '</p>' : '');
     } else {
         list.innerHTML = '';
     }
@@ -2476,7 +2489,7 @@ const WELCOME_HTML =
     + '<h3 class="font-heading text-xl font-medium leading-tight">Do you use FoxTrack?</h3>'
     + '<div class="mt-4 flex flex-wrap items-center gap-2">'
     + '<button type="button" onclick="answerUsesFoxTrack(\'yes\')" class="btn-primary">Yes, link FoxTrack</button>'
-    + '<button type="button" onclick="answerUsesFoxTrack(\'no\')" class="btn-outline">No, just this dashboard</button>'
+    + '<button type="button" onclick="answerUsesFoxTrack(\'no\')" class="btn-outline">No, only this dashboard</button>'
     + '</div>'
     + '<p class="mt-3 text-xs text-text-2">You can change this later in Settings.</p>'
     + '</li>'
@@ -2690,7 +2703,7 @@ function foxtrackLinked() { return foxtrackTokenSet || legacyKeySet; }
 function foxtrackMode() {
     if (!foxtrackLinked()) return 'standalone';
     if (relayProblem) return 'attention';
-    if (foxtrackCheckState === 'offline') return 'unreachable';
+    if (foxtrackCheckState === 'offline' || foxtrackCheckState === 'error') return 'unreachable'; // 'error': FoxTrack answered 5xx, 404 or 429
     if (foxtrackCheckState && foxtrackCheckState !== 'ok' && foxtrackCheckState !== 'unknown') return 'attention';
     if (foxtrackCheckState === null) return 'checking';
     if (foxtrackCheckState === 'unknown') return 'unreachable';
@@ -2749,7 +2762,7 @@ function renderFirstPrinterCard() {
     const url = networkUrls()[0];
     if (url && isLocalPage()) lines.push('<p class="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs leading-relaxed text-text-2"><i class="fas fa-smartphone"></i> Open on your phone: <code class="code-inline wrap-any">' + escHtml(url) + '</code></p>');
     const html = '<i class="fas fa-check-circle mt-0.5 shrink-0 text-brand"></i>'
-        + '<div class="min-w-0 flex-1"><p class="text-sm font-medium leading-tight">' + (configuredPrinters.length > 1 ? 'Your printers are connected.' : 'Your printer is connected.') + '</p>' + lines.join('') + '</div>'
+        + '<div class="min-w-0 flex-1"><p class="text-sm font-medium leading-tight">' + (configuredPrinters.length > 1 ? 'Your printers are added.' : 'Your printer is added.') + '</p>' + lines.join('') + '</div>'
         + '<button type="button" onclick="dismissFirstPrinterCard()" class="btn-icon -mr-2 -mt-1.5 shrink-0" title="Dismiss" aria-label="Dismiss"><i class="fas fa-times"></i></button>';
     if (el._html !== html) { el.innerHTML = html; el._html = html; }
     el.classList.remove('hidden');
@@ -2761,16 +2774,16 @@ function dismissFirstPrinterCard() { flagSet(FLAG_FIRST_DISMISSED); renderFirstP
 // What each plug type asks for beyond its address, and its setup help.
 // Help is static HTML written here, never user data.
 const PLUG_KINDS = {
-    shelly: { help: 'Enter the plug\'s IP address (Shelly app: device, Settings, Device information). Gen1 to Gen4 plugs work, with watts and energy.' },
-    tasmota: { help: 'Enter the plug\'s IP address. Any plug running Tasmota works, including Sonoff, Athom and Nous plugs flashed with it. Watts show when it has a power meter.' },
-    kasa: { login: 'TP-Link account email', help: 'Enter the plug\'s IP address (Kasa app: device, Settings, Device info). Older Kasa plugs need nothing else. Newer firmware also asks for the email and password of the TP-Link account you use in the Kasa app; the plug checks them itself and the Bridge never contacts TP-Link.' },
-    tapo: { login: 'TP-Link account email', help: 'Enter the plug\'s IP address (Tapo app: device, Settings, Device info) and the email and password of the TP-Link account you use in the Tapo app. Both are case-sensitive. The plug checks them itself; the Bridge never contacts TP-Link. If the login is refused, turn on Third-Party Compatibility in the Tapo app (Me, Tapo Lab).' },
-    tuya: { addr: '192.168.1.80 (port 6668)', tuya: true, help: 'Smart Life and Tuya plugs need their device ID and local key. Get them once: link the Smart Life app to a free Tuya IoT account, then run <code class="code-inline whitespace-nowrap">python -m tinytuya wizard</code>. The README has the steps. Re-pairing the plug in Smart Life changes its key. Leave Protocol on Auto.' },
-    meross: { meross: true, help: 'Enter the plug\'s IP address and leave the key blank: most Meross plugs answer without it. Newer models that encrypt their local traffic need the Meross key and the plug\'s MAC address; the README shows how to get the key.' },
+    shelly: { help: 'Find the IP in the Shelly app: device, Settings, Device information. Gen1 to Gen4 plugs work, with watts and energy.' },
+    tasmota: { help: 'Any plug running Tasmota works, including Sonoff, Athom and Nous plugs flashed with it. Watts show when it has a power meter.' },
+    kasa: { login: 'TP-Link account email', help: 'Find the IP in the Kasa app: device, Settings, Device info. Older Kasa plugs need nothing else. Newer firmware also asks for the email and password of the TP-Link account you use in the Kasa app; the plug checks them itself and the Bridge never contacts TP-Link.' },
+    tapo: { login: 'TP-Link account email', help: 'Find the IP in the Tapo app: device, Settings, Device info. Enter the email and password of the TP-Link account you use in the Tapo app. Both are case-sensitive. The plug checks them itself; the Bridge never contacts TP-Link. If the login is refused, turn on Third-Party Compatibility in the Tapo app (Me, Tapo Lab).' },
+    tuya: { addr: '192.168.1.80 (port 6668)', tuya: true, help: 'Smart Life and Tuya plugs need their device ID and local key. Get them once: link the Smart Life app to a free Tuya IoT account, then run <code class="code-inline whitespace-nowrap">python -m tinytuya wizard</code>. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge#getting-a-tuya-local-key" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Steps in the README</a>. Re-pairing the plug in Smart Life changes its key. Leave Protocol on Auto.' },
+    meross: { meross: true, help: 'Leave the key blank: most Meross plugs answer without it. Newer models that encrypt their local traffic need the Meross key and the plug\'s MAC address. <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge#getting-a-meross-key" target="_blank" rel="noopener" class="text-link hover:underline underline-offset-4">Steps in the README</a>.' },
     sonoff: { addr: '192.168.1.80 (port 8081)', help: 'Works in Sonoff DIY mode (firmware 3.5 or later), which takes the plug off the eWeLink cloud. Itead\'s DIY instructions for your model show how to turn it on. DIY mode has no power reading; for watts, flash Tasmota or ESPHome, or use Home Assistant.' },
     esphome: { login: 'Web server username (optional)', entity: ['Switch name (optional)', 'Power sensor name (optional)'], help: 'Needs <code class="code-inline">web_server:</code> in the device YAML (Athom plugs ship with it). The Bridge finds the relay and power sensor itself; name them only if it picks the wrong ones. Fill in the login only if the web server has one.' },
-    mystrom: { token: 'API token (optional)', help: 'Enter the plug\'s IP address. If you secured the plug with an API token in the myStrom app, paste it here.' },
-    wiz: { help: 'Enter the plug\'s IP address and turn on "Allow local communication" in the WiZ app settings. Watts show on WiZ plugs with a power meter.' },
+    mystrom: { token: 'API token (optional)', help: 'If you secured the plug with an API token in the myStrom app, paste it here.' },
+    wiz: { help: 'Turn on "Allow local communication" in the WiZ app settings. Watts show on WiZ plugs with a power meter.' },
     home_assistant: { addr: 'http://homeassistant.local:8123', addrLabel: 'Home Assistant URL', token: 'Long-lived access token', entity: ['Switch entity', 'Power sensor (optional)'], entityPh: ['switch.printer_plug', 'sensor.printer_plug_power'], help: 'Any plug Home Assistant can switch: Zigbee, Matter, Hue, Meross, Sonoff and more. Make the token in Home Assistant: your profile, Security, Long-lived access tokens, Create token. The entity is the switch\'s entity ID.' },
 };
 
@@ -2955,7 +2968,7 @@ async function saveVirtualPrinter(enabled, doneText) {
     try {
         await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ virtual_printer: { enabled, port } }) });
         toast(doneText);
-    } catch (e) { toast("Could not save: " + friendlyError(e.message), 'error'); }
+    } catch (e) { toast(withReason("Could not save:", friendlyError(e.message)), 'error'); }
     if (input) input.blur();
     await loadVirtualPrinter();
 }
@@ -3171,8 +3184,23 @@ async function loadCloudDevices(refresh) {
                 + '</label>';
         }).join('');
     } catch (e) {
+        // No account linked (the page already knows from /api/cloud/status): the
+        // fix is signing in, so offer that instead of the server's error.
+        if (cloudStatus && !cloudStatus.linked) {
+            list.innerHTML = '<p class="px-3 py-2.5 text-xs text-text-2"><button type="button" onclick="leaveAddPrinterThen(() => goToSettingsCard(\'cloudCard\',\'cloudEmail\'))" class="text-link underline-offset-4 hover:underline">Sign in to your Bambu account</button></p>';
+            return;
+        }
         list.innerHTML = '<p class="px-3 py-2.5 text-xs text-danger">' + escHtml(e.message) + '</p>';
     }
+}
+
+// Close the Add printer dialog, then run fn once its history entry is gone, so
+// a view change does not land between the dialog's entry and the back step.
+function leaveAddPrinterThen(fn) {
+    const pushed = !!(history.state && history.state.bridgeModal === 'addPrinterModal');
+    if (pushed) addEventListener('popstate', () => setTimeout(fn), { once: true });
+    closeAddPrinterModal();
+    if (!pushed) fn();
 }
 
 function onCloudDeviceChange(el) {
@@ -3203,17 +3231,20 @@ function markField(id, invalid) {
 // connection details.
 function readPrinterForm({ forTest = false } = {}) {
     const val = id => document.getElementById(id).value.trim();
+    // A web address typed without http:// gets it; an IP address pasted as a
+    // link keeps only the host.
+    const withScheme = u => (u && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) ? 'http://' + u : u;
     const brand = val('pBrand');
     const name = val('pName');
-    const ip = val('pIp');
-    const moonrakerUrl = val('pMoonrakerUrl');
+    const ip = val('pIp').replace(/^https?:\/\//i, '').replace(/[\/?#].*$/, '');
+    const moonrakerUrl = withScheme(val('pMoonrakerUrl'));
     const serial = val('pSerial');
     const lanCode = val('pLanCode');
     const klipperKey = val('pKlipperKey');
     const webcamUrl = val('pWebcamUrl');
-    const prusaLinkUrl = val('pPrusaLinkUrl');
-    const octoPrintUrl = val('pOctoPrintUrl');
-    const ha = { home_assistant_url: val('pHaUrl'), home_assistant_token: val('pHaToken') };
+    const prusaLinkUrl = withScheme(val('pPrusaLinkUrl'));
+    const octoPrintUrl = withScheme(val('pOctoPrintUrl'));
+    const ha = { home_assistant_url: withScheme(val('pHaUrl')), home_assistant_token: val('pHaToken') };
     Object.entries(HA_FIELDS).forEach(([id, key]) => { ha[key] = val(id); });
     const errEl = document.getElementById('addPrinterError');
     if (errEl) { errEl.textContent=''; errEl.classList.add('hidden'); }
@@ -3274,7 +3305,7 @@ function readPrinterForm({ forTest = false } = {}) {
 
     let payload;
     if (editingPrinterId) {
-        if (invalid) { showAddPrinterError(secretMsg || 'Please fill in the highlighted fields'); return null; }
+        if (invalid) { showAddPrinterError(secretMsg || 'Fill in the highlighted fields'); return null; }
         // Only the fields the printer's type uses (PUT /api/printers/{id}). The
         // server keeps the saved access code or API key when the field is blank.
         payload = { name };
@@ -3287,9 +3318,11 @@ function readPrinterForm({ forTest = false } = {}) {
         // The plug is sent as a whole: {kind: ""} removes it.
         if (plug) payload.plug = plug.kind ? plug : { kind: '' };
     } else {
-        payload = { name, ip, serial, lan_code:lanCode, moonraker_url:moonrakerUrl, api_key:klipperKey, webcam_url:webcamUrl };
-        // The newer types send only their own fields, so a URL typed under another
+        // Every type sends only its own fields, so a value typed under another
         // type before switching can never decide what kind of printer this is.
+        payload = brand === 'bambu'
+            ? { name, ip, serial, lan_code: lanCode }
+            : { name, moonraker_url: moonrakerUrl, api_key: klipperKey, webcam_url: webcamUrl };
         if (brand === 'prusalink') payload = { name, prusalink_url: prusaLinkUrl, api_key: klipperKey, webcam_url: webcamUrl };
         if (brand === 'octoprint') payload = { name, octoprint_url: octoPrintUrl, api_key: klipperKey, webcam_url: webcamUrl };
         if (brand === 'home_assistant') payload = { name, webcam_url: webcamUrl, ...ha };
@@ -3299,7 +3332,7 @@ function readPrinterForm({ forTest = false } = {}) {
             if (!picked) { showAddPrinterError('Pick a printer from your Bambu account'); return null; }
             payload = { name, serial: picked.value, connection: 'cloud', ip };
         }
-        if (invalid) { showAddPrinterError('Please fill in the highlighted fields'); return null; }
+        if (invalid) { showAddPrinterError('Fill in the highlighted fields'); return null; }
     }
     if (forTest && !payload.name) payload.name = 'Test printer';
     return { brand, name, payload };
@@ -3403,6 +3436,7 @@ async function addPrinter(skipCheck) {
     if (!built) return;
     const btn = document.getElementById('connectBtn');
     const sa = document.getElementById('saveAnywayBtn');
+    let hint = '';
     // A cloud printer has no connection to try; the account lists it already.
     if (skipCheck !== true && built.brand !== 'bambu_cloud') {
         const seq = ++checkSeq;
@@ -3422,12 +3456,14 @@ async function addPrinter(skipCheck) {
             showCheckResult(r);
             return;
         }
+        // A passing check can still carry a note (the serial is not confirmed).
+        if (r && r.ok && r.hint) hint = r.hint;
         showCheckResult(null);
     }
-    await savePrinter(built);
+    await savePrinter({ ...built, hint });
 }
 
-async function savePrinter({ name, payload }) {
+async function savePrinter({ name, payload, hint }) {
     const editing = editingPrinterId;
     const btn = document.getElementById('connectBtn');
     document.getElementById('saveAnywayBtn').classList.add('hidden');
@@ -3436,7 +3472,7 @@ async function savePrinter({ name, payload }) {
         if (editing) {
             await apiFetch('/api/printers/' + encodeURIComponent(editing), { method:'PUT', body:JSON.stringify(payload) });
             closeAddPrinterModal();
-            toast('Saved ' + name, 'info');
+            toast(hint || 'Saved ' + name, 'info');
             // Rebuild the card so an open camera stream closes: its URL uses the
             // old name, and the old connection details.
             forceFullCardRefresh = true;
@@ -3444,12 +3480,23 @@ async function savePrinter({ name, payload }) {
             await apiFetch('/api/printers', { method:'POST', body:JSON.stringify(payload) });
             if (pickedDisc) pickedDisc.added = true;
             closeAddPrinterModal();
-            toast(fill('Connecting to {0}…', name), 'info');
+            toast(hint || fill('Connecting to {0}…', name), 'info');
         }
         await loadConfig();
         await pollStatus();
     } catch (e) {
-        showAddPrinterError((editing ? "Could not save the printer: " : "Could not add the printer: ") + e.message);
+        // The server already applied the change and only the file write failed:
+        // trying again would add it twice, so close and show what it says.
+        if (/^The change is active/.test(e.message)) {
+            closeAddPrinterModal();
+            if (editing) forceFullCardRefresh = true;
+            await loadConfig();
+            toast(e.message, 'error');
+            return;
+        }
+        // A duplicate already says what happened; no prefix in front of it.
+        const dup = e.status === 409 && /^Already added as/.test(e.message);
+        showAddPrinterError(dup ? e.message : withReason(editing ? "Could not save the printer:" : "Could not add the printer:", e.message));
         if (btn) { btn.textContent = primaryLabel(); btn.disabled = false; } { const anyway = document.getElementById('saveAnywayBtn'); if (anyway) anyway.textContent = anywayLabel(); }
     }
 }
@@ -3578,7 +3625,7 @@ async function sendControl(id, command, payload) {
         toast(CONTROL_DONE[command] || 'Command sent');
         setTimeout(pollStatus, 800);
         return true;
-    } catch (e) { toast("Could not send the command: " + friendlyError(e.message), 'error'); return false; }
+    } catch (e) { toast(withReason("Could not send the command:", friendlyError(e.message)), 'error'); return false; }
     finally { controlInFlight.delete(key); }
 }
 
@@ -3600,7 +3647,14 @@ function startPrint(id) {
     _startPrintId = id;
     const input = document.getElementById('startPrintFile');
     input.value = '';
-    document.getElementById('startPrintSubtitle').textContent = 'On ' + printerNameForId(id);
+    // Bambu starts only a .3mf or .gcode.3mf; the others take plain G-code.
+    const p = configuredPrinters.find(p => p.id === id);
+    const bambu = !!p && printerBrand(p) === 'bambu';
+    input.placeholder = bambu ? 'benchy.gcode.3mf' : 'benchy.gcode';
+    document.getElementById('startPrintTip').textContent = bambu
+        ? 'A file already stored on the printer, like benchy.gcode.3mf. To send a new file, use Print in FoxTrack.'
+        : 'A file already stored on the printer, like benchy.gcode. To send a new file, use Print in FoxTrack.';
+    document.getElementById('startPrintSubtitle').textContent = fill('On {0}', printerNameForId(id));
     const btn = document.getElementById('startPrintBtn');
     btn.disabled = false;
     btn.textContent = 'Start';
@@ -3868,7 +3922,7 @@ function renderPrinters() {
     // Clear light pending entries whose state has been confirmed by the latest poll
     for (const id of Object.keys(pendingLightTarget)) {
         const actual = liveStatus[id]?.light_on ?? false;
-        if (actual === pendingLightTarget[id]) delete pendingLightTarget[id];
+        if (actual === pendingLightTarget[id]) { delete pendingLightTarget[id]; clearTimeout(lightSafetyTimers[id]); }
     }
 
     // Clear fan pending entries whose state has been confirmed by the latest poll
@@ -4234,7 +4288,7 @@ function patchCard(entry, printer) {
 const BAMBU_HMS_WIKI = 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/';
 const BAMBU_DEV_MODE_WIKI = 'https://wiki.bambulab.com/en/knowledge-sharing/enable-developer-mode';
 // The same sentence the Bridge answers /api/control with for such a printer.
-const CONTROL_BLOCKED_TEXT = 'This printer refuses control commands. Turn on LAN Only Mode and Developer Mode on the printer, then try again. LAN Only Mode is under Settings, Network (WLAN on the P1 and A1); Developer Mode is next to it on 2025 firmware and later, and under About on older firmware.';
+const CONTROL_BLOCKED_TEXT = 'This printer refuses control commands. Turn on LAN Only Mode and Developer Mode on it, then try again.';
 
 // One line per alarm, worst first, at most three. Bambu HMS codes link to the
 // Bambu wiki page that explains them.
@@ -4796,7 +4850,7 @@ async function toggleCameraHiddenEncoded(enc) {
         toast(fill(printer.camera_hidden ? 'Camera hidden for {0}' : 'Camera shown for {0}', printer.name), 'info');
     } catch (e) {
         if (hideBtn) hideBtn.disabled = false;
-        toast("Could not change the camera setting: " + e.message, 'error');
+        toast(withReason("Could not change the camera setting:", e.message), 'error');
     }
 }
 
@@ -4834,7 +4888,7 @@ async function setFanSpeedEncoded(enc, pct) {
     } catch (e) {
         clearTimeout(safetyTimer);
         delete pendingFanTarget[id];
-        toast("Could not change the fan: " + friendlyError(e.message), 'error');
+        toast(withReason("Could not change the fan:", friendlyError(e.message)), 'error');
         renderPrinters();
         pollStatus();
     }
@@ -4869,7 +4923,7 @@ async function setTempEncoded(enc, cmd) {
             : fill(bedCmd ? 'Bed set to {0} °C' : 'Nozzle set to {0} °C', text));
         inp.value = '';
         setTimeout(pollStatus, 1500);
-    } catch (e) { toast("Could not set the temperature: " + friendlyError(e.message), 'error'); }
+    } catch (e) { toast(withReason("Could not set the temperature:", friendlyError(e.message)), 'error'); }
 }
 
 // ── Gcode console ─────────────────────────────────────────────────────────────
@@ -4896,7 +4950,7 @@ async function sendGcodeEncoded(enc) {
         await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(id)) + '/gcode', { method:'POST', body:JSON.stringify({ line }), headers: controlHeaders() });
         toast('G-code sent: ' + line, 'info');
         inp.value = '';
-    } catch (e) { toast("Could not send the G-code: " + friendlyError(e.message), 'error'); }
+    } catch (e) { toast(withReason("Could not send the G-code:", friendlyError(e.message)), 'error'); }
 }
 
 // ── Global History view ───────────────────────────────────────────────────────
@@ -4971,7 +5025,7 @@ async function installUpdate() {
         const rb=document.getElementById('restartNowBtn'); if(rb) rb.classList.remove('hidden');
         if(btn) btn.classList.add('hidden');
         setUpdateProgress('Update downloaded. Click Restart to finish.');
-    } catch(e) { setUpdateProgress("Could not install the update: "+e.message,true); if(btn) btn.disabled=false; }
+    } catch(e) { setUpdateProgress(withReason("Could not install the update:", e.message),true); if(btn) btn.disabled=false; }
 }
 
 async function restartForUpdate() {
@@ -4981,11 +5035,11 @@ async function restartForUpdate() {
     try {
         await apiFetch('/api/update/restart', { method: 'POST' });
     } catch(e) {
-        setUpdateProgress("Could not restart: " + e.message, true);
+        setUpdateProgress(withReason("Could not restart:", e.message), true);
         if (rb) rb.disabled = false;
         return;
     }
-    setUpdateProgress('Restarting, please wait…');
+    setUpdateProgress('Restarting…');
     // Give the old process time to exit, then poll until the new server is up
     await new Promise(r => setTimeout(r, 2000));
     const deadline = Date.now() + 25000;
@@ -5005,6 +5059,9 @@ async function restartForUpdate() {
 const MAX_BACKUP_BYTES = 4 * 1024 * 1024; // matches the server's import limit
 
 function pickBackupFile() {
+    // Without the saved printer list the dialog cannot warn about printers the
+    // backup would remove, so a restore waits until the config has loaded.
+    if (!configEverLoaded) { toast('Reload the page first.', 'error'); return; }
     document.getElementById('restoreFileInput').click();
 }
 
@@ -5053,6 +5110,11 @@ async function restoreFromFile(file) {
         parsed = JSON.parse(await file.text());
     } catch (_) {
         toast('This file is not a FoxTrack Bridge backup or config.json.', 'error');
+        input.value = '';
+        return;
+    }
+    if (Array.isArray(parsed)) {   // history.json is a list
+        toast('This is a history file. Copy it into the config folder while the Bridge is stopped.', 'error');
         input.value = '';
         return;
     }
@@ -5108,13 +5170,21 @@ async function restoreFromFile(file) {
         const restored = !out || out.printers == null ? n : out.printers;
         await loadConfig();
         const missing = configuredPrinters.filter(p => printerMissingSecret(p));
+        // A backup holds no notification secrets, so say so when a channel needs one.
+        const nfLost = !configLoadFailed && typeof nfLostSecrets === 'function' && await nfLostSecrets();
+        const extra = nfLost ? 'Enter your notification details again.' : '';
+        let first;
         if (missing.length) {
-            toast(missing.length === 1
-                ? fill('Restored 1 printer. Enter its codes again: {0}.', missing[0].name)
-                : fill('Restored {0} printers. Enter their codes again: {1}.', restored, missing.map(p => p.name).join(', ')), 'info');
+            first = missing.length === 1
+                ? fill('Restored 1 printer. Enter its code or key again: {0}.', missing[0].name)
+                : fill('Restored {0} printers. Enter the code or key again for: {1}.', restored, missing.map(p => p.name).join(', '));
         } else {
-            toast(restored === 1 ? 'Restored 1 printer' : fill('Restored {0} printers', restored));
+            first = restored === 1 ? 'Restored 1 printer' : fill('Restored {0} printers', restored);
         }
+        // Each sentence is translated alone, then they are joined.
+        if (extra) toast(i18n(first) + (missing.length ? ' ' : '. ') + i18n(extra), 'info');
+        else if (missing.length) toast(first, 'info');
+        else toast(first);
         await pollStatus();
     } catch (e) {
         input.value = '';

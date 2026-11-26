@@ -122,6 +122,8 @@ test('the chip says connected only when the check passed and a report was accept
   assert.equal(mode({ linked: false, check: null, delivered: false, problem: false }), 'standalone');
   assert.equal(mode({ linked: true, check: null, delivered: false, problem: false }), 'checking');
   assert.equal(mode({ linked: true, check: 'unknown', delivered: true, problem: false }), 'unreachable');
+  assert.equal(mode({ linked: true, check: 'error', delivered: true, problem: false }), 'unreachable');
+  assert.equal(mode({ linked: true, check: 'offline', delivered: true, problem: false }), 'unreachable');
   assert.equal(mode({ linked: true, check: 'ok', delivered: false, problem: false }), 'waiting');
   assert.equal(mode({ linked: true, check: 'ok', delivered: true, problem: false }), 'connected');
   assert.equal(mode({ linked: true, check: 'ok', delivered: true, problem: true }), 'attention');

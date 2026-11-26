@@ -239,7 +239,8 @@ longer. Snapshots and everything else keep working.
 
 - Open **Settings** in the Bridge and read the line under **Bridge token**. It
   says **Connected to FoxTrack.** when the token works. Older installs also show
-  a **FoxTrack (legacy)** field: the token belongs in **Bridge token**, not there.
+  a **FoxTrack token (legacy)** field: the token belongs in **Bridge token**,
+  not there.
 - Check that the Bridge is running, and that the printer shows status in the
   Bridge dashboard.
 - If the Bridge dashboard shows a warning that FoxTrack rejected the token, the

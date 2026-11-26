@@ -20,6 +20,9 @@
         catch (_) { return ''; }
     }
 
+    // "created Mar 3, 2026": one sentence with the date as {0}, so it translates.
+    const createdOn = d => fill('created {0}', d);
+
     function render(el) {
         if (!view) {
             el.innerHTML = '<h2 class="font-heading text-xl font-medium leading-tight">Security</h2>'
@@ -49,14 +52,14 @@
                 <div>
                     <label for="secNew" class="field-label flex items-center gap-1">${on ? 'New password' : 'Password'} ${tip('<span id="secNewHelp">At least 8 characters. Everyone else is signed out when it changes.</span>', 'About the new password')}</label>
                     <input id="secNew" type="password" class="field" autocomplete="new-password" minlength="8" aria-describedby="secNewHelp">
-                    <p class="mt-1.5 text-xs text-text-2">With a password set, direct control and the live camera from the FoxTrack website stop working; status and history still sync.</p>
+                    ${foxtrackLinked() ? '<p class="mt-1.5 text-xs text-text-2">With a password, FoxTrack\'s live camera stops. Pause, resume and stop still work, a few seconds slower.</p>' : ''}
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2">
                     ${on ? '<button type="button" id="secRemove" class="btn-danger btn-lg">Remove password</button>' : ''}
                     <button type="submit" id="secSave" class="btn-primary btn-lg">${on ? 'Change password' : 'Set password'}</button>
                 </div>
             </form>
-            ${on ? `<div class="mt-3 text-xs text-text-2 flex items-center gap-1">Forgot the password? ${tip('<span data-i18n-html>Stop the Bridge, run it once with <code>--reset-password</code>, then start it again.</span>', 'About a forgotten password')}</div>
+            ${on ? `<div class="mt-3 text-xs text-text-2 flex items-center gap-1">Forgot the password? ${tip('<span data-i18n-html>Stop the Bridge, run it once with <code>--reset-password</code>, then start it again.</span> <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge#forgot-password" target="_blank" rel="noopener">Steps in the README</a>', 'About a forgotten password')}</div>
                 <div class="mt-4 flex justify-end"><button type="button" id="secSignOut" class="btn-ghost">Sign out of this browser</button></div>` : ''}
 
             <div class="mt-8 pt-6 border-t border-border">
@@ -69,7 +72,7 @@
                         <div class="sec-row">
                             <div class="min-w-0">
                                 <p class="text-sm font-medium truncate" data-no-i18n>${escHtml(t.name)}</p>
-                                <p class="text-xs text-text-2 sec-num">…${escHtml(t.hint)} · created ${escHtml(fmtDate(t.created_at))}</p>
+                                <p class="text-xs text-text-2 sec-num">…${escHtml(t.hint)} · <span>${createdOn(escHtml(fmtDate(t.created_at)))}</span></p>
                             </div>
                             <button type="button" class="btn-danger btn-xs" data-revoke="${escHtml(t.id)}" aria-label="Revoke ${escHtml(t.name)}">Revoke</button>
                         </div>`).join('') : '<p class="text-xs text-text-2">No tokens yet.</p>'}
@@ -92,7 +95,7 @@
                         <div class="sec-row">
                             <div class="min-w-0">
                                 <p class="text-sm font-medium truncate" data-no-i18n>${escHtml(s.name)}</p>
-                                <p class="text-xs text-text-2 sec-num"><span data-no-i18n>${s.printer_name ? escHtml(s.printer_name) : 'Printer removed'}</span> · ${s.camera ? 'Camera' : 'No camera'} · created ${escHtml(fmtDate(s.created_at))} · …${escHtml(s.hint)}</p>
+                                <p class="text-xs text-text-2 sec-num">${s.printer_name ? '<span data-no-i18n>' + escHtml(s.printer_name) + '</span>' : '<span>Printer removed</span>'} · <span>${s.camera ? 'Camera' : 'No camera'}</span> · <span>${createdOn(escHtml(fmtDate(s.created_at)))}</span> · …${escHtml(s.hint)}</p>
                             </div>
                             <button type="button" class="btn-danger btn-xs" data-share-revoke="${escHtml(s.id)}" aria-label="Revoke ${escHtml(s.name)}">Revoke</button>
                         </div>`).join('') : '<p class="text-xs text-text-2">No share links yet.</p>'}
@@ -191,13 +194,16 @@
                 const res = await apiFetch('/api/shares', { method: 'POST', body: JSON.stringify(body) });
                 shares = res.shares;
                 render(el);
-                const link = linkBase() + res.path;
+                const base = linkBase();
+                const link = base + res.path;
+                // Opened as localhost with no network address known, the link only works here.
+                const localOnly = isLocalPage() && base === location.origin;
                 const box = el.querySelector('#secNewShare');
                 box.classList.remove('hidden');
                 box.innerHTML = `<p class="text-xs text-text-2 mb-1.5">Copy it now. It is not shown again.</p>
                     <div class="flex items-center gap-2"><input id="secShareVal" class="field field-mono flex-1 min-w-0" type="text" readonly value="${escHtml(link)}">
                     <button type="button" class="btn-outline shrink-0" id="secShareCopy" aria-label="Copy link"><i class="fas fa-copy"></i> Copy</button></div>
-                    <p class="mt-1.5 text-xs text-text-2">The link works on your network, or through your own proxy.</p>`;
+                    <p class="mt-1.5 text-xs text-text-2">${localOnly ? 'This link only works on this computer. Open the dashboard by its network address, then create the link again.' : 'The link works on your network, or through your own proxy.'}</p>`;
                 box.querySelector('#secShareCopy').addEventListener('click', async () => {
                     try { await navigator.clipboard.writeText(link); toast('Link copied.'); }
                     catch (_) { const v = box.querySelector('#secShareVal'); v.focus(); v.select(); toast('Select and copy it by hand.', 'info'); }

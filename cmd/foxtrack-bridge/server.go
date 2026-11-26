@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -76,7 +77,19 @@ func sseEscape(s string) string {
 	return strings.NewReplacer("\n", " ", "\r", "").Replace(s)
 }
 
-func StartServer(port int) {
+// StartServer opens the port, then loads the config, connects the printers
+// and serves the dashboard until the server stops. The port comes first: a
+// Bridge that cannot open it (another copy is running) returns the error
+// before it connects to any printer or starts any background loop.
+// onListening, if set, runs once the dashboard is ready to answer.
+func StartServer(port int, onListening func()) error {
+	ln, err := listenWithRetry(fmt.Sprintf(":%d", port), listenWait)
+	if err != nil {
+		err = portError{port: port, err: err}
+		log.Print(err)
+		return err
+	}
+
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -112,7 +125,7 @@ func StartServer(port int) {
 	mqttpkg.OnCloudAuthFailed = expireCloudToken
 	wirePlugs()
 	startPlugRelay()
-	syncPrinterConnections(nil, cfg)
+	connectPrinters(nil, cfg)
 
 	// Units shipped before v2.3.1 used Restart=on-failure, so the clean exit an
 	// update makes on purpose left the bridge stopped instead of coming back on
@@ -166,7 +179,6 @@ func StartServer(port int) {
 	http.HandleFunc("/api/plug/test", handlePlugTest)             // POST: read a smart plug once
 	http.HandleFunc("/api/virtual-printer", handleVirtualPrinter) // GET: virtual printer address and key
 
-	printStartupBanner(port)
 	// No WriteTimeout: the camera and event streams stay open. The header
 	// timeout stops a client that opens a connection and never sends a request.
 	srv := &http.Server{
@@ -174,14 +186,45 @@ func StartServer(port int) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	ln, err := listenWithRetry(fmt.Sprintf(":%d", port), 8*time.Second)
-	if err != nil {
-		log.Printf("Server error: %v", err)
-		return
+	printStartupBanner(port)
+	if onListening != nil {
+		onListening()
 	}
-	if err := srv.Serve(ln); err != nil {
-		log.Printf("Server error: %v", err)
+	err = srv.Serve(ln)
+	log.Printf("Server error: %v", err)
+	return err
+}
+
+// connectPrinters opens the saved printers' connections at startup. A test
+// swaps it to see that a Bridge without its port connects to nothing.
+var connectPrinters = syncPrinterConnections
+
+// listenWait is how long StartServer waits for a port that is still in use.
+var listenWait = 8 * time.Second
+
+// portError is a port the Bridge could not open, in words the user can act on.
+type portError struct {
+	port int
+	err  error
+}
+
+func (e portError) Error() string {
+	if addrInUse(e.err) {
+		return fmt.Sprintf("Port %d is in use. Close the other program, or start the Bridge with --port or FOXTRACK_BRIDGE_PORT.", e.port)
 	}
+	return fmt.Sprintf("Could not open port %d (%v).", e.port, e.err)
+}
+
+func (e portError) Unwrap() error { return e.err }
+
+// addrInUse reports whether err says the port is taken. Windows reports it as
+// WSAEADDRINUSE (10048), which syscall.EADDRINUSE does not match there.
+func addrInUse(err error) bool {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+	var errno syscall.Errno
+	return runtime.GOOS == "windows" && errors.As(err, &errno) && errno == 10048
 }
 
 // printerNameFor lets the control, camera and history URLs take a printer ID
@@ -201,7 +244,7 @@ func listenWithRetry(addr string, wait time.Duration) (net.Listener, error) {
 	deadline := time.Now().Add(wait)
 	for {
 		ln, err := net.Listen("tcp", addr)
-		if err == nil || !errors.Is(err, syscall.EADDRINUSE) || time.Now().After(deadline) {
+		if err == nil || !addrInUse(err) || time.Now().After(deadline) {
 			return ln, err
 		}
 		time.Sleep(250 * time.Millisecond)
@@ -303,7 +346,14 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	body := map[string]string{"error": msg}
+	// The refusal's text is shown as is in the dashboard, so the API detail
+	// (how to confirm on purpose) rides in a separate "hint" field. This covers
+	// both POST /api/config and POST /api/config/import.
+	if msg == errRefuseClearPrinters.Error() {
+		body["hint"] = refuseClearPrintersHint
+	}
+	json.NewEncoder(w).Encode(body)
 }
 
 func jsonHeaders(w http.ResponseWriter) {
@@ -982,6 +1032,10 @@ var (
 
 const bambuCameraNoFrames = "the printer accepted the camera connection but sent no picture. Check the LAN access code. The Bridge camera works with A1 and P1 series printers"
 
+// bambuCameraNoAnswer is shown when a Bambu Lab printer's camera cannot be
+// reached at all (a missing ffmpeg has its own message, rtspNeedsFFmpeg).
+const bambuCameraNoAnswer = "The camera did not answer. Turn on Liveview on the printer."
+
 func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) {
 	conn, err := tls.DialWithDialer(
 		&net.Dialer{Timeout: 5 * time.Second},
@@ -991,7 +1045,7 @@ func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) 
 	)
 	if err != nil {
 		log.Printf("[camera/%s] connect: %v", printerName, err)
-		writeErr(w, http.StatusBadGateway, "camera unavailable")
+		writeErr(w, http.StatusBadGateway, bambuCameraNoAnswer)
 		return
 	}
 	defer conn.Close()
@@ -1007,7 +1061,7 @@ func proxyBambuCamera(w http.ResponseWriter, addr, lanCode, printerName string) 
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := conn.Write(auth); err != nil {
 		log.Printf("[camera/%s] auth write: %v", printerName, err)
-		writeErr(w, http.StatusBadGateway, "camera unavailable")
+		writeErr(w, http.StatusBadGateway, bambuCameraNoAnswer)
 		return
 	}
 	reader := bufio.NewReader(conn)
@@ -1227,6 +1281,56 @@ func hasDuplicateName(existing []config.Printer, incoming config.Printer) bool {
 	}
 	return false
 }
+
+// samePrinterIdentity reports whether a and b are the same machine: Bambu Lab
+// (LAN or cloud) by serial number; Klipper, PrusaLink and OctoPrint by kind
+// and address. Home Assistant printers often share one server, so they match
+// only when the address and every entity are the same.
+func samePrinterIdentity(a, b config.Printer) bool {
+	if a.Kind() != b.Kind() {
+		return false
+	}
+	switch a.Kind() {
+	case config.KindBambu:
+		serial := strings.TrimSpace(a.Serial)
+		return serial != "" && strings.EqualFold(serial, strings.TrimSpace(b.Serial))
+	case config.KindHomeAssistant:
+		same := func(x, y string) bool { return strings.TrimSpace(x) == strings.TrimSpace(y) }
+		return identityEndpoint(a) == identityEndpoint(b) &&
+			same(a.HAStateEntity, b.HAStateEntity) && same(a.HAProgressEntity, b.HAProgressEntity) &&
+			same(a.HANozzleEntity, b.HANozzleEntity) && same(a.HABedEntity, b.HABedEntity) &&
+			same(a.HAFileEntity, b.HAFileEntity) && same(a.HARemainingEntity, b.HARemainingEntity)
+	}
+	e := identityEndpoint(a)
+	return e != "" && e == identityEndpoint(b)
+}
+
+// identityEndpoint is printerEndpoint with an address typed without a scheme
+// read as http://, so "10.0.0.5:7125" and "http://10.0.0.5:7125" match.
+func identityEndpoint(p config.Printer) string {
+	e := printerEndpoint(p)
+	if p.Kind() != config.KindBambu && e != "" && !strings.Contains(e, "://") {
+		e = "http://" + e
+	}
+	return e
+}
+
+// alreadyAdded returns the printer in existing that is the same machine as p.
+func alreadyAdded(existing []config.Printer, p config.Printer) (config.Printer, bool) {
+	for _, o := range existing {
+		if samePrinterIdentity(o, p) {
+			return o, true
+		}
+	}
+	return config.Printer{}, false
+}
+
+// duplicatePrinterError refuses a printer that is already saved under another
+// entry. It counts as errDuplicatePrinterName, so it answers 409.
+type duplicatePrinterError struct{ name string }
+
+func (e duplicatePrinterError) Error() string        { return "Already added as \"" + e.name + "\"." }
+func (e duplicatePrinterError) Is(target error) bool { return target == errDuplicatePrinterName }
 
 // previousNameOwner returns the printer that used name before a rename. Print
 // history is filed under current AND previous names, so a printer that takes
@@ -1460,8 +1564,15 @@ func sameAIProvider(a, b *config.AI) bool {
 // errRefuseClearPrinters is returned when a POST /api/config body would replace a
 // non-empty printer list with an empty one and does not carry
 // "confirm_clear_printers": true. Its message is sent as the 409 response body, so
-// it is written to be understandable by an end user surfacing it in any client.
-var errRefuseClearPrinters = errors.New("This save would remove all of your saved printers, so it was blocked to prevent accidental data loss. Your existing printers were kept. To intentionally remove every printer, delete them individually, or resend this request with \"confirm_clear_printers\": true.")
+// it is written to be understandable by an end user surfacing it in any client
+// (the dashboard shows it as is during a restore). A client that means it sends
+// "confirm_clear_printers": true in the body, or ?confirm_clear_printers=true
+// on /api/config/import.
+var errRefuseClearPrinters = errors.New("This would remove every saved printer, so it was blocked. Your printers were kept.")
+
+// refuseClearPrintersHint is sent next to errRefuseClearPrinters as "hint" in
+// the 409 body, for API clients that mean to remove every printer.
+const refuseClearPrintersHint = `To remove every printer on purpose, send "confirm_clear_printers": true in the body of POST /api/config, or ?confirm_clear_printers=true on POST /api/config/import.`
 
 // resolveConfigUpdate applies a POST /api/config request body to the previous
 // config, enforcing the printer-preservation invariants:
@@ -1622,6 +1733,7 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		normalizePrinterAddresses(&p) // stored as a full URL, or a bare Bambu IP
 		if p.IsCloud() {
 			// Network lookup (cached, paced) happens before the lock is taken.
 			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -1650,6 +1762,12 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		}
 
 		configMutex.Lock()
+		// The same machine saved twice would open two connections to it.
+		if dup, ok := alreadyAdded(configStore.Printers, p); ok {
+			configMutex.Unlock()
+			writeErr(w, http.StatusConflict, duplicatePrinterError{name: dup.Name}.Error())
+			return
+		}
 		if hasDuplicateName(configStore.Printers, p) {
 			configMutex.Unlock()
 			writeErr(w, http.StatusConflict, fmt.Sprintf("a printer named %q already exists; printer names must be unique", p.Name))
@@ -1663,7 +1781,11 @@ func handlePrinters(w http.ResponseWriter, r *http.Request) {
 		// Server-generated only: a client-supplied id is never trusted on
 		// create, so "generated once on creation" is an actual guarantee.
 		p.ID = config.NewPrinterID()
-		configStore.Printers = append(configStore.Printers, p)
+		// A new config with its own printer list: an append could write into
+		// the array the stored config shares with readers.
+		next := configStore.Clone()
+		next.Printers = append(next.Printers, p)
+		configStore = next
 		cfg := configStore.Clone()
 		configMutex.Unlock()
 
@@ -1729,14 +1851,17 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		// Edit a copy and swap it in: readers may hold the stored config
+		// after releasing the lock, so it is never edited in place.
+		next := configStore.Clone()
 		var matched *config.Printer
-		for i := range configStore.Printers {
-			matches := configStore.Printers[i].Name == token
+		for i := range next.Printers {
+			matches := next.Printers[i].Name == token
 			if matchByID {
-				matches = configStore.Printers[i].ID == token
+				matches = next.Printers[i].ID == token
 			}
 			if matches {
-				matched = &configStore.Printers[i]
+				matched = &next.Printers[i]
 				break
 			}
 		}
@@ -1747,11 +1872,12 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		}
 		matched.CameraHidden = *pb.CameraHidden
 		snapshot := *matched
+		configStore = next
 		cfg := configStore.Clone()
 		configMutex.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if err := config.SaveConfig(cfg); err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to save config")
+			writeSaveFailed(w, err)
 			return
 		}
 		json.NewEncoder(w).Encode(redactPrinter(snapshot))
@@ -1789,10 +1915,14 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Work on a copy: other goroutines read the stored config's blocks after
+	// releasing the lock (dispatchNotification), so they are replaced, never
+	// edited in place.
+	next := configStore.Clone()
 	var removedNames []string
 	removedIDs := map[string]bool{}
-	printers := configStore.Printers[:0]
-	for _, p := range configStore.Printers {
+	printers := make([]config.Printer, 0, len(next.Printers))
+	for _, p := range next.Printers {
 		matches := p.Name == token
 		if matchByID {
 			matches = p.ID == token
@@ -1807,15 +1937,15 @@ func handlePrinterByName(w http.ResponseWriter, r *http.Request) {
 		printers = append(printers, p)
 	}
 	if len(removedNames) == 0 {
-		// Nothing matched: leave the stored list exactly as it was (the
-		// compaction above is a no-op in that case) and say so, rather than
-		// reporting a delete that never happened.
+		// Nothing matched: leave the stored config exactly as it was and say
+		// so, rather than reporting a delete that never happened.
 		configMutex.Unlock()
 		writeErr(w, http.StatusNotFound, "printer not found")
 		return
 	}
-	configStore.Printers = printers
-	forgetPrinterIDs(configStore, removedIDs)
+	next.Printers = printers
+	forgetPrinterIDs(next, removedIDs)
+	configStore = next
 	cfg := configStore.Clone()
 	configMutex.Unlock()
 	saveErr := config.SaveConfig(cfg)
@@ -1951,11 +2081,12 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 		// The Bambu account supplies the serial and the access code. Only the
 		// camera address belongs to the user, and it may be cleared.
 		if edit.IP != nil {
-			p.IP = strings.TrimSpace(*edit.IP)
+			p.IP = bareHost(*edit.IP)
 		}
 	case isBambuPrinterConfig(*p):
 		if edit.IP != nil {
-			v, err := required(edit.IP, "IP address")
+			ip := bareHost(*edit.IP)
+			v, err := required(&ip, "IP address")
 			if err != nil {
 				return nil, -1, err
 			}
@@ -1977,7 +2108,7 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 			if err != nil {
 				return nil, -1, err
 			}
-			p.PrusaLinkURL = v
+			p.PrusaLinkURL = editedURL(v, p.PrusaLinkURL)
 		}
 		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
 			p.APIKey = strings.TrimSpace(*edit.APIKey)
@@ -1991,7 +2122,7 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 			if err != nil {
 				return nil, -1, err
 			}
-			p.OctoPrintURL = v
+			p.OctoPrintURL = editedURL(v, p.OctoPrintURL)
 		}
 		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
 			p.APIKey = strings.TrimSpace(*edit.APIKey)
@@ -2011,6 +2142,9 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 				v, err := required(f.in, f.label)
 				if err != nil {
 					return nil, -1, err
+				}
+				if f.out == &p.HomeAssistantURL {
+					v = editedURL(v, p.HomeAssistantURL)
 				}
 				*f.out = v
 			}
@@ -2036,13 +2170,23 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 			if err != nil {
 				return nil, -1, err
 			}
-			p.MoonrakerURL = v
+			p.MoonrakerURL = editedURL(v, p.MoonrakerURL)
 		}
 		if edit.APIKey != nil && strings.TrimSpace(*edit.APIKey) != "" {
 			p.APIKey = strings.TrimSpace(*edit.APIKey)
 		}
 		if edit.WebcamURL != nil {
 			p.WebcamURL = strings.TrimSpace(*edit.WebcamURL)
+		}
+	}
+	// An edit that points this printer at another saved printer's machine
+	// would open a second connection to it. An edit that keeps the serial or
+	// address passes, even where an older config already holds such a pair.
+	if !samePrinterIdentity(old.Printers[idx], *p) {
+		for i, o := range cfg.Printers {
+			if i != idx && samePrinterIdentity(o, *p) {
+				return nil, -1, duplicatePrinterError{name: o.Name}
+			}
 		}
 	}
 	// A secret that was not typed again is kept only while it still goes to
@@ -2059,7 +2203,13 @@ func applyPrinterEdit(old *config.Config, token string, edit printerEdit, busy f
 		p.HomeAssistantToken = ""
 	}
 	prev := old.Printers[idx]
-	keepPrinterSecrets(p, prev)
+	// Both sides are compared with their addresses normalised: a printer saved
+	// by an older version can hold "10.0.0.5:7125", which the dashboard now
+	// sends back as "http://10.0.0.5:7125", and the same machine must keep its
+	// key. Only the kept secrets are copied back; p's addresses stay as edited.
+	cmp := withAddressesNormalized(*p)
+	keepPrinterSecrets(&cmp, withAddressesNormalized(prev))
+	p.LANCode, p.APIKey, p.HomeAssistantToken = cmp.LANCode, cmp.APIKey, cmp.HomeAssistantToken
 	// keepPrinterSecrets drops a secret whose machine changed. Where a blank
 	// secret leaves the printer unusable, refuse the edit instead of saving it
 	// (Klipper's key is optional, so it is not checked).

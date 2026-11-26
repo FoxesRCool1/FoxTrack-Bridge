@@ -144,7 +144,7 @@ func runDiscovery(ctx context.Context, d time.Duration) discoverResult {
 	}
 	noBambu := !slices.ContainsFunc(res.Printers, func(p discoveredPrinter) bool { return p.Type == "bambu" })
 	if !bambu.noSocket && bambu.bindFailed && noBambu {
-		res.Notes = append(res.Notes, "Bambu Studio may be holding UDP port 2021 on this computer; if your Bambu printer is missing, close Bambu Studio and scan again.")
+		res.Notes = append(res.Notes, "Bambu printer missing? Close Bambu Studio and scan again.")
 	}
 	if inDocker() && noBambu {
 		res.Notes = append(res.Notes, "Running in Docker: printer discovery needs host networking (network_mode: host).")
@@ -168,7 +168,8 @@ const bambuSeenFor = 10 * time.Minute
 // rememberBambu records this scan's Bambu printers and returns every one seen
 // in the last bambuSeenFor, oldest sighting first (so dedupeSort lets this
 // scan's finds win on a shared IP). A TCP find has no name, model or connect
-// mode (its name is its IP), so it keeps those an earlier announcement gave.
+// mode (its name is blank, or the IP for an unnamed announcement), so it keeps
+// those an earlier announcement gave.
 func rememberBambu(found []discoveredPrinter, now time.Time) []discoveredPrinter {
 	for _, p := range found {
 		key := strings.ToLower(p.Serial)
@@ -483,9 +484,9 @@ func discoverHost(ctx context.Context, c *http.Client, ip string, open func(port
 	if open(8883) {
 		if serial, ok := discoverBambuTLS(ctx, ip); ok {
 			// A TCP find has no announcement to read the name or connect mode
-			// from, so the IP stands in for the name, like an unnamed SSDP
-			// sighting.
-			return discoveredPrinter{Type: "bambu", Name: ip, Model: bambuSerialModel(serial), IP: ip, Serial: serial, Connect: "lan"}, true
+			// from. The name stays blank, so the dashboard offers the model
+			// ("Bambu P1S") instead of saving the printer named after its IP.
+			return discoveredPrinter{Type: "bambu", Model: bambuSerialModel(serial), IP: ip, Serial: serial, Connect: "lan"}, true
 		}
 	}
 	if open(7125) {
@@ -535,7 +536,7 @@ func discoverBambuTLS(ctx context.Context, ip string) (string, bool) {
 	// No timeout of its own: a printer's handshake can take over 1.5 s on Wi-Fi,
 	// so only the scan's deadline ends it.
 	d := tls.Dialer{Config: &tls.Config{InsecureSkipVerify: true}} // signed by BBL CA; read, not trusted
-	c, err := d.DialContext(ctx, "tcp", net.JoinHostPort(ip, "8883"))
+	c, err := d.DialContext(ctx, "tcp", net.JoinHostPort(ip, bambuProbePort))
 	if err != nil {
 		return "", false
 	}
@@ -586,7 +587,7 @@ func discoverGet(ctx context.Context, c *http.Client, u string) (int, http.Heade
 // discoverKlipper reports whether base serves Moonraker's /printer/info, and the
 // hostname it gives.
 func discoverKlipper(ctx context.Context, c *http.Client, base string) (string, bool) {
-	_, _, body, err := discoverGet(ctx, c, base+"/printer/info")
+	status, _, body, err := discoverGet(ctx, c, base+"/printer/info")
 	if err != nil {
 		return "", false
 	}
@@ -594,8 +595,20 @@ func discoverKlipper(ctx context.Context, c *http.Client, base string) (string, 
 		Result *struct {
 			Hostname string `json:"hostname"`
 		} `json:"result"`
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
 	}
-	if json.Unmarshal(body, &v) != nil || v.Result == nil {
+	parsed := json.Unmarshal(body, &v) == nil
+	if status == http.StatusUnauthorized {
+		// Moonraker with authorization on answers 401, so it is listed without
+		// a hostname and asks for its key when it is added. A 401 that is not
+		// Moonraker's JSON error (a router's login, say) counts only on
+		// Moonraker's own port.
+		moonrakerError := parsed && v.Error != nil && v.Error.Code == http.StatusUnauthorized
+		return "", moonrakerError || strings.HasSuffix(base, ":7125")
+	}
+	if !parsed || v.Result == nil {
 		return "", false
 	}
 	return v.Result.Hostname, true

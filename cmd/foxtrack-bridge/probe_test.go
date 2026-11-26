@@ -104,7 +104,18 @@ func TestProbeMoonraker(t *testing.T) {
 		t.Fatalf("unreachable result = %+v", res)
 	}
 
-	wantProbe(t, runProbe(t, `{"moonraker_url":"192.168.1.60:7125"}`), probeBadInput, false)
+	// The scan list shows addresses without a scheme: they are read as http://.
+	bare := strings.TrimPrefix(srv.URL, "http://")
+	wantProbe(t, runProbe(t, `{"moonraker_url":"`+bare+`","api_key":"secret"}`), probeOK, true)
+	wantProbe(t, runProbe(t, `{"moonraker_url":"ftp://192.168.1.60:7125"}`), probeBadInput, false)
+
+	// A blank key that Moonraker wants is asked for; a typed one is refused.
+	if res = runProbe(t, `{"moonraker_url":"`+srv.URL+`"}`); res.Message != "Moonraker asks for an API key." {
+		t.Errorf("blank key: message = %q", res.Message)
+	}
+	if res = runProbe(t, `{"moonraker_url":"`+srv.URL+`","api_key":"wrong"}`); res.Message != "Moonraker refused the API key." {
+		t.Errorf("wrong key: message = %q", res.Message)
+	}
 }
 
 func TestProbePrusaLink(t *testing.T) {
@@ -126,6 +137,72 @@ func TestProbePrusaLink(t *testing.T) {
 	wantProbe(t, res, probeAuth, false)
 	if !strings.Contains(res.Hint, "PrusaLink") {
 		t.Fatalf("hint = %q", res.Hint)
+	}
+	if res.Message != "PrusaLink refused the API key." {
+		t.Errorf("wrong key: message = %q", res.Message)
+	}
+	res = runProbe(t, `{"prusalink_url":"`+strings.TrimPrefix(srv.URL, "http://")+`"}`)
+	wantProbe(t, res, probeAuth, false)
+	if res.Message != "PrusaLink asks for an API key." {
+		t.Errorf("blank key: message = %q", res.Message)
+	}
+
+	// A plain web server answers 200 with HTML on every path: not PrusaLink.
+	html := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><body>It works</body></html>"))
+	}))
+	defer html.Close()
+	res = runProbe(t, `{"prusalink_url":"`+html.URL+`","api_key":"secret"}`)
+	wantProbe(t, res, probeNotFound, false)
+	if res.Message != "That address answers, but it isn't PrusaLink." {
+		t.Errorf("html server: message = %q", res.Message)
+	}
+	// JSON that does not name PrusaLink's API is not PrusaLink either.
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"ok":true}`)) }))
+	defer other.Close()
+	wantProbe(t, runProbe(t, `{"prusalink_url":"`+other.URL+`"}`), probeNotFound, false)
+}
+
+// Addresses from a create, edit or test request are fixed up; stored ones are
+// left alone.
+func TestNormalizePrinterAddresses(t *testing.T) {
+	p := config.Printer{MoonrakerURL: " 10.99.0.30:7125 "}
+	normalizePrinterAddresses(&p)
+	if p.MoonrakerURL != "http://10.99.0.30:7125" {
+		t.Errorf("moonraker = %q", p.MoonrakerURL)
+	}
+	for _, in := range []string{"https://octopi.local", "HTTP://10.0.0.9", "ftp://x"} {
+		p := config.Printer{OctoPrintURL: in}
+		normalizePrinterAddresses(&p)
+		if p.OctoPrintURL != in {
+			t.Errorf("%q became %q, want it kept", in, p.OctoPrintURL)
+		}
+	}
+	for in, want := range map[string]string{
+		"http://10.99.0.20/":       "10.99.0.20",
+		"https://10.99.0.20/x?y=1": "10.99.0.20",
+		" 10.99.0.20 ":             "10.99.0.20",
+		"10.99.0.20/":              "10.99.0.20",
+		"printer.local":            "printer.local",
+	} {
+		p := config.Printer{IP: in, Serial: "01S00A000000001"}
+		normalizePrinterAddresses(&p)
+		if p.IP != want {
+			t.Errorf("bambu ip %q = %q, want %q", in, p.IP, want)
+		}
+	}
+	// A Klipper printer's IP field is not a Bambu address and is not touched.
+	k := config.Printer{MoonrakerURL: "http://k", IP: "http://x/"}
+	normalizePrinterAddresses(&k)
+	if k.IP != "http://x/" {
+		t.Errorf("klipper ip = %q", k.IP)
+	}
+	if got := editedURL("10.0.0.5:7125", " 10.0.0.5:7125"); got != "10.0.0.5:7125" {
+		t.Errorf("an unchanged stored value was rewritten to %q", got)
+	}
+	if got := editedURL("10.0.0.6:7125", "10.0.0.5:7125"); got != "http://10.0.0.6:7125" {
+		t.Errorf("a new value = %q", got)
 	}
 }
 

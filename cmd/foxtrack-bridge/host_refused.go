@@ -23,23 +23,32 @@ func writeHostRefused(w http.ResponseWriter, r *http.Request) {
 			". Open it by IP address, or add the name to FOXTRACK_BRIDGE_ALLOWED_HOSTS and restart the Bridge.")
 		return
 	}
+	// Inside a container the addresses are the container's own, which the
+	// browser cannot reach, so the page names the Docker computer instead.
+	docker := hostRefusedInDocker()
 	var links []string
-	for _, ip := range lanAddresses() {
-		u := "http://" + ip
-		if port != "" {
-			u += ":" + port
+	if !docker {
+		for _, ip := range lanAddresses() {
+			u := "http://" + ip
+			if port != "" {
+				u += ":" + port
+			}
+			links = append(links, u)
 		}
-		links = append(links, u)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusForbidden)
 	_ = hostRefusedPage.Execute(w, struct {
-		Name  string
-		Links []string
-	}{name, links})
+		Name   string
+		Links  []string
+		Docker bool
+	}{name, links, docker})
 }
+
+// hostRefusedInDocker is inDocker; a test swaps it.
+var hostRefusedInDocker = inDocker
 
 // lanAddresses lists this computer's IPv4 addresses on interfaces that are up,
 // loopback last. Container and VM bridges (docker0, br-…, veth…, virbr…) are
@@ -110,7 +119,8 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 <p>You opened this page as <code>{{.Name}}</code>. The Bridge only answers to names it knows, so a website can't pretend to be it.</p>
 <section>
 <h2>Open it now</h2>
-{{if .Links}}<p>Use one of this computer's addresses:</p>
+{{if .Docker}}<p>In Docker, use the address of the computer that runs Docker.</p>
+{{else if .Links}}<p>Use one of this computer's addresses:</p>
 <ul>{{range .Links}}<li><a href="{{.}}">{{.}}</a></li>{{end}}</ul>{{else}}<p>Use this computer's IP address, for example <code>http://192.168.1.20:8080</code>.</p>{{end}}
 </section>
 <section>

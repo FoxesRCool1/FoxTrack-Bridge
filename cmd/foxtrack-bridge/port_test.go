@@ -3,8 +3,58 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
+	"net"
 	"testing"
+	"time"
+
+	"foxtrack-bridge/config"
 )
+
+// A second Bridge on a port that is taken stops with a message the user can
+// act on, before it loads the config, connects to a printer or reports that
+// the dashboard is up.
+func TestStartServerPortInUseStartsNothing(t *testing.T) {
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	prevWait, prevConnect := listenWait, connectPrinters
+	t.Cleanup(func() { listenWait, connectPrinters = prevWait, prevConnect })
+	listenWait = 300 * time.Millisecond
+	connected := false
+	connectPrinters = func(_, _ *config.Config) { connected = true }
+
+	configMutex.RLock()
+	before := configStore
+	configMutex.RUnlock()
+
+	listening := false
+	err = StartServer(port, func() { listening = true })
+	if err == nil {
+		t.Fatal("StartServer on a taken port returned no error")
+	}
+	want := fmt.Sprintf("Port %d is in use. Close the other program, or start the Bridge with --port or FOXTRACK_BRIDGE_PORT.", port)
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+	if !addrInUse(err) {
+		t.Errorf("error %v does not unwrap to address-in-use", err)
+	}
+	if connected || listening {
+		t.Errorf("connected = %v, listening = %v; want neither when the port is taken", connected, listening)
+	}
+	configMutex.RLock()
+	after := configStore
+	configMutex.RUnlock()
+	if after != before {
+		t.Error("StartServer replaced the stored config although it could not open the port")
+	}
+}
 
 func TestDefaultPortFromEnv(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {

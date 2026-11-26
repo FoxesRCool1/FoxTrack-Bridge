@@ -1,6 +1,6 @@
 // Maintenance: reminders that come due after some hours of printing. The hours
 // are counted from each printer's print history on this machine.
-const mt = { root: null, printers: null, open: new Set(), editing: null, pending: new Map() };
+const mt = { root: null, printers: null, open: new Set(), editing: null, pending: new Map(), done: new Map() };
 
 const mtStyle = document.createElement('style');
 mtStyle.textContent = `
@@ -107,6 +107,11 @@ async function mtLoad(quiet) {
             const f = mtFind(t.id);
             if (f) f.p.tasks.push(t);
         }
+        // A "Done" still in its undo window keeps showing zero hours across a reload.
+        for (const id of mt.done.keys()) {
+            const f = mtFind(id);
+            if (f) Object.assign(f.t, { hours: 0, percent: 0, status: 'ok' });
+        }
         mt.open = new Set([...mt.open].filter(id => mt.printers.some(p => p.id === id)));
         mtRenderAll();
     } catch (e) {
@@ -121,23 +126,38 @@ async function mtLoad(quiet) {
     }
 }
 
-async function mtMarkDone(id) {
+function mtMarkDone(id) {
     const f = mtFind(id);
-    if (!f || f.t.busy) return;
+    if (!f || mt.done.has(id)) return;
     const before = { hours: f.t.hours, percent: f.t.percent, status: f.t.status };
-    Object.assign(f.t, { hours: 0, percent: 0, status: 'ok', busy: true });
+    mt.done.set(id, before);
+    Object.assign(f.t, { hours: 0, percent: 0, status: 'ok' });
     mtRenderPrinter(f.p.id);
+    undoBar('“{0}” marked done.', f.t.name, {
+        ms: 10000,
+        onUndo() {
+            // Nothing was sent yet.
+            mt.done.delete(id);
+            const again = mtFind(id);
+            if (again) { Object.assign(again.t, before); mtRenderPrinter(again.p.id); }
+        },
+        onCommit() { mtSendDone(id, before); },
+    });
+}
+
+async function mtSendDone(id, before) {
     try {
         const v = await apiFetch('/api/maintenance/' + encodeURIComponent(id) + '/done', { method: 'POST' });
-        Object.assign(f.t, v, { busy: false });
-        toast('Marked as done');
+        const f = mtFind(id);
+        if (f) Object.assign(f.t, v);
     } catch (e) {
-        Object.assign(f.t, before, { busy: false });
+        const f = mtFind(id);
+        if (f) Object.assign(f.t, before);
         toast(friendlyError(e.message), 'error');
     }
-    mtRenderPrinter(f.p.id);
-    const again = mt.root.querySelector('.mt-task[data-task="' + CSS.escape(id) + '"] [data-mt-act="done"]');
-    if (again) again.focus();
+    mt.done.delete(id);
+    const f = mtFind(id);
+    if (f) mtRenderPrinter(f.p.id);
 }
 
 function mtDelete(id) {
@@ -153,9 +173,7 @@ function mtDelete(id) {
             const task = mt.pending.get(id);
             if (!task) return;
             mt.pending.delete(id);
-            const again = mtFind(id);
-            if (again) again.p.tasks.push(task);
-            mtRenderPrinter(task.printer_id);
+            mtLoad(true);
         },
         onCommit() {
             (async () => {

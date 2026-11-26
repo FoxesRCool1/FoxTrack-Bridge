@@ -176,7 +176,7 @@ It also does:
 
 ## 🚀 Quick start
 
-**Windows and macOS.** Download the file from the [latest release](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest) and run it. The dashboard opens in your browser and an icon appears in the tray. Tick **Start at Login** in the tray menu to keep it running.
+**Windows and macOS.** Download the file from the [latest release](https://github.com/FoxesRCool1/FoxTrack-Bridge/releases/latest) and run it. On Windows, if SmartScreen appears: **More info**, then **Run anyway**. On macOS, move the app to Applications first; if macOS blocks it: **System Settings > Privacy & Security > Open Anyway**. The dashboard opens in your browser and an icon appears in the tray. Choose **Enable: Start at Login** in the tray menu to keep it running.
 
 **Linux.** Install it for your user, with a systemd service that starts at login:
 
@@ -190,6 +190,8 @@ curl -fsSL https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/li
 docker compose up -d
 docker compose logs foxtrack-bridge   # shows the dashboard address
 ```
+
+Docker Desktop on Windows or macOS: turn on host networking in its settings, or the dashboard will not open.
 
 Then open the dashboard. The welcome screen looks for printers on your network: click **Add** next to yours and enter its access code (Bambu Lab) or API key. The Bridge tests the connection before saving and tells you what to fix if it can't sign in.
 
@@ -221,7 +223,7 @@ Each release has a `checksums.txt`. Check a download with `grep <file> checksums
 
 1. On the printer, turn on **LAN Only Mode** in the network settings. The access code is shown there.
 2. Turn on **Developer Mode** (next to LAN Only Mode on 2025 firmware and later, under About on older firmware). Pause, stop, printing files and skipping objects need it.
-3. In the dashboard, choose **Bambu Lab (LAN mode)** and enter the IP address, serial number and access code.
+3. In the dashboard, choose **Bambu Lab, on your network (LAN)** and enter the IP address, serial number and access code.
 
 The A1 and P1 series send camera pictures the Bridge reads directly. The X1, H2 and P2S series stream over RTSP, which needs [ffmpeg](https://ffmpeg.org) (`sudo apt install ffmpeg`, `brew install ffmpeg` or `winget install ffmpeg`; the Docker image already has it). Restart the Bridge after installing it, or set `FOXTRACK_BRIDGE_FFMPEG` to its full path. Liveview must be on in the printer's settings.
 
@@ -232,11 +234,11 @@ Printers that aren't in LAN mode can be added through your Bambu account. See **
 <details>
 <summary><b>Klipper, OctoPrint and PrusaLink</b></summary>
 
-**Klipper:** choose **Klipper / Moonraker** and enter the Moonraker address, usually `http://192.168.x.x:7125`. Add the API key if Moonraker has authentication turned on.
+**Klipper:** choose **Klipper / Moonraker** and enter the Moonraker URL, usually `http://192.168.x.x:7125`. Add the API key if Moonraker has authentication turned on.
 
-**OctoPrint:** create an API key under **Settings > Application Keys** (or copy the global key under **Settings > API**). Choose **OctoPrint** and enter the address, for example `http://octopi.local`, and the key. The webcam is read from OctoPrint's own settings.
+**OctoPrint:** create an API key under **Settings > Application Keys** (or copy the global key under **Settings > API**). Choose **OctoPrint** and enter the OctoPrint URL, for example `http://octopi.local`, and the key. The webcam is read from OctoPrint's own settings.
 
-**PrusaLink:** turn on PrusaLink in the printer's network settings. Choose **Prusa (PrusaLink)** and enter the printer's address and the API key from its PrusaLink screen. Only API key sign-in is supported (not HTTP Digest), there is no fan control, and the dashboard cannot start a file that is on the printer. A print sent from FoxTrack must be a plain `.gcode` file (not `.bgcode`). PrusaLink has no camera stream, so enter a separate webcam URL if you have one.
+**PrusaLink:** turn on PrusaLink in the printer's network settings. Choose **Prusa (PrusaLink)** and enter the PrusaLink URL and the API key from its PrusaLink screen. Only API key sign-in is supported (not HTTP Digest), there is no fan control, and the dashboard cannot start a file that is on the printer. A print sent from FoxTrack must be a plain `.gcode` file (not `.bgcode`). PrusaLink has no camera stream, so enter a separate webcam URL if you have one.
 
 The network scan finds Klipper, OctoPrint and PrusaLink on your local /24 subnet. Printers on another subnet or VLAN can be added by address.
 
@@ -350,9 +352,9 @@ Turn on **Settings > Timelapse** to take a picture every few seconds while a pri
 <details>
 <summary><b>Home Assistant, Prometheus and scripts</b></summary>
 
-**Settings > MQTT (Home Assistant)** connects the Bridge to your MQTT broker (the Mosquitto add-on works). With discovery on, each printer appears under **Settings > Devices & services > MQTT** with its status, progress, temperatures, time left and pause, resume, stop and light buttons. State is published to `foxtrack_bridge/<printer id>/state` and events to `foxtrack_bridge/<printer id>/event`, so any MQTT client can use them.
+**Settings > Advanced > MQTT (Home Assistant)** connects the Bridge to your MQTT broker (the Mosquitto add-on works). With discovery on, each printer appears in Home Assistant under **Settings > Devices & services > MQTT** with its status, progress, temperatures, time left and pause, resume, stop and light buttons. State is published to `foxtrack_bridge/<printer id>/state` and events to `foxtrack_bridge/<printer id>/event`, so any MQTT client can use them.
 
-**Settings > Prometheus** turns on `/metrics`: printer up, printing, progress, temperatures, time left, alarms, job counts, print time and energy. With a dashboard password set, create an API token and send it as a bearer token:
+**Settings > Advanced > Prometheus** turns on `/metrics`: printer up, printing, progress, temperatures, time left, alarms, job counts, print time and energy. With a dashboard password set, create an API token and send it as a bearer token:
 
 ```yaml
 scrape_configs:
@@ -375,6 +377,8 @@ curl -H "Authorization: Bearer ftk_your_token" "http://192.168.1.20:8080/api/his
 
 </details>
 
+<a name="forgot-password"></a>
+
 <details>
 <summary><b>Password, API tokens and share links</b></summary>
 
@@ -389,7 +393,7 @@ To reset a forgotten password, stop the Bridge, run it once with `--reset-passwo
 <details>
 <summary><b>Bambu Cloud (experimental)</b></summary>
 
-Bambu printers that aren't in LAN mode can be added through your Bambu account. Open **Settings > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer of type **Bambu Lab (cloud, experimental)** and pick it from the list.
+Bambu printers that aren't in LAN mode can be added through your Bambu account. Open **Settings > Advanced > Bambu Cloud**, sign in with your Bambu email and password, and enter the code Bambu emails you. Then add a printer of type **Bambu Lab, through Bambu Cloud (experimental)** and pick it from the list.
 
 Status, temperatures, progress, AMS, the light and smart plugs work. The camera works when the printer is on the same network as the Bridge. Pause, stop, speed, fan and G-code don't: Bambu's 2025 and later firmware rejects every command except the light from third-party software, so those buttons are hidden.
 
@@ -402,7 +406,7 @@ Bambu bans accounts for 24 hours to 7 days when it sees too many connections, so
 
 The assistant (the sparkle button in the top bar) answers questions about your printers from live status, print history and the Bridge log. It walks you through adding a printer, works out why a printer won't connect, and can look at a camera picture to spot a warped or detached print.
 
-It is off until you add an AI provider under **Settings > Assistant**, and you pay that provider. Anything that speaks the OpenAI chat completions API works: OpenAI, Google Gemini, Anthropic, a custom endpoint, or a local server such as Ollama (`http://localhost:11434/v1`). Requests go straight from the Bridge to the provider, and conversations are not saved.
+It is off until you add an AI provider under **Settings > Advanced > Assistant**, and you pay that provider. Anything that speaks the OpenAI chat completions API works: OpenAI, Google Gemini, Anthropic, a custom endpoint, or a local server such as Ollama (`http://localhost:11434/v1`). Requests go straight from the Bridge to the provider, and conversations are not saved.
 
 The assistant can only read. It can't change printers, control prints or change settings, and it says when it doesn't know. Access codes, API keys and tokens are removed from log lines before it sees them. Camera access is a separate switch, off by default; with a cloud provider it sends pictures of your printer to that provider. Without a dashboard password, anyone on your network can use the assistant and spend credit on your key.
 
@@ -415,7 +419,7 @@ The assistant can only read. It can't change printers, control prints or change 
 
 **Settings > General > Back up and restore** downloads your printers and settings as one file, and restores them from it. The file holds no passwords, tokens or keys: not your FoxTrack tokens, printer access codes, plug, notification or MQTT secrets, dashboard password, API tokens, linked Bambu account or assistant key. Share links are not in it either. A restore never changes the dashboard password, API tokens, share links and Bambu account, and keeps the access codes, tokens and keys already saved for the same printers, channels and broker (the assistant key only when the backup uses the same AI provider). On a new machine, enter them again. With no dashboard password set, backup and restore work only on the computer the Bridge runs on; from another device, set a password first. Before a restore, the current settings are saved next to `config.json` as `config.json.before-import-<date>`.
 
-The Bridge also keeps a daily copy of `config.json` and `history.json` in a `backups` folder next to them, and keeps the last 7 of each. **Restore from file** accepts those copies too.
+The Bridge also keeps a daily copy of `config.json` and `history.json` in a `backups` folder next to them, and keeps the last 7 of each. **Restore from file** accepts a backup file or a `config.json` copy. To move print history, copy `history.json` to the new computer while the Bridge is stopped.
 
 </details>
 
@@ -426,7 +430,7 @@ Keep the binary somewhere your own account can write to, so automatic updates wo
 
 ```bash
 mkdir -p ~/.local/bin
-mv FoxTrack-Bridge-Linux-ARM64 ~/.local/bin/foxtrack-bridge
+mv FoxTrack-Bridge-Linux ~/.local/bin/foxtrack-bridge   # ARM: FoxTrack-Bridge-Linux-ARM64 or -ARM32
 chmod +x ~/.local/bin/foxtrack-bridge
 ```
 
@@ -443,8 +447,9 @@ loginctl enable-linger "$(whoami)"   # keep it running after you log out
 As a system service under a dedicated account:
 
 ```bash
-sudo cp FoxTrack-Bridge-Linux-ARM64 /usr/local/bin/foxtrack-bridge
-sudo cp linux/foxtrack-bridge@.service /etc/systemd/system/
+sudo cp FoxTrack-Bridge-Linux /usr/local/bin/foxtrack-bridge   # ARM: FoxTrack-Bridge-Linux-ARM64 or -ARM32
+sudo curl -fsSL -o /etc/systemd/system/foxtrack-bridge@.service \
+  https://raw.githubusercontent.com/FoxesRCool1/FoxTrack-Bridge/main/linux/foxtrack-bridge@.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now foxtrack-bridge@<username>
 ```
@@ -471,7 +476,7 @@ To open the dashboard through a reverse proxy on your own domain, see [Behind a 
 
 `config.json`, `history.json` and `queue.json` live in `~/.config/FoxTrack-Bridge/` on Linux (or `$XDG_CONFIG_HOME/FoxTrack-Bridge`), `~/Library/Application Support/FoxTrack-Bridge/` on macOS and `%AppData%\FoxTrack-Bridge\` on Windows, with the daily copies in `backups/` next to them. If a file is damaged, the Bridge keeps it as `<name>.corrupt-<timestamp>` and starts fresh. It never deletes it.
 
-The Bridge listens on port 8080. Change it with `--port 9000` or `FOXTRACK_BRIDGE_PORT=9000`; the flag wins if both are set. On Klipper machines 8080 is also the usual webcam port for Mainsail and Fluidd, so move one of them.
+The Bridge listens on port 8080. Change it with `--port 9000` or `FOXTRACK_BRIDGE_PORT=9000`; the flag wins if both are set. If the port is taken, the Bridge stops and says so. On Klipper machines 8080 is also the usual webcam port for Mainsail and Fluidd, so move one of them.
 
 </details>
 

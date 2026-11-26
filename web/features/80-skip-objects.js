@@ -104,7 +104,7 @@ window.openSkipObjects = function (enc) {
     SK.picked = new Set();
     SK.error = '';
     SK.busy = false;
-    skEl('skipSub').textContent = 'On ' + SK.name;
+    skEl('skipSub').textContent = fill('On {0}', SK.name);
     openModal('skipObjectsModal');
     skEl('skipClose').focus();
     clearInterval(SK.timer);

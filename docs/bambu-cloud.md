@@ -22,8 +22,9 @@ mode" option for Bambu Lab printers.
   account and stores the LAN access code the cloud reports.
 - Config: `bambu_cloud` block and `connection` per printer, both additive.
   The token is redacted from every response and survives settings saves.
-- UI: Settings > Bambu Cloud, the "Bambu Lab (cloud)" printer type with a
-  device picker, and cloud cards that show only the light, camera and smart plug buttons.
+- UI: Settings > Advanced > Bambu Cloud, the "Bambu Lab, through Bambu Cloud
+  (experimental)" printer type with a device picker, and cloud cards that show
+  only the light, camera and smart plug buttons.
 
 The rest of this document is the research the implementation follows.
 

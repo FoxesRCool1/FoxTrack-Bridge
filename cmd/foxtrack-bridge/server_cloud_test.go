@@ -83,7 +83,7 @@ func TestHandlePrinters_CloudNeedsLinkedAccount(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "link your Bambu account") {
+	if !strings.Contains(rec.Body.String(), "Sign in to your Bambu account first.") {
 		t.Errorf("body = %s", rec.Body.String())
 	}
 	configMutex.RLock()

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
-	"time"
 
 	"github.com/getlantern/systray"
 
@@ -35,13 +34,31 @@ func onReady() {
 	port := mustResolvePort()
 	dashboardURL := fmt.Sprintf("http://localhost:%d", port)
 
-	// Start HTTP server + MQTT connections in background
-	go StartServer(port)
-
-	// Open browser after a short delay so the server is ready
+	// Start HTTP server + MQTT connections in background. StartServer opens
+	// the port first; when it cannot, nothing else starts and it returns why.
+	listening := make(chan struct{})
+	failed := make(chan error, 1)
 	go func() {
-		time.Sleep(1500 * time.Millisecond)
-		openBrowser(dashboardURL)
+		err := StartServer(port, func() { close(listening) })
+		select {
+		case <-listening: // it served; StartServer logged why it stopped
+		default:
+			failed <- err
+		}
+	}()
+
+	// Open the browser once the dashboard answers. A Bridge that could not
+	// open its port says why in the tray instead; Quit still works.
+	go func() {
+		select {
+		case <-listening:
+			openBrowser(dashboardURL)
+		case err := <-failed:
+			systray.SetTitle("FoxTrack Bridge: not running")
+			systray.SetTooltip(err.Error())
+			mOpen.SetTitle(err.Error())
+			mOpen.Disable()
+		}
 	}()
 
 	go func() {

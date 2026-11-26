@@ -54,6 +54,7 @@
         button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
         .error { min-height: 1.25rem; margin-top: .75rem; font-size: .8125rem; color: var(--danger); }
         .help { margin-top: 1.25rem; font-size: .75rem; }
+        .help a { color: var(--accent); text-underline-offset: .2em; }
         code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; background: var(--panel); border-radius: 4px; padding: .05rem .3rem; white-space: nowrap; }
     </style>
 </head>
@@ -72,7 +73,7 @@
             <button id="go" type="submit">Sign in</button>
             <div id="err" class="error" role="alert" aria-live="polite"></div>
         </form>
-        <p class="help">Forgot it? Stop the Bridge, run it once with <code>--reset-password</code>. <span>Then start it again as usual.</span></p>
+        <p class="help">Forgot it? <span data-i18n-html>Stop the Bridge, run it once with <code>--reset-password</code>, then start it again.</span> <a href="https://github.com/FoxesRCool1/FoxTrack-Bridge#forgot-password" target="_blank" rel="noopener">Steps in the README</a></p>
     </main>
 <script>
 // Translations for the pages that open without signing in. The dashboard's own
@@ -98,6 +99,16 @@
         if (!m) return;
         map = m;
         document.documentElement.lang = lang;
+        // A sentence with an element inside (<code>): the element is {0} in the key.
+        document.querySelectorAll('[data-i18n-html]').forEach(function (el) {
+            var parts = [], key = '';
+            el.childNodes.forEach(function (c) {
+                if (c.nodeType === 3) key += c.nodeValue;
+                else if (c.nodeType === 1) { key += '{' + parts.length + '}'; parts.push(c.outerHTML); }
+            });
+            var tr = m[key.replace(/\s+/g, ' ').trim()];
+            if (tr) el.innerHTML = tr.replace(/\{(\d)\}/g, function (_, i) { return parts[i] || ''; });
+        });
         var walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT), n;
         while ((n = walk.nextNode())) {
             if (n.parentNode.closest('code, script, style')) continue;

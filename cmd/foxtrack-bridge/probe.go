@@ -107,10 +107,13 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 // older dashboard's {"ip"}-only body: it asks for a reachability check of a
 // Bambu printer, with no serial number or access code to test.
 func probePrinter(ctx context.Context, p config.Printer, reachOnly bool) probeResult {
+	normalizePrinterAddresses(&p)
 	// A saved secret fills a blank field only when the test goes to the saved
 	// printer's own address. Otherwise anyone who can reach the dashboard could
 	// name a saved printer's id and their own host, and receive its secret.
-	if saved, ok := savedPrinter(p.ID); ok && sameEndpoint(saved, p) {
+	// The saved copy is compared in the same form as p: a printer saved by an
+	// older version can hold an address with no scheme.
+	if saved, ok := savedPrinter(p.ID); ok && sameEndpoint(withAddressesNormalized(saved), p) {
 		keep := func(v *string, savedValue string) {
 			if strings.TrimSpace(*v) == "" {
 				*v = savedValue
@@ -192,11 +195,70 @@ func savedPrinter(id string) (config.Printer, bool) {
 }
 
 // probeBase trims an address the way the pollers do and says whether it names
-// a scheme, which they need.
+// a scheme, which they need. An address typed without one is read as http://.
 func probeBase(raw string) (string, bool) {
-	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	base := strings.TrimRight(withScheme(raw), "/")
 	lower := strings.ToLower(base)
 	return base, strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// withScheme reads an address typed without a scheme ("10.0.0.5:7125", the
+// form the network scan lists) as http://. An address with any scheme, or a
+// blank one, is only trimmed.
+func withScheme(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v != "" && !strings.Contains(v, "://") {
+		v = "http://" + v
+	}
+	return v
+}
+
+// editedURL is a printer URL from an edit (already trimmed): withScheme for a
+// new value, while a value equal to the stored one is kept as it was.
+func editedURL(v, stored string) string {
+	if v == strings.TrimSpace(stored) {
+		return v
+	}
+	return withScheme(v)
+}
+
+// bareHost turns a pasted Bambu Lab address into the host alone: a leading
+// http:// or https://, any path and a trailing slash are dropped, so
+// "http://10.0.0.5/" is "10.0.0.5".
+func bareHost(raw string) string {
+	v := strings.TrimSpace(raw)
+	lower := strings.ToLower(v)
+	for _, scheme := range []string{"http://", "https://"} {
+		if strings.HasPrefix(lower, scheme) {
+			v = v[len(scheme):]
+			break
+		}
+	}
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	return v
+}
+
+// normalizePrinterAddresses fixes the addresses of a printer that arrives in a
+// create or test request: the HTTP kinds get a scheme, a Bambu Lab IP loses a
+// pasted scheme and path. Printers already in config.json are never rewritten.
+func normalizePrinterAddresses(p *config.Printer) {
+	for _, u := range []*string{&p.MoonrakerURL, &p.PrusaLinkURL, &p.OctoPrintURL, &p.HomeAssistantURL} {
+		*u = withScheme(*u)
+	}
+	if p.Kind() == config.KindBambu {
+		p.IP = bareHost(p.IP)
+	}
+}
+
+// withAddressesNormalized returns a copy of p with normalizePrinterAddresses
+// applied, for comparing a stored printer with a request: an older version
+// saved addresses with no scheme ("10.0.0.5:7125"), which a request now sends
+// as "http://10.0.0.5:7125". The printer p came from is not changed.
+func withAddressesNormalized(p config.Printer) config.Printer {
+	normalizePrinterAddresses(&p)
+	return p
 }
 
 func probeBadAddress(what string) probeResult {
@@ -248,6 +310,9 @@ func probeMoonraker(ctx context.Context, p config.Printer) probeResult {
 		return *fail
 	}
 	if probeRefused(status) {
+		if strings.TrimSpace(p.APIKey) == "" {
+			return probeResultOf(probeAuth, "Moonraker asks for an API key.", "Enter Moonraker's API key, or add this computer's address to trusted_clients in moonraker.conf.")
+		}
 		return probeResultOf(probeAuth, "Moonraker refused the API key.", "Check the API key, or leave it blank if Moonraker trusts this computer's address.")
 	}
 	var info struct {
@@ -275,31 +340,38 @@ func probePrusaLink(ctx context.Context, p config.Printer) probeResult {
 	if key := strings.TrimSpace(p.APIKey); key != "" {
 		headers["X-Api-Key"] = key
 	}
+	refused := probeResultOf(probeAuth, "PrusaLink refused the API key.", "On the printer: Settings → Network → PrusaLink shows the API key.")
+	if strings.TrimSpace(p.APIKey) == "" {
+		refused = probeResultOf(probeAuth, "PrusaLink asks for an API key.", "On the printer: Settings → Network → PrusaLink shows the API key.")
+	}
 	status, body, fail := probeGet(ctx, "PrusaLink", base, "/api/version", "Check that the printer is on and PrusaLink is enabled, e.g. http://192.168.1.50", headers)
 	if fail != nil {
 		return *fail
 	}
 	if probeRefused(status) {
-		return probeResultOf(probeAuth, "PrusaLink refused the API key.", "On the printer: Settings → Network → PrusaLink shows the API key.")
+		return refused
 	}
-	if status != http.StatusOK {
+	// PrusaLink's /api/version is a JSON object that names the API or the server.
+	// A plain web server answers 200 with HTML and is not PrusaLink.
+	var info struct {
+		API      string `json:"api"`
+		Server   string `json:"server"`
+		Text     string `json:"text"`
+		Hostname string `json:"hostname"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &info) != nil || (info.API == "" && info.Server == "" && info.Text == "" && info.Hostname == "") {
 		return probeResultOf(probeNotFound, "That address answers, but it isn't PrusaLink.", "Check that the printer is on and PrusaLink is enabled, e.g. http://192.168.1.50")
 	}
 	// Some firmware serves /api/version without a key; the poller's endpoint does not.
 	if st, _, fail := probeGet(ctx, "PrusaLink", base, "/api/v1/status", "", headers); fail != nil {
 		return *fail
 	} else if probeRefused(st) {
-		return probeResultOf(probeAuth, "PrusaLink refused the API key.", "On the printer: Settings → Network → PrusaLink shows the API key.")
+		return refused
 	}
-	var info struct {
-		Hostname string `json:"hostname"`
+	if info.Hostname == "" {
+		return probeResultOf(probeOK, "Connected to the printer.", "")
 	}
-	json.Unmarshal(body, &info)
-	name := info.Hostname
-	if name == "" {
-		name = "the printer"
-	}
-	return probeResultOf(probeOK, fmt.Sprintf("Connected to %s.", name), "")
+	return probeResultOf(probeOK, fmt.Sprintf("Connected to %s.", info.Hostname), "")
 }
 
 func probeHomeAssistant(ctx context.Context, p config.Printer) probeResult {

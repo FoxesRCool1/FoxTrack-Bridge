@@ -494,7 +494,8 @@ func rtspCameraStream(w http.ResponseWriter, r *http.Request, p config.Printer, 
 	select {
 	case f, ok := <-sub.ch:
 		if !ok {
-			writeErr(w, http.StatusBadGateway, "camera unavailable")
+			// ffmpeg was found (rtspSubscribe checks), so the printer did not answer.
+			writeErr(w, http.StatusBadGateway, bambuCameraNoAnswer)
 			return
 		}
 		frame = f

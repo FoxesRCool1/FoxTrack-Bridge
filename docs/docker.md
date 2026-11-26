@@ -8,7 +8,7 @@ From the repository root:
 
 ```bash
 docker build \
-  --build-arg APP_VERSION=v2.2.0 \
+  --build-arg APP_VERSION=v2.6.6 \
   -t foxtrack-bridge .
 ```
 
@@ -35,7 +35,7 @@ docker run -d \
 
 Open the dashboard at [http://localhost:8080](http://localhost:8080).
 
-`--network host` lets the Bridge find Bambu printers: their SSDP broadcasts do not cross Docker's default bridge network. It is Linux-only and makes `-p` unnecessary; change the port with `-e FOXTRACK_BRIDGE_PORT=9000`. Without it (for example `-p 8080:8080`) the dashboard works, but printers must be added by address. The repository's `docker-compose.yml` sets this up for you.
+`--network host` lets the Bridge find Bambu printers: their SSDP broadcasts do not cross Docker's default bridge network. It makes `-p` unnecessary; change the port with `-e FOXTRACK_BRIDGE_PORT=9000`. Without it (for example `-p 8080:8080`) the dashboard works, but printers must be added by address. The repository's `docker-compose.yml` sets this up for you. On Docker Desktop (Windows, macOS), turn on host networking in its settings, or the dashboard will not open.
 
 ## Behind a reverse proxy
 
@@ -52,9 +52,9 @@ Docker can build directly from a GitHub repository:
 
 ```bash
 docker build \
-  --build-arg APP_VERSION=v2.2.0 \
+  --build-arg APP_VERSION=v2.6.6 \
   -t foxtrack-bridge \
-  https://github.com/jonathanq/FoxTrack-Bridge.git#add-docker-support
+  https://github.com/FoxesRCool1/FoxTrack-Bridge.git#main
 ```
 
 Replace the repository, branch, and `APP_VERSION` value for your own fork or release.
@@ -63,16 +63,16 @@ Replace the repository, branch, and `APP_VERSION` value for your own fork or rel
 
 The Docker workflow builds images for pull requests and publishes multi-platform `linux/amd64` and `linux/arm64` images to GitHub Container Registry on pushes to `main`, on `v*` tags, and on manual workflow runs. Only a `v*` release tag moves `latest` (and the version tags); a push to `main` publishes the `main` tag, for trying unreleased changes.
 
-For this repository, images are published as:
+Images are published as:
 
 ```text
 ghcr.io/<owner>/foxtrack-bridge
 ```
 
-For example, a fork owned by `jonathanq` publishes:
+This repository publishes:
 
 ```bash
-docker pull ghcr.io/jonathanq/foxtrack-bridge:latest
+docker pull ghcr.io/foxesrcool1/foxtrack-bridge:latest
 ```
 
 Run a published image with:
@@ -83,7 +83,7 @@ docker run -d \
   --network host \
   -v foxtrack-bridge-data:/data \
   --restart unless-stopped \
-  ghcr.io/jonathanq/foxtrack-bridge:latest
+  ghcr.io/foxesrcool1/foxtrack-bridge:latest
 ```
 
 The first package published from a fork may be private by default. If you want a server to pull it without authenticating, make the package public in the repository package settings. Otherwise, run `docker login ghcr.io` on the server before pulling.

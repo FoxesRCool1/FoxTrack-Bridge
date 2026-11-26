@@ -54,3 +54,36 @@ func TestHostRefused_PageForBrowsersJSONForAPI(t *testing.T) {
 		t.Errorf("API error = %s", rec.Body.String())
 	}
 }
+
+// In Docker the container's own addresses are unreachable from the browser, so
+// the page names the Docker computer instead of listing them.
+func TestHostRefused_DockerNamesTheHostComputer(t *testing.T) {
+	t.Setenv("FOXTRACK_BRIDGE_ALLOWED_HOSTS", "")
+	prev := hostRefusedInDocker
+	t.Cleanup(func() { hostRefusedInDocker = prev })
+	page := func() string {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "bridge.example.com:8080"
+		req.Header.Set("Accept", "text/html")
+		rec := httptest.NewRecorder()
+		writeHostRefused(rec, req)
+		return rec.Body.String()
+	}
+	const line = "In Docker, use the address of the computer that runs Docker."
+
+	hostRefusedInDocker = func() bool { return true }
+	body := page()
+	if !strings.Contains(body, line) {
+		t.Errorf("Docker page missing %q", line)
+	}
+	if strings.Contains(body, "this computer's addresses") || strings.Contains(body, `<a href="http://`) {
+		t.Error("Docker page still lists the container's addresses")
+	}
+
+	hostRefusedInDocker = func() bool { return false }
+	if body := page(); strings.Contains(body, line) {
+		t.Error("the Docker line shows outside Docker")
+	} else if len(lanAddresses()) > 0 && !strings.Contains(body, "this computer's addresses") {
+		t.Error("outside Docker the address list is gone")
+	}
+}

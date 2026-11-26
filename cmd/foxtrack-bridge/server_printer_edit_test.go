@@ -458,6 +458,25 @@ func TestProxyBambuCamera_NoPictureReturns502(t *testing.T) {
 	}
 }
 
+// A camera that refuses the connection says what to check on the printer.
+func TestProxyBambuCamera_NoAnswerNamesLiveview(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+
+	rec := httptest.NewRecorder()
+	proxyBambuCamera(rec, addr, "code", "P")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "The camera did not answer. Turn on Liveview on the printer.") {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+}
+
 func TestProxyBambuCamera_StreamsJPEGAfterAuth(t *testing.T) {
 	jpeg := []byte{0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9}
 	gotAuth := make(chan []byte, 1)

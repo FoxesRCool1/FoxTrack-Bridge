@@ -176,13 +176,13 @@ async function tlLoad(withForm) {
         if (seq !== tl.loadSeq) return;
         if (!tl.filled) {
             const err = document.getElementById('tlError');
-            err.textContent = "Could not load these settings: " + e.message;
+            err.textContent = withReason("Could not load these settings:", e.message);
             err.classList.remove('hidden');
             document.getElementById('tlRetry').classList.remove('hidden');
         }
         if (!tl.data) {
             document.getElementById('tlGallery').dataset.sig = '';
-            document.getElementById('tlGallery').innerHTML = '<p class="text-sm text-danger">Could not load timelapses: ' + escHtml(e.message)
+            document.getElementById('tlGallery').innerHTML = '<p class="text-sm text-danger">' + escHtml(withReason('Could not load timelapses:', e.message))
                 + ' <button type="button" class="btn-outline btn-xs tl-btn ml-2" data-tl-retry>Try again</button></p>';
         }
         return;
@@ -281,7 +281,7 @@ async function tlSave() {
         toast('Timelapse settings saved');
     } catch (e) {
         status.textContent = '';
-        fail("Could not save: " + e.message);
+        fail(withReason("Could not save:", e.message));
     } finally {
         btn.disabled = false;
     }
@@ -302,7 +302,7 @@ function tlDelete(id) {
                 try {
                     await apiFetch('/api/timelapse/file/' + encodeURIComponent(id), { method: 'DELETE' });
                 } catch (e) {
-                    if (!/does not exist/.test(e.message)) toast("Could not delete the timelapse: " + e.message, 'error');
+                    if (!/does not exist/.test(e.message)) toast(withReason("Could not delete the timelapse:", e.message), 'error');
                 }
                 tl.pending.delete(id);
                 tlLoad(false);

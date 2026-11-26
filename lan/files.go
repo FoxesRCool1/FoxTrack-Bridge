@@ -126,7 +126,7 @@ func (c *Controller) PrintFile(name, file string) error {
 	if file == "" || slices.Contains(strings.Split(file, "/"), "..") ||
 		strings.ContainsAny(file, "\"\\") ||
 		strings.IndexFunc(file, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
-		return errors.New("Pick a file from the printer's list.")
+		return errors.New("Use the exact file name stored on the printer.")
 	}
 	if err := c.PrintReady(name); err != nil {
 		return err

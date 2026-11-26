@@ -258,7 +258,7 @@ func TestPrintPrinterFile_BadNameIsRefused(t *testing.T) {
 	if printerStarts(starts) != 0 {
 		t.Fatalf("the printer was asked to start a path with ..")
 	}
-	if e.count("ack:failed:Pick a file from the printer's list.") != 1 {
+	if e.count("ack:failed:Use the exact file name stored on the printer.") != 1 {
 		t.Fatalf("events = %v", e.snapshot())
 	}
 }

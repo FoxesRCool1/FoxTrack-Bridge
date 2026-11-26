@@ -4,7 +4,9 @@ Usage, from the repo root: python3 scripts/i18n-extract.py . web/i18n/_source.js
 then translate the new keys into each web/i18n/<lang>.json and check them with
 python3 web/i18n/_check.py. Reads web/ui.html, web/login.html, web/share.html and
 web/features/*.js: HTML text, placeholder/title/aria-label, and JS strings, plus
-the error sentences in cmd/foxtrack-bridge/*.go (see GO_FILES).
+the error sentences in cmd/foxtrack-bridge/*.go, mqtt/files.go, lan/files.go and
+notify/send.go (see GO_FILES). Text for the FoxTrack website (bridge_commands.go,
+printjob.go) and log lines are not read.
 """
 import glob, html.parser, json, os, re, sys
 
@@ -111,7 +113,7 @@ def split_page(path):
 # used to drop its whole body.
 for page in ('web/ui.html', 'web/login.html', 'web/share.html'):
     markup, scripts = split_page(page)
-    html_text(markup)
+    html_text(html_sentences(markup))
     for s in scripts:
         js_strings(s)
 # Event names in the notification settings come from the server
@@ -134,32 +136,95 @@ for f in sorted(glob.glob(os.path.join(ROOT, 'web/features/*.js'))):
 # Error sentences the Go server sends and the dashboard shows as they are (a
 # toast, a field note). Only sentences are taken: a capital first letter, a
 # space, an end mark. "method not allowed" and the like are for programs and stay
-# out; so do the Assistant's tool replies, which are written for the model. A
+# out; so do the Assistant's tool replies, which are written for the model, and
+# the text bridge_commands.go and printjob.go send to the FoxTrack website. A
 # Printf verb becomes a {0} slot, like the pattern keys in the dictionaries.
 GO_FILES = ('queue.go', 'security.go', 'skip_routes.go', 'timelapse_routes.go', 'metrics.go',
             'maintenance_routes.go', 'spoolman_routes.go', 'server.go', 'costs_routes.go',
-            'notify_routes.go', 'server_ai.go', 'files_commands.go')
-GO_MSG = re.compile(
-    r'(?:writeErr\([^"\n]*|\bbad\(|badNotify\(|errors\.New\(|invalidPrinterEdit\(|refused = |gone := '
-    r'|enterKeyAgain = |Reason: |writeSkip\(w, false, |"error": |return "(?:bad_token|plan|offline|error)", )'
-    r'"((?:[^"\\\n]|\\.)*)"')
+            'notify_routes.go', 'server_ai.go', 'files_commands.go', 'probe.go', 'share.go',
+            'config_transfer.go', 'camera_rtsp.go', 'server_wave27.go', 'discover.go',
+            'mqttexport_routes.go', 'server_cloud.go')
+# Files outside cmd/foxtrack-bridge whose errors the dashboard shows.
+GO_PKG_FILES = ('mqtt/files.go', 'lan/files.go')
+# Where else, per file, a sentence for the user goes into a variable, a
+# constant or a reply field instead of an error call.
+GO_EXTRA = {
+    'share.go': r'http\.Error\(w, ',
+    'discover.go': r'res\.Notes = append\(res\.Notes, ',
+    'camera_rtsp.go': r'rtspNeedsFFmpeg = ',
+    'server.go': r'bambuCameraNoAnswer = ',
+    'server_wave27.go': r'"message": ',
+    'mqttexport_routes.go': r'"message": ',
+    'spoolman_routes.go': r'msg :?= ',
+}
+GO_BASE = (r'writeErr\([^"\n]*|\bbad\(|badNotify\(|errors\.New\(|invalidPrinterEdit\(|refused = |gone := '
+           r'|enterKeyAgain = |Reason: |writeSkip\(w, false, |"error": |return "(?:bad_token|plan|offline|error)", ')
+GO_STRING = r'"((?:[^"\\\n]|\\.)*)"'
 go_found = set()
-for name in GO_FILES:
-    gsrc = open(os.path.join(ROOT, 'cmd/foxtrack-bridge', name)).read()
-    for m in GO_MSG.finditer(gsrc):
-        t = m.group(1).replace('\\"', '"')
-        if not re.match(r'[A-Z][^ ]* ', t) or not re.search(r'[.?!)]$', t) or t.startswith('Content-Type') or '"' in t:
-            continue
-        n = [0]
-        def verb(_):
-            n[0] += 1
-            return '{%d}' % (n[0] - 1)
-        go_found.add(re.sub(r'%[sdv]', verb, t))
+
+
+def go_add(t, loose=False):
+    """Keep t when it is a sentence. loose: a hint may end on an example
+    address, and a notification service answer starts with its name (%s) and has
+    no end mark."""
+    t = t.replace('\\"', '"')
+    start = re.match(r'[A-Z][^ ]* ', t) or (loose and re.match(r'%s [a-z]|could not [a-z]+ %s', t))
+    end = re.search(r'[.?!)]$', t) or (loose and len(t.split()) >= 4)
+    if not start or not end or t.startswith('Content-Type') or '"' in t:
+        return
+    n = [0]
+    def verb(_):
+        n[0] += 1
+        return '{%d}' % (n[0] - 1)
+    go_found.add(re.sub(r'%[sdv]', verb, t))
+
+
+for name in GO_FILES + GO_PKG_FILES:
+    gsrc = open(os.path.join(ROOT, name if '/' in name else 'cmd/foxtrack-bridge/' + name)).read()
+    for m in re.finditer('(?:' + GO_BASE + ('|' + GO_EXTRA[name] if name in GO_EXTRA else '') + ')' + GO_STRING, gsrc):
+        go_add(m.group(1))
+    if name == 'probe.go':
+        # Test-connection answers: probeResultOf(code, message, hint) with a plain
+        # or Sprintf message, the hint constants, and the "can't reach" sentence.
+        for line in gsrc.split('\n'):
+            if re.search(r'probeResultOf\(|probeUnreachableAt\(|[hH]int = "', line):
+                for m in re.finditer(GO_STRING, line):
+                    go_add(m.group(1), loose=True)
+
+# The notification service answers (send.go: netErr and check) start with the
+# service name, a %s. The field checks in Validate are put together with the
+# channel name in notify_routes.go and stay out.
+send = open(os.path.join(ROOT, 'notify/send.go')).read()
+send = send[send.index('func netErr'):send.index('// detail pulls')]
+for m in re.finditer(r'Errorf\(' + GO_STRING, send):
+    go_add(m.group(1), loose=True)
+
+# Sentences the server puts together from pieces, which no pattern above can
+# read. Each is (file, a piece that must still be in it, the sentence), so a
+# change in the Go code fails here instead of leaving a stale key behind.
+GO_COMPOSED = (
+    ('probe.go', 'Can\'t reach %s at %s.', "Can't reach the printer at {0}."),  # what = "the printer"
+    ('spoolman_routes.go', '" found."', 'Spoolman {0} found.'),
+    ('spoolman_routes.go', "Can't reach Spoolman there. ", "Can't reach Spoolman there. {0}"),
+    ('server.go', 'Already added as ', 'Already added as "{0}".'),
+    ('server_wave27.go', '"Plug found, "', 'Plug found, on, {0} W now.'),
+    ('server_wave27.go', '"Plug found, "', 'Plug found, off, {0} W now.'),
+    ('server_wave27.go', 'It has no energy meter, so FoxTrack will not see watts or kWh.',
+     'Plug found, on. It has no energy meter, so FoxTrack will not see watts or kWh.'),
+    ('server_wave27.go', 'It has no energy meter, so FoxTrack will not see watts or kWh.',
+     'Plug found, off. It has no energy meter, so FoxTrack will not see watts or kWh.'),
+)
+for name, piece, sentence in GO_COMPOSED:
+    if piece not in open(os.path.join(ROOT, 'cmd/foxtrack-bridge', name)).read():
+        sys.exit('i18n-extract: %s no longer holds %r; update GO_COMPOSED' % (name, piece))
+    go_found.add(sentence)
 
 # Drop markup and code fragments that slipped through. A string that holds a
 # URL is dropped only when it is nothing but the URL (no spaces); a help
 # sentence that mentions an address ("For example http://...") is kept.
-JUNK = re.compile(r'^#|:not\(|[<>=\[\]{}]|^["\'.,:;)\-]|^\w+_\w+$|@example|ftb_|ftk_|^\S*https?:\S*$')
+JUNK = re.compile(r'^#|:not\(|[<>=\[\]{}]|^["\'.,:;)\-]|^\w+_\w+$|@example|^ftb_|^ftk_|^\S*https?:\S*$')
+# A JS string writes an apostrophe as \'; the page shows a plain one.
+found = {x.replace("\\'", "'") for x in found}
 out = sorted({x for x in found if not JUNK.search(PH.sub('X', x))} | go_found)
 json.dump(out, open(OUT, 'w'), indent=0, ensure_ascii=False)
 print(len(out), 'strings')

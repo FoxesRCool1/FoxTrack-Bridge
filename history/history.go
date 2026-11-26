@@ -96,6 +96,11 @@ const (
 // start time.
 var ErrNotFound = errors.New("no history record found")
 
+// ErrCorrupt wraps a history file that was read but could not be parsed. Only
+// then may Append move the file aside; any other read error (permissions, a
+// failing disk) must not cost the user a good file.
+var ErrCorrupt = errors.New("history file is corrupt")
+
 func historyPath() string {
 	return filepath.Join(config.ConfigDir(), "history.json")
 }
@@ -111,17 +116,20 @@ func Load() ([]Record, error) {
 	}
 	var records []Record
 	if err := json.Unmarshal(data, &records); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
 	}
 	return records, nil
 }
 
+// save writes compact JSON: with 5000 records the indented form ran to about
+// 80 MB, rewritten on every append. Load reads either form, and so does every
+// older Bridge.
 func save(records []Record) error {
 	p := historyPath()
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(records, "", "  ")
+	data, err := json.Marshal(records)
 	if err != nil {
 		return err
 	}
@@ -140,12 +148,16 @@ func backupCorrupt() (string, error) {
 }
 
 // Append adds a record to the history file in a thread-safe manner.
-// Load returns no error for a missing file, so an error here means an existing
-// file failed to load. Back it up rather than overwrite the user's history.
+// Load returns no error for a missing file. A file that does not parse is
+// backed up and a new one started; a file that could not be read at all
+// (permissions, I/O) may be fine, so it is left alone and nothing is written.
 func Append(r Record) error {
 	mu.Lock()
 	defer mu.Unlock()
 	records, err := Load()
+	if err != nil && !errors.Is(err, ErrCorrupt) {
+		return fmt.Errorf("history could not be read, so this print was not recorded: %w", err)
+	}
 	if err != nil {
 		backup, backupErr := backupCorrupt()
 		if backupErr != nil {

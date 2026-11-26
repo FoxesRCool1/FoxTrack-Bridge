@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,16 +50,19 @@ func syncCloud(cfg *config.Config) {
 // held across the save.
 func onCloudIP(serial, ip string) {
 	configMutex.Lock()
-	changed := false
-	for i := range configStore.Printers {
-		p := &configStore.Printers[i]
-		if p.IsCloud() && p.Serial == serial && p.IP != ip {
-			p.IP = ip
-			changed = true
-		}
-	}
+	stale := func(p config.Printer) bool { return p.IsCloud() && p.Serial == serial && p.IP != ip }
+	changed := slices.ContainsFunc(configStore.Printers, stale)
 	var cfg *config.Config
 	if changed {
+		// Edit a copy and swap it in, as every other writer does: the
+		// stored config is never edited in place.
+		next := configStore.Clone()
+		for i := range next.Printers {
+			if stale(next.Printers[i]) {
+				next.Printers[i].IP = ip
+			}
+		}
+		configStore = next
 		cfg = configStore.Clone()
 	}
 	configMutex.Unlock()
@@ -335,10 +339,10 @@ func handleCloudRetry(w http.ResponseWriter, r *http.Request) {
 func cloudDevices(ctx context.Context, force bool) ([]cloud.Device, error) {
 	bc := cloudAccount()
 	if !bc.Linked() {
-		return nil, errors.New("link your Bambu account in Settings first")
+		return nil, errors.New("Sign in to your Bambu account first.")
 	}
 	if bc.Expired(time.Now().Unix()) {
-		return nil, errors.New("the Bambu sign-in has expired; link the account again in Settings")
+		return nil, errors.New("Your Bambu sign-in has expired. Sign in again in Settings.")
 	}
 	devs, err := cloud.NewClient(bc.Region).Devices(ctx, bc.AccessToken, force)
 	if errors.Is(err, cloud.ErrUnauthorized) {

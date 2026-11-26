@@ -268,6 +268,53 @@ func TestDiscord(t *testing.T) {
 	}
 }
 
+// A 301 would turn the POST into an empty GET that the server answers with 200,
+// so "Send test" reported success with nothing delivered. A 301 is an error
+// now; a 308 repeats the POST at the new address and delivers.
+func TestRedirects(t *testing.T) {
+	var mu sync.Mutex
+	var methods []string
+	var delivered []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		methods = append(methods, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/moved":
+			http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+		case "/kept":
+			http.Redirect(w, r, "/new", http.StatusPermanentRedirect)
+		case "/new":
+			if r.Method == http.MethodPost {
+				delivered = b
+			}
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	err := send(config.NotifyChannel{Kind: "slack", URL: srv.URL + "/moved"}, Compose(finished()))
+	if err == nil || err.Error() != "Slack moved to a new address (HTTP 301). Use the address it redirects to" {
+		t.Fatalf("301: err = %v", err)
+	}
+	mu.Lock()
+	if len(methods) != 1 || delivered != nil {
+		t.Errorf("301 was followed: %v", methods)
+	}
+	methods = nil
+	mu.Unlock()
+
+	if err := send(config.NotifyChannel{Kind: "slack", URL: srv.URL + "/kept"}, Compose(finished())); err != nil {
+		t.Fatalf("308: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(methods) != 2 || methods[1] != "POST /new" || !strings.Contains(string(delivered), "Print finished") {
+		t.Errorf("308: requests %v, delivered %q; want the POST repeated at /new", methods, delivered)
+	}
+}
+
 func TestSlack(t *testing.T) {
 	srv, got := server(t, 200, "ok")
 	if err := send(config.NotifyChannel{Kind: "slack", URL: srv.URL}, Compose(finished())); err != nil {

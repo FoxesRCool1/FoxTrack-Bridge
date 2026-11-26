@@ -53,7 +53,7 @@ The Bridge is a background service, not an app you open to check a print. MQTT c
 
 On Windows and macOS there is a system tray icon with "Open Dashboard" and an "Enable: Start at Login" option. Every Linux build is headless: there is no tray, so run it from a terminal or set up a systemd service.
 
-Setup order: run the Bridge, open the dashboard, optionally paste a FoxTrack API key in Settings, then add a printer under Printers with "Add Printer".`,
+Setup order: run the Bridge, open the dashboard, optionally paste a Bridge token in Settings, then add a printer under Printers with "Add Printer".`,
 	},
 	{
 		ID:       "add-bambu-lan",
@@ -63,12 +63,12 @@ Setup order: run the Bridge, open the dashboard, optionally paste a FoxTrack API
 
 On the printer's touchscreen:
 1. Turn on LAN Only Mode under Network settings.
-2. Turn on Developer Mode under About.
+2. Turn on Developer Mode (next to LAN Only Mode on 2025 firmware and later, under About on older firmware).
 3. Write down the IP address, the Serial Number, and the LAN Access Code. The access code is shown on the screen after LAN Only Mode is enabled.
 
 In the dashboard:
 4. Go to Printers and click "Add Printer".
-5. Choose the type Bambu Lab.
+5. Choose the type Bambu Lab, on your network (LAN).
 6. Enter the IP address, serial number and LAN access code, then click Connect.
 
 The Bridge reaches the printer over MQTT on TCP port 8883. If the printer is not on the same network segment as the Bridge, or a firewall blocks 8883, the connection fails.
@@ -81,11 +81,11 @@ The serial number and access code are case sensitive and must be typed exactly. 
 		Keywords: []string{"cloud", "bambu account", "sign in", "login", "email", "code", "token", "not in lan mode", "experimental", "ban", "banned", "expired"},
 		Body: `Bambu Cloud is for printers that are not in LAN mode. It is experimental and it is labelled that way in the dashboard.
 
-To link the account: open Settings > Bambu Cloud, sign in with the Bambu email and password, then enter the code Bambu emails back. Then add a printer with the type "Bambu Lab (cloud, experimental)" and pick it from the list.
+To link the account: open Settings > Advanced > Bambu Cloud, sign in with the Bambu email and password, then enter the code Bambu emails back. Then add a printer with the type "Bambu Lab, through Bambu Cloud (experimental)" and pick it from the list.
 
 What cloud printers can do: status, temperatures, progress, AMS and the light toggle work.
 
-What they cannot do: pause, stop, speed, fan and GCode do not work over the cloud. Bambu's 2025 and later firmware rejects every command except the light from third-party clients, so those buttons are hidden. LAN mode is the only way to get full control.
+What they cannot do: pause, stop, speed, fan and G-code do not work over the cloud. Bambu's 2025 and later firmware rejects every command except the light from third-party clients, so those buttons are hidden. LAN mode is the only way to get full control.
 
 The camera works when the printer is on the same network as the Bridge. The account hands back the printer's LAN access code and the printer reports its own LAN address, so nothing needs typing. The IP can also be entered when adding the printer.
 
@@ -93,7 +93,7 @@ Tokens last about 90 days and cannot be renewed. The dashboard warns a week befo
 
 Bambu bans accounts for 24 hours to 7 days when it sees connection churn, so the Bridge paces itself deliberately: one MQTT connection for the whole account however many cloud printers there are, reconnect backoff from 5 seconds to 5 minutes with jitter, a 30 minute pause after 10 failures or 3 refused connections in a row, sign-in limited to once a minute, a 5 minute pause after a Cloudflare block, a one minute device list cache, and a full state request to a printer at most once a minute. A rejected sign-in is final: the Bridge stops and asks for the account to be linked again rather than retrying on its own.
 
-If sign-in is blocked by Cloudflare, "Paste a token instead" accepts a token taken from a signed-in Bambu session in a browser.`,
+If sign-in is blocked by Cloudflare, "Use a token instead" accepts a token taken from a signed-in Bambu session in a browser.`,
 	},
 	{
 		ID:       "add-klipper",
@@ -106,7 +106,7 @@ If sign-in is blocked by Cloudflare, "Paste a token instead" accepts a token tak
 3. Enter the URL and click Connect.
 4. If Moonraker has authentication turned on, also enter the Moonraker API key.
 
-The URL must include the scheme (http:// or https://) and the port. The Bridge checks reachability by calling /printer/info on that URL, so a URL that works in a browser works here.
+The URL must include the port; http:// can be left out. The Bridge checks reachability by calling /printer/info on that URL, so a URL that works in a browser works here.
 
 A common clash: the Bridge listens on port 8080 by default, and 8080 is also the default webcam port for mjpg-streamer on Mainsail and Fluidd. Running both on the same machine collides unless one is moved. Change the Bridge with --port 9000 or the FOXTRACK_BRIDGE_PORT environment variable; if both are set, --port wins.`,
 	},
@@ -121,7 +121,7 @@ A common clash: the Bridge listens on port 8080 by default, and 8080 is also the
 3. Enter the URL (for example http://192.168.1.50) and the API key, then click Connect.
 4. PrusaLink has no camera stream. If there is a separate webcam, enter its URL.
 
-The Bridge reads status, progress, temperatures, file name and time left, and it records finished prints in the history. FoxTrack can pause, resume and stop a print. FoxTrack can also send a .gcode file: the Bridge puts it on the printer's USB drive and starts it. FoxTrack knows a PrusaLink printer by its name in the Bridge.
+The Bridge reads status, progress, temperatures, file name and time left, and it records finished prints in the history. FoxTrack can pause, resume and stop a print. FoxTrack can also send a .gcode file: the Bridge puts it on the printer's USB drive and starts it. FoxTrack follows a fixed ID the Bridge gives the printer, so renaming is safe.
 
 The Bridge checks reachability by calling /api/version on that URL.`,
 	},
@@ -138,7 +138,7 @@ The Bridge checks reachability by calling /api/version on that URL.`,
 
 The state entity can read idle, printing, paused, finished or error (running, standby, complete and failed work too). Unavailable or unknown shows the printer as offline. A time left entity can count seconds, minutes or hours (the Bridge reads its unit), or hold the time the print will finish.
 
-The Bridge checks reachability by calling /api/ on the Home Assistant URL. That call carries no token, so it shows that Home Assistant answers, not that the token is right. FoxTrack knows a Home Assistant printer by its name in the Bridge.`,
+The Bridge checks reachability by calling /api/ on the Home Assistant URL. That call carries no token, so it shows that Home Assistant answers, not that the token is right. FoxTrack follows a fixed ID the Bridge gives the printer, so renaming is safe.`,
 	},
 	{
 		ID:       "edit-printer",
@@ -226,12 +226,12 @@ The Bridge never controls a print on its own. It can pause, stop, set speed and 
 	{
 		ID:       "controls",
 		Title:    "What the control buttons do, and which printers have them",
-		Keywords: []string{"pause", "stop", "resume", "cancel", "pause all", "all printers", "bulk", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "console", "command", "advanced", "temperature", "nozzle", "bed", "heat", "preheat", "home", "temps"},
-		Body: `Available controls depend on how the printer is connected.
+		Keywords: []string{"pause", "stop", "resume", "cancel", "pause all", "all printers", "bulk", "light", "speed", "silent", "sport", "ludicrous", "fan", "gcode", "g-code", "console", "command", "advanced", "temperature", "nozzle", "bed", "heat", "preheat", "home", "temps"},
+		Body: `Available controls depend on how the printer is connected. Temps, Fan, Speed and G-code appear after you turn on Advanced mode in Settings > General.
 
-Bambu Lab in LAN mode: pause, stop, light toggle, print speed (Silent, Standard, Sport, Ludicrous), fan speed, the Temps panel, and a GCode console for single commands. The GCode console only appears in Advanced mode.
+Bambu Lab in LAN mode: pause, stop, light toggle, print speed (Silent, Standard, Sport, Ludicrous), fan speed, the Temps panel, and a G-code console for single commands.
 
-Bambu Lab over the cloud: the light toggle only. Pause, stop, speed, fan, Temps and GCode are hidden because Bambu's 2025 and later firmware rejects them from third-party clients. LAN mode is the only way to get those back.
+Bambu Lab over the cloud: the light toggle only. Pause, stop, speed, fan, Temps and G-code are hidden because Bambu's 2025 and later firmware rejects them from third-party clients. LAN mode is the only way to get those back.
 
 Klipper / Moonraker: pause, stop, fan speed and the Temps panel.
 
@@ -245,7 +245,7 @@ Home Assistant (read-only): no controls. The Bridge only reads the status.
 
 A printer with a smart plug set in the Bridge also has a "Plug on" / "Plug off" button. "Plug off" is disabled while the printer prints or is paused, and the Bridge refuses it while the nozzle is above 50 C.
 
-AMS slot display, the speed selector and the GCode console are Bambu-only. Fan control works on both Bambu and Klipper.
+AMS slot display, the speed selector and the G-code console are Bambu-only. Fan control works on both Bambu and Klipper.
 
 The command menu (Ctrl+K or Cmd+K) also has bulk actions, shown only when they apply: Pause all printing, Resume all paused, and Turn off idle plugs (printers that are not printing or paused and whose nozzle is below 50 C). Each one asks first and lists the printers it will act on.`,
 	},
@@ -272,10 +272,10 @@ This section is in FoxTrack, not in the Bridge dashboard. It needs FoxTrack Brid
 
 1. In OctoPrint, make an API key: Settings > Application Keys (make one for the Bridge), or copy the global key under Settings > API.
 2. In the dashboard go to Printers, click "Add Printer" and choose OctoPrint.
-3. Enter the OctoPrint address (for example http://octopi.local, or http://192.168.1.60:5000 when OctoPrint is not behind a web server) and the API key, then click Connect.
+3. Enter the OctoPrint URL (for example http://octopi.local, or http://192.168.1.60:5000 when OctoPrint is not behind a web server) and the API key, then click Connect.
 4. The webcam is read from OctoPrint's own webcam settings. Enter a webcam URL only if the camera button does not work.
 
-The Bridge reads status, progress, temperatures, file name and time left, records finished prints in the history, and reports an OctoPrint printer error as an alarm. FoxTrack can pause, resume and stop a print, and can send a .gcode file: the Bridge uploads it to OctoPrint and starts it. FoxTrack knows an OctoPrint printer by its name in the Bridge.
+The Bridge reads status, progress, temperatures, file name and time left, records finished prints in the history, and reports an OctoPrint printer error as an alarm. FoxTrack can pause, resume and stop a print, and can send a .gcode file: the Bridge uploads it to OctoPrint and starts it. FoxTrack follows a fixed ID the Bridge gives the printer, so renaming is safe.
 
 "OctoPrint is running but is not connected to the printer" means OctoPrint itself answers but its serial connection to the printer is closed: press Connect in OctoPrint.
 
@@ -291,7 +291,7 @@ To set one: open the printer's pencil (edit) or add it, scroll to Smart plug, ch
 
 The printer card then shows "Plug on · 142 W" and a "Plug on" / "Plug off" button, also while the printer itself is switched off. "Plug off" is disabled while the printer prints or is paused, refused while the nozzle is above 50 C, and refused when the Bridge cannot tell whether the printer is idle, so a print is never cut.
 
-"Turn the plug off after a print": once a print ends (finished, stopped or failed), the Bridge waits the number of minutes you set (10 by default) with the printer idle and the nozzle under 50 C, then turns the plug off. A new print in that time cancels it. The log says "plug turned off after the print".
+"Turn off after a print": once a print ends (finished, stopped or failed), the Bridge waits the number of minutes you set (10 by default) with the printer idle and the nozzle under 50 C, then turns the plug off. A new print in that time cancels it. The log says "plug turned off after the print".
 
 Energy per print: the Bridge reads the plug's energy counter when a print starts and ends (Shelly, Tasmota, Kasa), or sums watts over time for a plug without a counter (Tapo, Tuya, Meross, ESPHome, myStrom, WiZ, Home Assistant), and sends the Wh to FoxTrack with the print history. FoxTrack shows it in Reports under Printer use as kWh and a cost. A plug without a meter (or a Sonoff in DIY mode) switches but reports no watts or energy.
 
@@ -369,9 +369,9 @@ To link: in FoxTrack, open Settings > Integrations > FoxTrack Bridge and create 
 
 Once linked, the Bridge relays telemetry, print history and camera snapshots to FoxTrack so printers can be monitored remotely. Each printer then appears on the FoxTrack Printers page: in the Live view, and in the Fleet view under "Detected on your network, not linked". Pick a FoxTrack printer in its "Link to printer" menu to link them.
 
-Printers that already exist in FoxTrack should be linked, not deleted. Deleting a printer in FoxTrack also deletes its maintenance schedules, maintenance log and installed hardware. FoxTrack recognizes a Bambu printer by its serial number and a Klipper, PrusaLink or Home Assistant printer by its name in the Bridge, so the names do not have to match.
+Printers that already exist in FoxTrack should be linked, not deleted. Deleting a printer in FoxTrack also deletes its maintenance schedules, maintenance log and installed hardware. FoxTrack recognizes a Bambu printer by its serial number and every other printer by a fixed ID the Bridge gives it, so the names do not have to match.
 
-If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the key was revoked, the key was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.
+If the relay stops working the dashboard reports the problem rather than retrying silently. The three causes that never fix themselves on a retry are: the Bridge token was revoked, it was mistyped, or the FoxTrack workspace is on a plan that no longer covers the Bridge. All three need action in FoxTrack, not in the Bridge.
 
 A fourth warning is about a printer limit. A FoxTrack plan limits how many Bridge printers a workspace can have (5 on Pro, unlimited on Farm). Old devices left behind by a rename still count. To make room: in FoxTrack, open Printers, find the old offline device under "Detected on your network, not linked", and click Remove.
 
@@ -395,7 +395,7 @@ If one of these files fails to load, for example because it is corrupted, the Br
 
 config.json is written with file mode 0600 because it holds printer access codes and API keys.
 
-The listen port is 8080 by default. Change it with --port or FOXTRACK_BRIDGE_PORT; --port wins if both are set.`,
+The listen port is 8080 by default. Change it with --port or FOXTRACK_BRIDGE_PORT; --port wins if both are set. If the port is taken, the Bridge stops and says so.`,
 	},
 	{
 		ID:       "updates",
@@ -431,7 +431,7 @@ The dashboard can also raise browser notifications when prints finish, fail or p
 		ID:       "assistant",
 		Title:    "About this assistant and its AI settings",
 		Keywords: []string{"assistant", "ai", "chat", "model", "provider", "openai", "gemini", "anthropic", "local", "ollama", "llama", "api key", "privacy", "cost"},
-		Body: `This assistant runs against an AI provider that you configure and pay for. The Bridge ships with no provider and no key: until one is set in Settings > Assistant, the assistant is off.
+		Body: `This assistant runs against an AI provider that you configure and pay for. The Bridge ships with no provider and no key: until one is set in Settings > Advanced > Assistant, the assistant is off.
 
 Supported providers are anything that speaks the OpenAI chat-completions API: OpenAI, Google Gemini and Anthropic through their OpenAI-compatible endpoints, any custom endpoint, or a local model server on your own machine such as Ollama, llama.cpp or LM Studio.
 
@@ -443,7 +443,7 @@ The assistant can only read. It cannot add, change or delete a printer, cannot s
 
 Unless a dashboard password is set in Settings > Security, anyone who can reach the dashboard on your network can use the assistant and spend credit on the configured key.
 
-Watch prints for failures (Settings > Assistant, needs camera access) has the assistant look at each printing printer's camera every few minutes (5 by default, 2 to 60), starting 5 minutes into a print. After two checks in a row that look like a failed print, the channels that have "Failure spotted by camera watch" ticked get one notification for that print. It never pauses or stops a print. Each check sends a picture to the provider, which can cost money with a paid provider.`,
+Watch prints for failures (Settings > Advanced > Assistant, needs camera access) has the assistant look at each printing printer's camera every few minutes (5 by default, 2 to 60), starting 5 minutes into a print. After two checks in a row that look like a failed print, the channels that have "Failure spotted by camera watch" ticked get one notification for that print. It never pauses or stops a print. Each check sends a picture to the provider, which can cost money with a paid provider.`,
 	},
 	{
 		ID:       "print-queue",
@@ -475,7 +475,7 @@ The link is shown once, when it is made: copy it then. Only a hash of it is stor
 
 The dashboard password, API tokens, share links, the linked Bambu account and the assistant's API key are not in the file. A restore never changes the first four, and keeps the assistant's key unless the backup uses a different AI provider. Before a restore the current settings are saved next to config.json as config.json.before-import-<date>, so a restore can be undone by hand.
 
-Restore also accepts a plain config.json, such as one of the daily copies in the backups folder next to config.json. A file with no printers is refused unless you confirm that every saved printer should be removed.
+Restore also accepts a plain config.json, such as one of the daily config-YYYY-MM-DD.json copies in the backups folder. A file with no printers is refused unless you confirm that every saved printer should be removed.
 
 To move to another machine: download a backup on the old one, install the Bridge on the new one, and restore the file there.`,
 	},

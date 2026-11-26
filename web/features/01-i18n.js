@@ -10,7 +10,9 @@
     const ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
     // Nothing in these is translated, text or attributes. Input and textarea
     // values are never touched, but their placeholder, title and aria-label are.
-    const SKIP_ALL = 'script, style, code, pre, kbd, select option[value=""] ~ option, [data-no-i18n], [data-i18n-html], #logOutput, #assistantMessages';
+    // Options after an empty one are skipped (they are often names from the
+    // user's data) unless the select has data-i18n-options.
+    const SKIP_ALL = 'script, style, code, pre, kbd, select:not([data-i18n-options]) option[value=""] ~ option, [data-no-i18n], [data-i18n-html], #logOutput, #assistantMessages';
     const SKIP = SKIP_ALL + ', textarea, input';
 
     function stored() { try { return localStorage.getItem(KEY); } catch (_) { return null; } }

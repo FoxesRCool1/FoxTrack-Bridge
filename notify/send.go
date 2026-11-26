@@ -159,7 +159,7 @@ func Validate(ch config.NotifyChannel) error {
 // ---- HTTP plumbing ----
 
 var (
-	client = &http.Client{Timeout: 10 * time.Second}
+	client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: sameRequestOnly}
 	// retryDefault is the wait before the one retry when the service sent no
 	// Retry-After.
 	retryDefault = 2 * time.Second
@@ -173,6 +173,24 @@ const (
 type reply struct {
 	status int
 	body   []byte
+}
+
+// sameRequestOnly follows a 307 or 308, which repeat the same POST at the new
+// address. On a 301, 302 or 303 Go would send it again as a GET with no body,
+// which many servers answer with 200 although nothing was delivered, so the
+// redirect itself is returned and check reports it.
+func sameRequestOnly(req *http.Request, via []*http.Request) error {
+	if req.Response != nil {
+		switch req.Response.StatusCode {
+		case http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		default:
+			return http.ErrUseLastResponse
+		}
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 // do sends the request build makes. A 429 or 5xx gets one retry after
@@ -238,6 +256,8 @@ func check(svc, cred string, r reply) error {
 		return fmt.Errorf("%s refused the %s", svc, cred)
 	case r.status == 404:
 		return fmt.Errorf("%s could not find that address (404). Check the URL", svc)
+	case r.status == 301 || r.status == 302 || r.status == 303:
+		return fmt.Errorf("%s moved to a new address (HTTP %d). Use the address it redirects to", svc, r.status)
 	case r.status == 429:
 		return fmt.Errorf("%s is limiting how often the Bridge may send. Try again in a minute", svc)
 	case r.status >= 500:

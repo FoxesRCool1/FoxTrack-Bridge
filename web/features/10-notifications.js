@@ -66,6 +66,17 @@ const NF_FIELDS = {
     ],
 };
 
+// After a restore: true when an enabled channel lacks a webhook URL, token or
+// mail login that a backup never holds. Read-only; false when it cannot tell.
+async function nfLostSecrets() {
+    try {
+        const v = await apiFetch('/api/notifications');
+        return (v.channels || []).some(ch => ch.enabled && (
+            (ch.kind === 'email' && ch.smtp && ch.smtp.username && !ch.smtp.password_set)
+            || (NF_FIELDS[ch.kind] || []).some(f => !f.optional && !f.pw && (f.secret ? !nfGet(ch, f.secret) : (f.k === 'url' && !ch.url)))));
+    } catch (_) { return false; }
+}
+
 const NF_PRIVACY = 'Messages go from this machine straight to the service you pick. With Picture on, a camera photo is attached.';
 
 function nfGet(o, k) { return k.split('.').reduce((a, p) => (a == null ? a : a[p]), o); }

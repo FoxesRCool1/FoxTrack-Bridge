@@ -9,7 +9,9 @@ import (
 
 // forgetPrinterIDs removes deleted printers from everything in cfg that names
 // printers by ID: notification channels, the timelapse list, share links and
-// maintenance tasks. The caller holds configMutex.
+// maintenance tasks. It edits cfg in place, so the caller passes a copy it is
+// about to store, never the live configStore: other goroutines read the live
+// blocks after releasing configMutex.
 //
 // A printer list that becomes empty would mean "all printers", which is wider
 // than what the user chose. So a channel whose last printer is deleted is

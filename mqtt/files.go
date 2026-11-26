@@ -52,7 +52,7 @@ func IsBambuPrintFile(name string) bool {
 
 var (
 	errListNoClient = errors.New("Bridge could not reach the printer's file storage. Check that the printer is on and in LAN Only Mode.")
-	errFileName     = errors.New("Pick a file from the printer's list.")
+	errFileName     = errors.New("Use the exact file name stored on the printer.")
 	errFileNotCard  = errors.New("The printer prints .3mf and .gcode.3mf files from its card.")
 )
 

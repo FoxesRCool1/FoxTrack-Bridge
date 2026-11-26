@@ -55,15 +55,38 @@ ask_yes_no() {
 	esac
 }
 
+# show_dashboard_url <port>: print the dashboard URL, with this machine's first
+# IPv4 address as a second URL when it can be found (useful over SSH).
+show_dashboard_url() {
+	lan=""
+	if have_cmd hostname; then
+		lan=$(hostname -I 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }') || lan=""
+	fi
+	if [ -n "$lan" ]; then
+		info "Dashboard: http://localhost:$1 or http://$lan:$1"
+	else
+		info "Dashboard: http://localhost:$1"
+	fi
+}
+
 # start_service: enable and start the user unit, then show the dashboard URL.
-# The unit runs on the default port; it does not see this shell's environment.
+# A unit that was already running is restarted, so a re-run picks up the new
+# binary. The unit runs on the default port; it does not see this shell's
+# environment.
 start_service() {
 	port=8080
+	was_active=0
+	if systemctl --user is-active --quiet foxtrack-bridge; then
+		was_active=1
+	fi
 	if ! systemctl --user daemon-reload || ! systemctl --user enable --now foxtrack-bridge; then
 		warn "could not start the service; run the commands below yourself"
 		return 1
 	fi
-	info "Dashboard: http://localhost:$port"
+	if [ "$was_active" = 1 ]; then
+		systemctl --user restart foxtrack-bridge || warn "could not restart the service; run: systemctl --user restart foxtrack-bridge"
+	fi
+	show_dashboard_url "$port"
 	if { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; } && have_cmd xdg-open; then
 		(xdg-open "http://localhost:$port" >/dev/null 2>&1 &) || true
 	fi
@@ -259,7 +282,7 @@ do_install() {
 		return
 	fi
 
-	info "Dashboard: http://localhost:8080"
+	show_dashboard_url 8080
 	info ""
 	info "The service was installed but not enabled. To run it on login, run:"
 	info "  systemctl --user enable --now foxtrack-bridge"

@@ -93,6 +93,7 @@
             if (!targets.length) { toast('No printers match anymore', 'info'); return; }
             const done = [];
             const failed = [];
+            const reasons = [];
             for (const p of targets) {
                 try {
                     await apiFetch('/api/control/' + encodeURIComponent(printerApiRef(p.id)) + '/' + encodeURIComponent(command), {
@@ -100,16 +101,19 @@
                         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) },
                     });
                     done.push(p);
-                } catch (_) { failed.push(p); }
+                } catch (e) { failed.push(p); reasons.push(friendlyError(e && e.message)); }
             }
             await pollStatus();
             if (!failed.length) {
                 toast(countText(text.done, done.length), 'info');
             } else {
                 const failedNames = failed.map(p => p.name).join(', ');
+                // The reason is shown when one printer failed or every failure has the same one.
+                const why = reasons.every(r => r === reasons[0]) ? reasons[0] : '';
+                const doneNames = done.map(p => p.name).join(', ');
                 toast(done.length
-                    ? fill('Done: {0}. Failed: {1}', done.map(p => p.name).join(', '), failedNames)
-                    : fill('Failed: {0}', failedNames), 'error');
+                    ? (why ? fill('Done: {0}. Failed: {1}. {2}', doneNames, failedNames, i18n(why)) : fill('Done: {0}. Failed: {1}', doneNames, failedNames))
+                    : (why ? fill('Failed: {0}. {1}', failedNames, i18n(why)) : fill('Failed: {0}', failedNames)), 'error');
             }
         });
     }
